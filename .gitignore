@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment Variables
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# IDEs
+.vscode/
+.idea/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Build / Distribution
+build/
+dist/
+*.egg-info/
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Project Specific
+checkpoints/
+vision_pipeline/data/
+
+# Config secrets (if they contain API keys)
+config/local*
+config/*.secret*
+vision_pipeline/config.local.yaml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
+
+# Generated images/documents
+*.png
+*.jpg
+*.jpeg
+*.pdf
+
+# Keep logs directory structure if needed
+!logs/.gitkeep

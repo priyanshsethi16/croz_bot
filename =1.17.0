@@ -1,0 +1,2 @@
+Requirement already satisfied: pdf2image in ./.venv/lib/python3.14/site-packages (1.17.0)
+Requirement already satisfied: pillow in ./.venv/lib/python3.14/site-packages (from pdf2image) (12.2.0)

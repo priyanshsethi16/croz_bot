@@ -1,0 +1,35 @@
+# Catalog Parser Configuration
+# API keys are loaded from .env — do not put secrets here.
+
+ocr:
+  model: "mistral-ocr-latest"
+  max_retries: 3
+  retry_delay: 2.0    # seconds between retries
+  timeout: 120        # seconds per OCR call
+
+llm:
+  model: "qwen/qwen3-32b"
+  temperature: 0.1
+  max_tokens: 1024
+  max_retries: 3
+  retry_delay: 2.0
+
+paths:
+  ocr_dir: "data/ocr"
+  chunks_dir: "chunks"
+  data_dir: "data"
+  logs_dir: "logs"
+  checkpoints_dir: "checkpoints"
+
+processing:
+  window_size: 4              # Pages per boundary-detection window (2-4)
+  overlap_pages: 1            # Overlap between sliding windows
+  max_prompt_chars: 6000      # Max total prompt size per LLM call
+  max_ocr_chars: 4500         # Max OCR text chars per LLM call
+  boundary_max_tokens: 2048
+  extraction_max_tokens: 4096 # Ceiling — clamped by groq_tpm_limit at runtime
+  groq_tpm_limit: 6000        # Set to your tier limit (free=6000, dev tier=higher)
+  llm_call_delay: 0.75
+  min_product_pages: 1
+  max_product_pages: 20
+  resume_from_checkpoint: true

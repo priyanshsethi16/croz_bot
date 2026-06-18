@@ -1,0 +1,30 @@
+# Vision Pipeline Configuration
+# Set `provider` to "groq" or "gemini"
+# API keys loaded from .env (GROQ_API_KEY or GEMINI_API_KEY)
+
+provider: "gemini"   # switch to "gemini" to use Google Gemini 2.5 Flash
+
+groq:
+  vision_model: "meta-llama/llama-4-scout-17b-16e-instruct"
+  temperature: 0
+  max_tokens: 8192
+  max_retries: 3
+  retry_delay: 2.0
+  request_delay: 5.0   # seconds between calls (free tier: ~15 RPM)
+
+gemini:
+  gemini_model: "gemini-2.5-flash"
+  max_tokens: 8192
+  max_retries: 3
+  retry_delay: 2.0
+  request_delay: 5.0   # seconds between calls (free tier: 15 RPM)
+
+pdf:
+  dpi: 300                  # PNG rasterisation DPI (300 is enough for Gemini)
+
+paths:
+  pages_dir: "vision_pipeline/data/pages"         # rasterized PNG pages
+  chunks_dir: "vision_pipeline/data/chunks"       # output markdown chunks
+  products_json: "vision_pipeline/data/products.json"
+  checkpoints_file: "vision_pipeline/data/checkpoint.json"
+  logs_dir: "vision_pipeline/logs"
