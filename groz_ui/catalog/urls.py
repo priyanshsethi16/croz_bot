@@ -7,6 +7,7 @@ urlpatterns = [
     path('logout/',   views.admin_logout, name='admin_logout'),
     path('api/upload/',   views.upload_pdf,    name='upload_pdf'),
     path('api/pdfs/',     views.list_pdfs,     name='list_pdfs'),
+    path('api/pdf-preview/', views.pdf_preview, name='pdf_preview'),
     path('api/pipeline/', views.run_pipeline,  name='run_pipeline'),
     path('api/ingest/',   views.run_ingest,    name='run_ingest'),
     path('api/chat/',     views.admin_chat,    name='admin_chat'),

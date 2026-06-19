@@ -163,6 +163,37 @@ def list_pdfs(request):
     return JsonResponse({'pdfs': pdfs, 'chunked': list(chunked)})
 
 
+# ── API: PDF Preview (page thumbnails) ───────────────────────────────────
+
+@login_required
+def pdf_preview(request):
+    import base64, fitz
+    filename = request.GET.get('pdf', '').strip()
+    if not filename:
+        return JsonResponse({'error': 'No PDF specified.'}, status=400)
+    pdf_path = PROJECT_ROOT / 'input' / Path(filename).name
+    if not pdf_path.exists():
+        return JsonResponse({'error': 'PDF not found.'}, status=404)
+    try:
+        doc   = fitz.open(str(pdf_path))
+        total = len(doc)
+        pages = []
+        for i in range(min(total, 50)):
+            thumb = doc[i].get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
+            full  = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            thumb_b64 = base64.b64encode(thumb.pil_tobytes(format='JPEG', optimize=True, quality=60)).decode()
+            full_b64  = base64.b64encode(full.pil_tobytes(format='JPEG', optimize=True, quality=85)).decode()
+            pages.append({
+                'num':   i + 1,
+                'thumb': f'data:image/jpeg;base64,{thumb_b64}',
+                'full':  f'data:image/jpeg;base64,{full_b64}',
+            })
+        doc.close()
+        return JsonResponse({'pages': pages, 'total': total})
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
+
+
 # ── API: Run Ingest (indexing) ────────────────────────────────────────────────
 
 @login_required

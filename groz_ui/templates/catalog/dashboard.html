@@ -278,6 +278,32 @@
           </div>
           <input type="file" id="pdf-file-input" accept=".pdf" multiple/>
           <div class="file-list" id="upload-file-list"></div>
+
+          <!-- PDF Page Preview Gallery -->
+          <div class="pdf-preview-section" id="pdf-preview-section" style="display:none">
+            <div class="pdf-preview-header">
+              <div class="ph-left">
+                <i class="fa fa-file-pdf" style="color:var(--orange)"></i>
+                <span class="ph-title" id="preview-pdf-name"></span>
+                <span class="ph-badge" id="preview-page-count"></span>
+              </div>
+              <span class="ph-sub" id="preview-sub">Page preview</span>
+            </div>
+            <div class="pdf-preview-body">
+              <div class="pdf-thumb-strip" id="pdf-thumb-strip">
+                <div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Loading pages…</div>
+              </div>
+              <div class="pdf-page-viewer" id="pdf-page-viewer">
+                <div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px">
+                  <i class="fa fa-hand-pointer"></i> Select a page to preview
+                </div>
+                <div class="pdf-viewer-scroll">
+                  <div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="next-step-bar" id="next-to-chunk" style="display:none">
             <p><i class="fa fa-check-circle"></i> PDF uploaded! Now create product chunks.</p>
             <button class="btn btn-primary btn-sm" onclick="showPanel('chunk')">

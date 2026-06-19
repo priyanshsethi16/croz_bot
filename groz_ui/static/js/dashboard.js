@@ -20,6 +20,20 @@ function showPanel(name) {
 
   closeSidebar();
   if (name === 'chunk') loadPdfList();
+  if (name === 'upload') loadExistingUploads();
+}
+
+async function loadExistingUploads() {
+  const list = document.getElementById('upload-file-list');
+  if (list.children.length > 0) return; // already populated this session
+  try {
+    const res  = await fetch('/admin-panel/api/pdfs/');
+    const data = await res.json();
+    (data.pdfs || []).forEach(name => {
+      const item = addFileItem(name, '', 'success', '✓ Uploaded');
+      // hide the preview btn until status is known — it's already there
+    });
+  } catch(e) {}
 }
 
 // Open from ?panel= query param
@@ -62,6 +76,7 @@ async function uploadFile(file) {
       refreshStats();
       document.getElementById('next-to-chunk').style.display = 'flex';
       showSplitterForPdf(file.name);
+      loadPdfPreview(file.name);
     }
   } catch(e) {
     setFileStatus(item, 'error', '✗ Failed');
@@ -78,7 +93,10 @@ function addFileItem(name, size, statusClass, statusText) {
       <div class="fname">${escHtml(name)}</div>
       <div class="fsize">${size}</div>
     </div>
-    <span class="fstatus ${statusClass}">${statusText}</span>`;
+    <span class="fstatus ${statusClass}">${statusText}</span>
+    <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(name)}')" title="Preview pages">
+      <i class="fa fa-eye"></i> Preview
+    </button>`;
   document.getElementById('upload-file-list').prepend(div);
   return div;
 }
@@ -93,6 +111,83 @@ function formatBytes(b) {
   if (b < 1024) return b + ' B';
   if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
   return (b/1048576).toFixed(1) + ' MB';
+}
+
+// ── PDF Page Preview ─────────────────────────────────────────────────────────────
+async function loadPdfPreview(filename) {
+  const section = document.getElementById('pdf-preview-section');
+  const strip   = document.getElementById('pdf-thumb-strip');
+  const viewer  = document.getElementById('pdf-page-viewer');
+  const nameEl  = document.getElementById('preview-pdf-name');
+  const countEl = document.getElementById('preview-page-count');
+  const subEl   = document.getElementById('preview-sub');
+
+  section.style.display = 'block';
+  nameEl.textContent    = filename;
+  countEl.textContent   = '';
+  subEl.textContent     = 'Loading pages…';
+  strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
+  viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Select a page to preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
+
+  try {
+    const res  = await fetch('/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(filename));
+    const data = await res.json();
+    if (data.error) {
+      strip.innerHTML = `<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> ${data.error}</div>`;
+      return;
+    }
+    countEl.textContent = data.total + ' pages';
+    subEl.textContent   = data.pages.length < data.total
+      ? `Showing first ${data.pages.length} of ${data.total} pages`
+      : `${data.total} page${data.total !== 1 ? 's' : ''}`;
+
+    strip.innerHTML = data.pages.map((p, i) => `
+      <div class="pdf-thumb-item${i === 0 ? ' active' : ''}" onclick="selectPreviewPage(${i})" id="thumb-${i}">
+        <img src="${p.thumb}" alt="Page ${p.num}" loading="lazy"/>
+        <span class="thumb-num">${p.num}</span>
+      </div>`).join('');
+
+    window._previewPages = data.pages;
+    if (data.pages.length) selectPreviewPage(0);
+
+  } catch(e) {
+    strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Failed to load preview.</div>';
+  }
+}
+
+let _zoomLevel = 100;
+
+function selectPreviewPage(idx) {
+  const pages  = window._previewPages || [];
+  if (!pages[idx]) return;
+  _zoomLevel = 100;
+  const viewer = document.getElementById('pdf-page-viewer');
+  viewer.innerHTML = `
+    <div class="pdf-viewer-toolbar">
+      <button class="zoom-btn" onclick="adjustZoom(-25)" title="Zoom out"><i class="fa fa-minus"></i></button>
+      <span class="zoom-level" id="zoom-level-label">100%</span>
+      <button class="zoom-btn" onclick="adjustZoom(25)" title="Zoom in"><i class="fa fa-plus"></i></button>
+      <button class="zoom-btn" onclick="adjustZoom(0)" title="Reset zoom"><i class="fa fa-compress-arrows-alt"></i></button>
+      <span class="page-label">Page ${pages[idx].num} of ${pages.length}</span>
+    </div>
+    <div class="pdf-viewer-scroll" id="viewer-scroll">
+      <img src="${pages[idx].full}" id="viewer-img" alt="Page ${pages[idx].num}" style="width:100%;max-width:100%;height:auto"/>
+    </div>`;
+  document.querySelectorAll('.pdf-thumb-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+  document.getElementById('thumb-' + idx)?.scrollIntoView({ block: 'nearest' });
+}
+
+function adjustZoom(delta) {
+  const img   = document.getElementById('viewer-img');
+  const label = document.getElementById('zoom-level-label');
+  if (!img) return;
+  if (delta === 0) { _zoomLevel = 100; }
+  else { _zoomLevel = Math.min(300, Math.max(25, _zoomLevel + delta)); }
+  img.style.width    = _zoomLevel + '%';
+  img.style.maxWidth = 'none';
+  label.textContent  = _zoomLevel + '%';
 }
 
 // ── Load PDF list for chunk panel ─────────────────────────────────────────────
@@ -433,7 +528,7 @@ async function splitPdfCustom() {
     _splitParts = data.splits;
     showToast(data.message, 'success');
     renderSplitParts(data.splits);
-  } catch(e) { showToast('Split failed.', 'error'); }
+  } catch(e) { showToast('Split failed: ' + e.message, 'error'); console.error(e); }
   finally { btn.disabled = false; btn.innerHTML = '<i class="fa fa-cut"></i> Split &amp; Process Parts'; }
 }
 
