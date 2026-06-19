@@ -1,18 +1,27 @@
 """
 key_rotator.py
 --------------
-Manages multiple Gemini API keys with automatic rotation on rate limit.
-Falls back to Groq (Llama 4 Scout) when all Gemini keys are exhausted.
+Multi-tier Gemini key rotation with Groq fallback.
+
+Tier order (best quality first):
+  1. gemini-3.5-flash     — all 5 keys (1500 req/day each)
+  2. gemini-2.5-flash     — all 5 keys (250 req/day each)
+  3. gemini-2.5-flash-lite — all 5 keys (1000 req/day each)
+  4. Groq (Llama 4 Scout) — final fallback
+
+On 429 (quota) → key is dead for the day, rotate to next key in same tier.
+On 503 (overload) → rotate to next key in same tier (different server).
+When all keys in a tier are exhausted/overloaded → drop to next tier.
+When Gemini returns empty on a large page → try Groq as sanity check.
 
 .env format:
-    GEMINI_API_KEY_1=...
-    GEMINI_API_KEY_2=...
-    GEMINI_API_KEY_3=...
-    GEMINI_API_KEY_4=...
-    GROQ_API_KEY=...        ← fallback
+    GEMINI_API_KEY_1=...  (up to GEMINI_API_KEY_9)
+    GROQ_API_KEY=...
 
 config.yaml:
-    provider: "gemini"      ← or "groq" to skip Gemini entirely
+    provider: "gemini"    ← or "groq" to skip Gemini entirely
+    gemini:
+      gemini_model: "gemini-3.5-flash"   ← starting tier model
 """
 from __future__ import annotations
 
@@ -21,108 +30,220 @@ from pathlib import Path
 from typing import Any
 
 
+# Model tiers in priority order — first working tier wins
+GEMINI_TIERS = [
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+]
+
+
 class KeyRotator:
     """
-    Wraps multiple Gemini extractors + one Groq fallback.
-    Rotates Gemini keys on 429 (daily limit). Falls back to Groq
-    when all Gemini keys are exhausted.
+    Multi-tier Gemini extractor with per-tier key rotation and Groq fallback.
     """
 
     def __init__(self, cfg: dict):
         self._cfg = cfg
         self._provider = cfg.get("provider", "groq").lower()
-        self._extractors: list = []        # Gemini extractors, one per key
-        self._active_idx: int = 0          # current Gemini key index
-        self._groq_extractor = None        # Groq fallback
-        self._using_fallback: bool = False
+        self._gemini_cfg = cfg.get("gemini", {})
+        self._groq_extractor = None
+
+        # Keys shared across all tiers
+        self._keys: list[str] = []
+
+        # Per-tier state: {model: {"active_idx": int, "exhausted_keys": set}}
+        self._tier_state: dict[str, dict] = {}
+
+        # Current tier index into GEMINI_TIERS
+        self._tier_idx: int = 0
+
+        # Whether we've fallen back to Groq entirely
+        self._using_groq: bool = False
 
         if self._provider == "gemini":
-            self._build_gemini_extractors()
+            self._load_keys()
+            self._init_tiers()
 
-        # Always build Groq as fallback (or primary if provider=groq)
         self._build_groq_extractor()
 
-    # ── Builder helpers ───────────────────────────────────────────────────
+    # ── Setup ─────────────────────────────────────────────────────────────
 
-    def _build_gemini_extractors(self):
-        from vision_pipeline.gemini_extractor import GeminiExtractor
-        gemini_cfg = self._cfg.get("gemini", {})
-
-        # Collect keys: GEMINI_API_KEY_1 ... GEMINI_API_KEY_N, then GEMINI_API_KEY
-        keys: list[str] = []
-        for i in range(1, 10):
-            k = os.getenv(f"GEMINI_API_KEY_{i}", "")
+    def _load_keys(self):
+        for i in range(1, 20):  # support up to 19 keys
+            k = os.getenv(f"GEMINI_API_KEY_{i}", "").strip()
             if k:
-                keys.append(k)
-        # Also accept plain GEMINI_API_KEY as key 1
-        plain = os.getenv("GEMINI_API_KEY", "")
-        if plain and plain not in keys:
-            keys.insert(0, plain)
+                self._keys.append(k)
+        plain = os.getenv("GEMINI_API_KEY", "").strip()
+        if plain and plain not in self._keys:
+            self._keys.insert(0, plain)
 
-        if not keys:
+        if not self._keys:
             print("WARNING: No GEMINI_API_KEY found in .env — falling back to Groq")
             self._provider = "groq"
             return
 
-        for key in keys:
-            self._extractors.append(GeminiExtractor(key, gemini_cfg))
+        print(f"Gemini keys loaded: {len(self._keys)}")
 
-        print(f"Gemini keys loaded: {len(keys)}")
+    def _init_tiers(self):
+        for model in GEMINI_TIERS:
+            self._tier_state[model] = {
+                "active_idx": 0,
+                "exhausted_keys": set(),   # permanently dead (429)
+                "overloaded_keys": set(),  # temporarily overloaded (503)
+            }
 
     def _build_groq_extractor(self):
         from vision_pipeline.vision_extractor import VisionExtractor
-        groq_key = os.getenv("GROQ_API_KEY", "")
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
         if groq_key:
             self._groq_extractor = VisionExtractor(groq_key, self._cfg.get("groq", {}))
+
+    def _make_extractor(self, key: str, model: str):
+        from vision_pipeline.gemini_extractor import GeminiExtractor
+        cfg = dict(self._gemini_cfg)
+        cfg["gemini_model"] = model
+        return GeminiExtractor(key, cfg)
 
     # ── Public interface ──────────────────────────────────────────────────
 
     def describe(self) -> str:
-        if self._provider != "gemini" or not self._extractors:
+        if self._provider != "gemini" or not self._keys:
             return f"Groq ({self._cfg.get('groq', {}).get('vision_model', 'llama-4-scout')})"
-        model = self._cfg.get("gemini", {}).get("gemini_model", "gemini-2.5-flash")
-        return f"Gemini ({model}) — {len(self._extractors)} key(s) + Groq fallback"
+        return f"Gemini tiers {GEMINI_TIERS} — {len(self._keys)} key(s) + Groq fallback"
 
     def active_provider(self) -> str:
-        if self._using_fallback or self._provider != "gemini":
+        if self._using_groq or self._provider != "gemini":
             return "groq"
-        return f"gemini-{self._active_idx + 1}"
+        if self._tier_idx < len(GEMINI_TIERS):
+            model = GEMINI_TIERS[self._tier_idx]
+            state = self._tier_state[model]
+            return f"{model}[key{state['active_idx'] + 1}]"
+        return "groq"
 
     def extract_page(self, png_path: Path, page_num: int) -> list[dict[str, Any]]:
-        """
-        Extract products from one page PNG.
-        Rotates Gemini keys on rate limit; falls back to Groq if all exhausted.
-        """
-        if self._provider != "gemini" or not self._extractors or self._using_fallback:
+        if self._provider != "gemini" or not self._keys or self._using_groq:
             return self._groq_extract(png_path, page_num)
 
-        # Try Gemini keys in order
-        while self._active_idx < len(self._extractors):
-            extractor = self._extractors[self._active_idx]
+        # Try each tier in order, but only skip tiers that are quota-exhausted (429)
+        # Overloaded tiers (503) are retried each page since it's a temporary server issue
+        for tier_offset in range(len(GEMINI_TIERS)):
+            actual_idx = (self._tier_idx + tier_offset) % len(GEMINI_TIERS)
+            model = GEMINI_TIERS[actual_idx]
+            state = self._tier_state[model]
+
+            # Skip tier only if ALL keys are quota-exhausted (429), not just overloaded
+            all_exhausted = len(state["exhausted_keys"]) >= len(self._keys)
+            if all_exhausted:
+                continue
+
+            # Clear overloaded set each page — 503 is temporary
+            state["overloaded_keys"].clear()
+
+            result = self._try_tier(model, png_path, page_num)
+
+            if result is None:
+                # All keys quota-exhausted on this tier — advance permanently
+                if len(state["exhausted_keys"]) >= len(self._keys):
+                    if actual_idx == self._tier_idx:
+                        self._tier_idx = min(self._tier_idx + 1, len(GEMINI_TIERS))
+                        if self._tier_idx < len(GEMINI_TIERS):
+                            print(f"\n  All {model} keys quota exhausted — switching to {GEMINI_TIERS[self._tier_idx]}")
+                continue
+
+            if result == [] and png_path.stat().st_size > 100_000:
+                print(f"  [page {page_num}] {model} returned empty on large page ({png_path.stat().st_size // 1024} KB) — trying Groq...")
+                groq_result = self._groq_extract(png_path, page_num)
+                if groq_result:
+                    return groq_result
+
+            return result
+
+        # All Gemini tiers quota-exhausted
+        print("\n  All Gemini tiers exhausted — switching to Groq permanently")
+        self._using_groq = True
+        return self._groq_extract(png_path, page_num)
+
+    # ── Per-tier logic ────────────────────────────────────────────────────
+
+    def _try_tier(self, model: str, png_path: Path, page_num: int) -> list[dict[str, Any]] | None:
+        """
+        Try all available keys for a given model tier.
+        Returns:
+          - list of products (possibly empty) on success
+          - None if all keys are exhausted/failed for this tier
+        """
+        state = self._tier_state[model]
+        num_keys = len(self._keys)
+        keys_attempted = 0
+
+        # Build a list of key indices to try: start from active_idx, skip exhausted
+        for attempt in range(num_keys):
+            idx = (state["active_idx"] + attempt) % num_keys
+
+            if idx in state["exhausted_keys"]:
+                keys_attempted += 1
+                continue
+
+            key = self._keys[idx]
+            extractor = self._make_extractor(key, model)
+
             try:
-                return extractor.extract_page(png_path, page_num)
+                result = extractor.extract_page(png_path, page_num)
+                # Success — update active index and return
+                state["active_idx"] = idx
+                state["overloaded_keys"].discard(idx)
+                return result
+
             except Exception as exc:
                 err = str(exc).lower()
-                # Daily quota exhausted → rotate to next key
-                if "429" in err or "quota" in err or "rate" in err:
-                    self._active_idx += 1
-                    if self._active_idx < len(self._extractors):
-                        print(
-                            f"\n  Gemini key {self._active_idx}/{len(self._extractors)} "
-                            f"daily limit hit — rotating to key {self._active_idx + 1}"
-                        )
+                is_quota = "429" in err or "quota" in err
+                is_overload = "503" in err or "unavailable" in err
+                is_not_found = "404" in err or "not_found" in err
+
+                if is_not_found:
+                    # Model doesn't exist — skip entire tier
+                    print(f"\n  {model} not available (404) — skipping tier")
+                    return None
+
+                if is_quota:
+                    state["exhausted_keys"].add(idx)
+                    keys_attempted += 1
+                    remaining = num_keys - len(state["exhausted_keys"])
+                    if remaining > 0:
+                        next_idx = self._next_available(state, num_keys)
+                        print(f"\n  {model} key {idx+1} quota exhausted — rotating to key {next_idx+1}")
+                        state["active_idx"] = next_idx
                     else:
-                        print("\n  All Gemini keys exhausted — falling back to Groq Scout")
-                        self._using_fallback = True
-                        return self._groq_extract(png_path, page_num)
+                        print(f"\n  All {model} keys quota exhausted")
+                        return None
+
+                elif is_overload:
+                    state["overloaded_keys"].add(idx)
+                    keys_attempted += 1
+                    next_idx = self._next_available(state, num_keys)
+                    if next_idx != idx:
+                        print(f"\n  [page {page_num}] {model} key {idx+1} overloaded (503) — trying key {next_idx+1}")
+                        state["active_idx"] = next_idx
+                    else:
+                        # All keys overloaded — bail to next tier
+                        print(f"\n  [page {page_num}] All {model} keys overloaded — trying next tier")
+                        return None
                 else:
-                    # Non-rate-limit error — don't rotate, just return empty
-                    print(f"  [page {page_num}] Gemini error: {exc}")
+                    # Other error — don't rotate, return empty
+                    print(f"  [page {page_num}] {model} error: {exc}")
                     return []
 
-        # All keys tried
-        self._using_fallback = True
-        return self._groq_extract(png_path, page_num)
+        # All keys tried and exhausted
+        return None
+
+    def _next_available(self, state: dict, num_keys: int) -> int:
+        """Find next key index not in exhausted_keys."""
+        for i in range(num_keys):
+            idx = (state["active_idx"] + 1 + i) % num_keys
+            if idx not in state["exhausted_keys"]:
+                return idx
+        return state["active_idx"]  # fallback to current if all exhausted
 
     def _groq_extract(self, png_path: Path, page_num: int) -> list[dict[str, Any]]:
         if self._groq_extractor is None:

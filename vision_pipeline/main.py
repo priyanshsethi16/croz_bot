@@ -127,10 +127,23 @@ def main():
     pending = [p for p in png_paths if int(p.stem.split("_")[1]) not in completed_pages]
     print(f"Pages to process: {len(pending)} (skipping {len(completed_pages)} already done)")
 
+    failed_pages: list[int] = []
+
     with tqdm(total=len(pending), desc="Pages", unit="page") as pbar:
         for png_path in pending:
             page_num = int(png_path.stem.split("_")[1])
             products = rotator.extract_page(png_path, page_num)
+
+            if products is None:
+                # None signals a hard failure (all retries exhausted with errors)
+                tqdm.write(f"  p{page_num:03d} → [FAILED] all retries exhausted — will retry later")
+                failed_pages.append(page_num)
+                pbar.update(1)
+                pbar.set_postfix({"products": product_count, "provider": rotator.active_provider(), "failed": len(failed_pages)})
+                continue
+
+            if not products:
+                tqdm.write(f"  p{page_num:03d} → [EMPTY] no products found (cover/TOC/divider page)")
 
             for product in products:
                 product_count += 1
@@ -139,8 +152,8 @@ def main():
                 product["chunk_path"] = str(chunk_path)
                 all_products.append(product)
                 tqdm.write(
-                    f"  p{page_num:03d} → [{product.get('product_code','?'):12s}] "
-                    f"{str(product.get('product_name','?'))[:40]}"
+                    f"  p{page_num:03d} → [{str(product.get('product_code') or '?'):12s}] "
+                    f"{str(product.get('product_name') or '?')[:40]}"
                 )
 
             completed_pages.add(page_num)
@@ -155,7 +168,11 @@ def main():
             )
 
             pbar.update(1)
-            pbar.set_postfix({"products": product_count, "provider": rotator.active_provider()})
+            pbar.set_postfix({"products": product_count, "provider": rotator.active_provider(), "failed": len(failed_pages)})
+
+    if failed_pages:
+        print(f"\nWARNING: {len(failed_pages)} pages failed and were NOT checkpointed: {failed_pages}")
+        print("Re-run the same command to retry them.")
 
     print("=" * 60)
     print("Vision Pipeline Complete!")

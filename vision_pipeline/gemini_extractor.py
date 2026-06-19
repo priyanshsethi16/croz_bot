@@ -83,10 +83,14 @@ class GeminiExtractor:
 
             except Exception as exc:
                 last_error = exc
+                err_str = str(exc).lower()
+                # Re-raise rate limit AND server overload errors so KeyRotator can rotate keys
+                if "429" in err_str or "quota" in err_str or "rate" in err_str or "503" in err_str or "unavailable" in err_str:
+                    raise
                 print(f"  [page {page_num}] Gemini attempt {attempt}/{self.max_retries} failed: {exc}")
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay * attempt)
 
         self._last_call_time = time.time()
         print(f"  [page {page_num}] All Gemini retries failed: {last_error}")
-        return []
+        return None  # None = hard failure, lets KeyRotator/main distinguish from empty page
