@@ -1,0 +1,754 @@
+// ── Sidebar mobile toggle ─────────────────────────────────────────────────────
+const sidebarEl  = document.getElementById('sidebar');
+const overlayEl  = document.getElementById('sidebar-overlay');
+const toggleBtn  = document.getElementById('sidebar-toggle');
+
+function openSidebar()  { sidebarEl.classList.add('open'); overlayEl.classList.add('visible'); }
+function closeSidebar() { sidebarEl.classList.remove('open'); overlayEl.classList.remove('visible'); }
+toggleBtn.addEventListener('click', openSidebar);
+overlayEl.addEventListener('click', closeSidebar);
+
+// ── Panel navigation ──────────────────────────────────────────────────────────
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('.step-item').forEach(s => s.classList.remove('active'));
+
+  document.getElementById('panel-' + name).classList.add('active');
+  document.querySelector(`.sidebar-link[data-panel="${name}"]`)?.classList.add('active');
+  document.querySelector(`.step-item[data-step="${name}"]`)?.classList.add('active');
+
+  closeSidebar();
+  if (name === 'chunk') loadPdfList();
+}
+
+// Open from ?panel= query param
+(function() {
+  const p = new URLSearchParams(location.search).get('panel');
+  if (p && document.getElementById('panel-' + p)) showPanel(p);
+})();
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('dragover');
+  [...e.dataTransfer.files].forEach(f => uploadFile(f));
+});
+document.getElementById('pdf-file-input').addEventListener('change', e => {
+  [...e.target.files].forEach(f => uploadFile(f));
+  e.target.value = '';
+});
+
+async function uploadFile(file) {
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    showToast('Only PDF files are allowed.', 'error'); return;
+  }
+  const item = addFileItem(file.name, formatBytes(file.size), 'pending', 'Uploading…');
+  // Check duplicate before uploading
+  const fd = new FormData();
+  fd.append('pdf', file);
+  fd.append('csrfmiddlewaretoken', CSRF);
+  try {
+    const res  = await fetch('/admin-panel/api/upload/', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (res.status === 409 || data.error) {
+      setFileStatus(item, 'error', res.status === 409 ? '✗ Already exists' : '✗ ' + data.error);
+      showToast(data.error, 'error');
+    } else {
+      setFileStatus(item, 'success', '✓ Uploaded');
+      showToast(data.message || 'Uploaded successfully!', 'success');
+      refreshStats();
+      document.getElementById('next-to-chunk').style.display = 'flex';
+      showSplitterForPdf(file.name);
+    }
+  } catch(e) {
+    setFileStatus(item, 'error', '✗ Failed');
+    showToast('Upload failed.', 'error');
+  }
+}
+
+function addFileItem(name, size, statusClass, statusText) {
+  const div = document.createElement('div');
+  div.className = 'file-item';
+  div.innerHTML = `
+    <div class="file-item-icon"><i class="fa fa-file-pdf"></i></div>
+    <div class="file-item-info">
+      <div class="fname">${escHtml(name)}</div>
+      <div class="fsize">${size}</div>
+    </div>
+    <span class="fstatus ${statusClass}">${statusText}</span>`;
+  document.getElementById('upload-file-list').prepend(div);
+  return div;
+}
+
+function setFileStatus(item, cls, text) {
+  const s = item.querySelector('.fstatus');
+  s.className = `fstatus ${cls}`;
+  s.textContent = text;
+}
+
+function formatBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+// ── Load PDF list for chunk panel ─────────────────────────────────────────────
+async function loadPdfList() {
+  try {
+    const res  = await fetch('/admin-panel/api/pdfs/');
+    const data = await res.json();
+    const grid    = document.getElementById('pdf-selector-grid');
+    const chunked = new Set(data.chunked || []);
+    grid.innerHTML = '';
+    (data.pdfs || []).forEach(name => {
+      const stem    = name.replace(/\.pdf$/i, '');
+      const isDone  = chunked.has(stem);
+      const card    = document.createElement('div');
+      card.className = 'pdf-select-card' + (isDone ? ' chunked-done' : '');
+      card.dataset.pdf = name;
+      card.innerHTML = `
+        <i class="fa fa-file-pdf"></i>
+        <div>
+          <div class="pdf-name">${escHtml(name)}</div>
+          <div class="pdf-sub">${isDone
+            ? '<i class="fa fa-check-circle" style="color:#22c55e"></i> Already chunked'
+            : 'Click to select'}</div>
+        </div>
+        ${isDone ? '<span class="pdf-done-badge"><i class="fa fa-check"></i></span>' : ''}`;
+      if (!isDone) card.addEventListener('click', () => selectPdf(card, name));
+      else card.title = 'Chunks already exist for this PDF';
+      grid.appendChild(card);
+    });
+    if (!data.pdfs?.length) {
+      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0">No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel(\'upload\')">Upload one →</button></p>';
+    }
+  } catch(e) {}
+}
+
+let selectedPdf = null;
+function selectPdf(card, name) {
+  document.querySelectorAll('.pdf-select-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  selectedPdf = name;
+  document.getElementById('btn-run-chunk').disabled = false;
+}
+
+// ── Create Chunks (Pipeline) ──────────────────────────────────────────────────
+async function runChunking() {
+  if (!selectedPdf) { showToast('Please select a PDF first.', 'error'); return; }
+
+  const btn   = document.getElementById('btn-run-chunk');
+  const prog  = document.getElementById('chunk-progress');
+  const fill  = document.getElementById('chunk-fill');
+  const pct   = document.getElementById('chunk-pct');
+  const log   = document.getElementById('chunk-log');
+  const label = document.getElementById('chunk-progress-label');
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+  prog.classList.add('visible');
+  log.classList.add('visible');
+  log.textContent = `▶ Starting chunk extraction for: ${selectedPdf}\n`;
+
+  let p = 0;
+  const ticker = setInterval(() => {
+    p = Math.min(p + 2, 88);
+    fill.style.width = p + '%';
+    pct.textContent  = p + '%';
+  }, 600);
+
+  try {
+    const res  = await fetch('/admin-panel/api/pipeline/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: selectedPdf })
+    });
+    const data = await res.json();
+    clearInterval(ticker);
+    fill.style.width = '100%'; pct.textContent = '100%';
+    label.textContent = 'Complete';
+
+    if (data.error) {
+      log.textContent += '\n✗ ERROR:\n' + data.error;
+      showToast('Chunking failed.', 'error');
+    } else {
+      log.textContent += data.output || '\n✓ Chunks created successfully.';
+      showToast('Product chunks created!', 'success');
+      refreshStats();
+      document.getElementById('next-to-index').style.display = 'flex';
+      markStepDone('chunk');
+    }
+  } catch(e) {
+    clearInterval(ticker);
+    log.textContent += '\n✗ Network error.';
+    showToast('Request failed.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-layer-group"></i> Create Chunks';
+  }
+}
+
+// ── Index & Embed ─────────────────────────────────────────────────────────────
+let indexMode = 'incremental';
+function setIndexMode(mode) {
+  indexMode = mode;
+  document.querySelectorAll('.index-option-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`.index-option-card[data-mode="${mode}"]`).classList.add('selected');
+}
+
+async function runIndexing() {
+  const reset = indexMode === 'reset';
+  const btn   = document.getElementById('btn-run-index');
+  const prog  = document.getElementById('index-progress');
+  const fill  = document.getElementById('index-fill');
+  const pct   = document.getElementById('index-pct');
+  const log   = document.getElementById('index-log');
+  const label = document.getElementById('index-progress-label');
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Indexing…';
+  prog.classList.add('visible');
+  log.classList.add('visible');
+  log.textContent = reset ? '▶ Resetting and re-indexing all chunks…\n' : '▶ Running incremental indexing…\n';
+
+  let p = 0;
+  const ticker = setInterval(() => {
+    p = Math.min(p + 4, 88);
+    fill.style.width = p + '%';
+    pct.textContent  = p + '%';
+  }, 400);
+
+  try {
+    const res  = await fetch('/admin-panel/api/ingest/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ reset })
+    });
+    const data = await res.json();
+    clearInterval(ticker);
+    fill.style.width = '100%'; pct.textContent = '100%';
+    label.textContent = 'Complete';
+
+    if (data.error) {
+      log.textContent += '\n✗ ERROR:\n' + data.error;
+      showToast('Indexing failed.', 'error');
+    } else {
+      log.textContent += data.output || '\n✓ Indexing complete.';
+      showToast('Indexing complete!', 'success');
+      refreshStats();
+      markStepDone('index');
+    }
+  } catch(e) {
+    clearInterval(ticker);
+    log.textContent += '\n✗ Network error.';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-bolt"></i> Run Indexing';
+  }
+}
+
+function markStepDone(name) {
+  const s = document.querySelector(`.step-item[data-step="${name}"]`);
+  if (s) { s.classList.add('done'); s.querySelector('.step-circle').innerHTML = '<i class="fa fa-check"></i>'; }
+}
+
+// ── Admin Chat ────────────────────────────────────────────────────────────────
+async function adminChat() {
+  const input = document.getElementById('admin-chat-input');
+  const msgs  = document.getElementById('admin-msgs');
+  const query = input.value.trim();
+  if (!query) return;
+
+  appendAdminMsg('user', escHtml(query));
+  input.value = '';
+
+  const typing = document.createElement('div');
+  typing.id = 'admin-typing';
+  typing.className = 'admin-msg bot';
+  typing.innerHTML = `<div class="admin-msg-avatar">GZ</div>
+    <div class="admin-msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+  msgs.appendChild(typing); msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const res  = await fetch('/admin-panel/api/chat/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ query })
+    });
+    const data = await res.json();
+    document.getElementById('admin-typing')?.remove();
+    if (data.error) appendAdminMsg('bot', `<span style="color:var(--orange)">${data.error}</span>`);
+    else {
+      const src = (data.sources||[]).map(s=>`<span style="background:var(--orange-light);color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">${escHtml(s.name||s.code)}</span>`).join(' ');
+      appendAdminMsg('bot', renderMarkdown(data.answer) + (src ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${src}</div>` : ''));
+    }
+  } catch(e) {
+    document.getElementById('admin-typing')?.remove();
+    appendAdminMsg('bot', 'Network error.');
+  }
+}
+
+function adminAskCat(cat, el) {
+  document.querySelectorAll('.admin-cat-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  const input = document.getElementById('admin-chat-input');
+  input.value = cat === 'all'
+    ? 'Show all available products'
+    : `Show ${cat} products and their specifications`;
+  adminChat();
+}
+
+function appendAdminMsg(role, html) {
+  const msgs = document.getElementById('admin-msgs');
+  const div  = document.createElement('div');
+  div.className = `admin-msg ${role}`;
+  div.innerHTML = `<div class="admin-msg-avatar">${role==='bot'?'GZ':'<i class="fa fa-user"></i>'}</div>
+    <div class="admin-msg-bubble msg-content">${html}</div>`;
+  msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
+}
+
+// -- Delete PDF ------------------------------------------------------------------
+async function deletePdf(filename) {
+  if (!confirm(`Delete "${filename}" and ALL associated chunks, products and index data?\nThis cannot be undone.`)) return;
+  try {
+    const res  = await fetch('/admin-panel/api/delete-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showToast(data.message, 'success');
+    refreshStats();
+    loadPdfList();
+    document.querySelectorAll('.catalog-table tbody tr').forEach(row => {
+      if (row.querySelector('.pname')?.textContent === filename) row.remove();
+    });
+  } catch(e) { showToast('Delete failed.', 'error'); }
+}
+
+// -- Stats refresh -------------------------------------------------------------────────────
+async function refreshStats() {
+  try {
+    const res  = await fetch('/admin-panel/api/stats/');
+    const data = await res.json();
+    document.getElementById('stat-pdfs').textContent      = data.total_pdfs ?? '—';
+    document.getElementById('stat-processed').textContent = (data.processed||[]).length;
+    document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
+    document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
+  } catch(e) {}
+}
+
+// ── Text Splitter ────────────────────────────────────
+let _splitMode = 'uniform'; // 'uniform' | 'custom'
+let _customRangeCount = 0;
+let _totalPages = 0;
+
+function setSplitMode(mode) {
+  _splitMode = mode;
+  document.getElementById('split-mode-uniform').classList.toggle('active', mode === 'uniform');
+  document.getElementById('split-mode-custom').classList.toggle('active', mode === 'custom');
+  document.getElementById('uniform-split-controls').style.display = mode === 'uniform' ? 'block' : 'none';
+  document.getElementById('custom-split-controls').style.display  = mode === 'custom'  ? 'block' : 'none';
+  if (mode === 'custom' && _customRangeCount === 0) addCustomRange();
+}
+
+function addCustomRange() {
+  _customRangeCount++;
+  const idx  = _customRangeCount;
+  const list = document.getElementById('custom-ranges-list');
+  const row  = document.createElement('div');
+  row.id = `cr-row-${idx}`;
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fafafa;border:1.5px solid var(--border);border-radius:8px';
+  row.innerHTML = `
+    <span style="font-size:12px;font-weight:700;color:var(--grey);min-width:52px">Part ${idx}</span>
+    <span style="font-size:12px;color:var(--grey)">Pages</span>
+    <input type="number" id="cr-start-${idx}" min="1" value="" placeholder="From"
+      style="width:70px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;outline:none"
+      oninput="_validateCustomRanges()"/>
+    <span style="font-size:12px;color:var(--grey)">to</span>
+    <input type="number" id="cr-end-${idx}" min="1" value="" placeholder="To"
+      style="width:70px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;outline:none"
+      oninput="_validateCustomRanges()"/>
+    <button onclick="removeCustomRange(${idx})" style="margin-left:auto;background:none;border:none;color:#ccc;cursor:pointer;font-size:14px;padding:2px 6px" title="Remove">
+      <i class="fa fa-times"></i>
+    </button>`;
+  list.appendChild(row);
+  _validateCustomRanges();
+}
+
+function removeCustomRange(idx) {
+  document.getElementById(`cr-row-${idx}`)?.remove();
+  _validateCustomRanges();
+}
+
+function _getCustomRanges() {
+  const rows = document.querySelectorAll('#custom-ranges-list > div');
+  return Array.from(rows).map(row => {
+    const s = parseInt(row.querySelector('input:first-of-type').value);
+    const e = parseInt(row.querySelector('input:last-of-type').value);
+    return { start: s, end: e };
+  }).filter(r => !isNaN(r.start) && !isNaN(r.end));
+}
+
+function _validateCustomRanges() {
+  const ranges  = _getCustomRanges();
+  const preview = document.getElementById('custom-split-preview');
+  if (!ranges.length) { preview.className = 'splitter-preview'; return; }
+  const total = ranges.reduce((s, r) => s + (r.end - r.start + 1), 0);
+  const errors = ranges.filter(r => r.start < 1 || r.end < r.start || (_totalPages > 0 && r.end > _totalPages));
+  preview.className = 'splitter-preview visible';
+  if (errors.length) {
+    preview.innerHTML = `<i class="fa fa-exclamation-triangle" style="color:#dc2626"></i> &nbsp; Invalid ranges detected`;
+  } else {
+    preview.innerHTML = `<i class="fa fa-check-circle" style="color:#22c55e"></i> &nbsp;
+      <strong>${ranges.length}</strong> parts &nbsp;·&nbsp; <strong>${total}</strong> pages total`;
+  }
+}
+
+function doSplit() {
+  if (_splitMode === 'custom') splitPdfCustom();
+  else splitPdf();
+}
+
+async function splitPdfCustom() {
+  if (!selectedPdf) { showToast('Select a PDF first.', 'error'); return; }
+  const ranges = _getCustomRanges();
+  if (!ranges.length) { showToast('Add at least one page range.', 'error'); return; }
+  const btn = document.getElementById('btn-split-pdf');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Splitting…';
+  try {
+    const res  = await fetch('/admin-panel/api/split-pdf-custom/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: selectedPdf, ranges })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+    _splitStem  = data.stem;
+    _splitParts = data.splits;
+    showToast(data.message, 'success');
+    renderSplitParts(data.splits);
+  } catch(e) { showToast('Split failed.', 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="fa fa-cut"></i> Split &amp; Process Parts'; }
+}
+
+function showSplitterForPdf(filename) {
+  selectedPdf = filename;
+  _splitStem  = filename.replace(/\.pdf$/i, '');
+  _splitParts = [];
+
+  document.getElementById('splitter-section').style.display = 'block';
+  _splitterOpen = true;
+  _splitMode = 'uniform';
+  _customRangeCount = 0;
+  _totalPages = 0;
+  document.getElementById('split-mode-uniform').classList.add('active');
+  document.getElementById('split-mode-custom').classList.remove('active');
+  document.getElementById('uniform-split-controls').style.display = 'block';
+  document.getElementById('custom-split-controls').style.display  = 'none';
+  document.getElementById('custom-ranges-list').innerHTML = '';
+  document.getElementById('custom-split-preview').className = 'splitter-preview';
+  document.getElementById('splitter-body').style.display = 'block';
+  document.getElementById('btn-toggle-splitter').innerHTML =
+    '<i class="fa fa-chevron-up"></i> Collapse';
+  document.getElementById('split-parts-wrap').style.display = 'none';
+  document.getElementById('split-parts-list').innerHTML = '';
+  document.getElementById('splitter-preview').className = 'splitter-preview';
+  document.getElementById('splitter-preview').innerHTML = '';
+  document.getElementById('splitter-pdf-name').textContent = filename;
+  document.getElementById('splitter-pages-badge').innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+  document.getElementById('splitter-info-bar').style.display = 'flex';
+  _loadPageCount(filename);
+}
+
+
+let _splitStem    = null;
+let _splitParts   = [];
+let _pagesPerPart = 5;
+
+function toggleSplitter() {
+  _splitterOpen = !_splitterOpen;
+  document.getElementById('splitter-body').style.display    = _splitterOpen ? 'block' : 'none';
+  document.getElementById('btn-toggle-splitter').innerHTML  =
+    `<i class="fa fa-chevron-${_splitterOpen?'up':'down'}" id="splitter-chevron"></i> ${_splitterOpen?'Collapse':'Expand'}`;
+  if (_splitterOpen && selectedPdf) _loadPageCount(selectedPdf);
+}
+
+async function _loadPageCount(pdf) {
+  const bar    = document.getElementById('splitter-info-bar');
+  const nameEl = document.getElementById('splitter-pdf-name');
+  const pagesEl= document.getElementById('splitter-pages-badge');
+  const hint    = document.getElementById('split-hint');
+  const btnSplit = document.getElementById('btn-split-pdf');
+
+  bar.style.display = 'flex';
+  nameEl.textContent  = pdf;
+  pagesEl.textContent = 'Loading…';
+
+  try {
+    const res  = await fetch(`/admin-panel/api/pdf-pages/?pdf=${encodeURIComponent(pdf)}`);
+    const data = await res.json();
+    if (data.error) { pagesEl.textContent = 'Error'; return; }
+    pagesEl.textContent = `${data.pages} pages`;
+    _totalPages = data.pages;
+    if (hint) hint.textContent = '';
+    if (btnSplit) btnSplit.disabled = false;
+    _updateSplitterPreview(data.pages);
+  } catch(e) { pagesEl.textContent = 'Error'; }
+}
+
+function setPreset(btn, val) {
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('pages-per-input').value = val;
+  _pagesPerPart = val;
+  const badge = document.getElementById('splitter-pages-badge').textContent;
+  const total  = parseInt(badge);
+  if (!isNaN(total)) _updateSplitterPreview(total);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const customInput = document.getElementById('pages-per-input');
+  if (customInput) {
+    customInput.addEventListener('input', () => {
+      const v = parseInt(customInput.value);
+      if (v > 0) {
+        _pagesPerPart = v;
+        document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+        const badge = document.getElementById('splitter-pages-badge').textContent;
+        const total  = parseInt(badge);
+        if (!isNaN(total)) _updateSplitterPreview(total);
+      }
+    });
+  }
+});
+
+function _updateSplitterPreview(totalPages) {
+  const pp      = parseInt(document.getElementById('pages-per-input').value) || _pagesPerPart;
+  const parts   = Math.ceil(totalPages / pp);
+  const preview = document.getElementById('splitter-preview');
+  preview.className = 'splitter-preview visible';
+  preview.innerHTML =
+    `<i class="fa fa-info-circle" style="color:var(--orange)"></i> &nbsp;
+     <strong>${totalPages}</strong> pages ÷ <strong>${pp}</strong> pages/part
+     = <strong style="color:var(--orange)">${parts} part${parts!==1?'s':''}</strong>
+     &nbsp;·&nbsp; Each processed sequentially`;
+}
+
+async function splitPdf() {
+  if (!selectedPdf) { showToast('Select a PDF first.', 'error'); return; }
+  const pp  = parseInt(document.getElementById('pages-per-input').value) || _pagesPerPart;
+  const btn = document.getElementById('btn-split-pdf');
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Splitting…';
+
+  try {
+    const res  = await fetch('/admin-panel/api/split-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: selectedPdf, pages_per: pp })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+
+    _splitStem  = data.stem;
+    _splitParts = data.splits;
+    showToast(data.message, 'success');
+    renderSplitParts(data.splits);
+  } catch(e) { showToast('Split failed.', 'error'); }
+  finally { btn.disabled = false; btn.innerHTML = '<i class="fa fa-cut"></i> Split PDF'; }
+}
+
+function renderSplitParts(parts) {
+  const wrap  = document.getElementById('split-parts-wrap');
+  const list  = document.getElementById('split-parts-list');
+  const title = document.getElementById('split-parts-title');
+
+  wrap.style.display = 'block';
+  title.textContent  = `${parts.length} parts ready to process`;
+  list.innerHTML = parts.map((p, i) => `
+    <div class="split-part-item" id="split-part-${i}">
+      <div class="split-part-num">${i+1}</div>
+      <div class="split-part-info">
+        <div class="part-name">${escHtml(p.filename)}</div>
+        <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;·&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
+      </div>
+      <span class="split-part-status pending" id="split-status-${i}">Pending</span>
+      <button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="runSingleSplit(${i})">
+        <i class="fa fa-play"></i> Run
+      </button>
+    </div>`).join('');
+}
+
+async function runSingleSplit(idx) {
+  const part   = _splitParts[idx];
+  const itemEl = document.getElementById(`split-part-${idx}`);
+  const statEl = document.getElementById(`split-status-${idx}`);
+  const btnEl  = document.getElementById(`split-btn-${idx}`);
+
+  itemEl.className = 'split-part-item running';
+  statEl.className = 'split-part-status running';
+  statEl.textContent = 'Running…';
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+
+  try {
+    const res  = await fetch('/admin-panel/api/pipeline-split/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ stem: _splitStem, part_file: part.filename })
+    });
+    const data = await res.json();
+    if (data.error) {
+      itemEl.className = 'split-part-item errored';
+      statEl.className = 'split-part-status errored';
+      statEl.textContent = '✗ Failed';
+      showToast(`Part ${idx+1} failed.`, 'error');
+    } else {
+      itemEl.className = 'split-part-item done';
+      statEl.className = 'split-part-status done';
+      statEl.textContent = '✓ Done';
+      btnEl.innerHTML = '<i class="fa fa-check"></i>';
+      refreshStats();
+    }
+  } catch(e) {
+    itemEl.className = 'split-part-item errored';
+    statEl.className = 'split-part-status errored';
+    statEl.textContent = '✗ Error';
+  } finally {
+    if (!document.getElementById(`split-btn-${idx}`).innerHTML.includes('check'))
+      btnEl.disabled = false;
+  }
+}
+
+async function runAllSplits() {
+  const btn = document.getElementById('btn-run-all-splits');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+  for (let i = 0; i < _splitParts.length; i++) {
+    const statEl = document.getElementById(`split-status-${i}`);
+    if (statEl && statEl.textContent === '✓ Done') continue; // skip already done
+    await runSingleSplit(i);
+  }
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa fa-check"></i> All Done';
+  document.getElementById('next-to-index').style.display = 'flex';
+  showToast('All parts processed!', 'success');
+}
+
+// ── Chunks Drawer ─────────────────────────────────────────────────────
+let _chunksCache = {};
+
+async function openChunks(pdfName) {
+  const drawer  = document.getElementById('chunks-drawer');
+  const overlay = document.getElementById('chunks-overlay');
+  const title   = document.getElementById('chunks-drawer-title');
+  const sub     = document.getElementById('chunks-drawer-sub');
+  const tabs    = document.getElementById('chunks-tabs');
+  const body    = document.getElementById('chunks-body');
+
+  title.textContent = pdfName;
+  sub.textContent   = 'Product markdown chunks';
+  tabs.innerHTML    = '';
+  body.innerHTML    = '<div class="chunks-loading"><i class="fa fa-spinner fa-spin"></i> Loading chunks…</div>';
+
+  drawer.classList.add('open');
+  overlay.classList.add('visible');
+  document.body.style.overflow = 'hidden';
+
+  if (_chunksCache[pdfName]) {
+    renderChunks(pdfName, _chunksCache[pdfName]);
+    return;
+  }
+
+  try {
+    const res  = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(pdfName)}`);
+    const data = await res.json();
+    if (data.error) { body.innerHTML = `<p style="color:var(--orange)">${data.error}</p>`; return; }
+    _chunksCache[pdfName] = data.chunks;
+    renderChunks(pdfName, data.chunks);
+  } catch(e) {
+    body.innerHTML = '<p style="color:var(--orange)"><i class="fa fa-exclamation-triangle"></i> Failed to load chunks.</p>';
+  }
+}
+
+function renderChunks(pdfName, chunks) {
+  const tabs = document.getElementById('chunks-tabs');
+  const body = document.getElementById('chunks-body');
+  const sub  = document.getElementById('chunks-drawer-sub');
+
+  sub.textContent = `${chunks.length} chunk${chunks.length !== 1 ? 's' : ''} found`;
+
+  if (!chunks.length) {
+    body.innerHTML = '<div class="chunks-loading">No chunks found for this PDF.</div>';
+    return;
+  }
+
+  // Build tabs
+  tabs.innerHTML = chunks.map((c, i) =>
+    `<button class="chunk-tab${i===0?' active':''}" onclick="switchChunk(${i})">${escHtml(c.filename.replace(/\.md$/, ''))}</button>`
+  ).join('');
+
+  // Build content panes
+  body.innerHTML = chunks.map((c, i) =>
+    `<div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">${mdToHtml(c.content)}</div>`
+  ).join('');
+}
+
+function switchChunk(idx) {
+  document.querySelectorAll('.chunk-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+  document.querySelectorAll('.chunk-content').forEach((p, i) => p.classList.toggle('visible', i === idx));
+  document.getElementById('chunks-body').scrollTop = 0;
+}
+
+function closeChunks() {
+  document.getElementById('chunks-drawer').classList.remove('open');
+  document.getElementById('chunks-overlay').classList.remove('visible');
+  document.body.style.overflow = '';
+}
+
+// Minimal markdown → HTML for chunk display
+function mdToHtml(md) {
+  if (!md) return '';
+  let h = escHtml(md);
+
+  // Tables
+  h = h.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g, (_, header, rows) => {
+    const ths = header.split('|').filter(s => s.trim()).map(s => `<th>${s.trim()}</th>`).join('');
+    const trs = rows.trim().split('\n').map(row => {
+      const tds = row.split('|').filter(s => s.trim()).map(s => `<td>${s.trim()}</td>`).join('');
+      return `<tr>${tds}</tr>`;
+    }).join('');
+    return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+  });
+
+  // Headings
+  h = h.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+  h = h.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
+  h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+
+  // Inline
+  h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/`([^`]+)`/g,     '<code>$1</code>');
+  h = h.replace(/^---$/gm,        '<hr>');
+
+  // Lists
+  h = h.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+  h = h.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
+
+  // Paragraphs (lines not already wrapped)
+  h = h.replace(/^(?!<[hultHULT]).+$/gm, line => line.trim() ? `<p>${line}</p>` : '');
+
+  return h;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}

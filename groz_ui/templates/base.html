@@ -1,0 +1,75 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}GROZ Tools — Product Assistant{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="{% static 'css/base.css' %}"/>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<!-- Top utility bar (hidden, merged into navbar) -->
+<div class="top-bar"></div>
+
+<!-- Main navbar -->
+<nav class="navbar">
+  <a href="/" class="navbar-brand">
+    <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" class="groz-logo-img"/>
+    <div class="groz-wordmark">GROZ</div>
+  </a>
+
+  <div class="nav-links">
+    {% block nav_center_links %}
+        <a href="#" class="nav-link">Products</a>
+    <a href="#" class="nav-link">Resources</a>
+    <a href="#" class="nav-link">Contacts</a>
+    <a href="/assistant/" class="nav-link active">Assistant</a>
+
+    {% endblock %}
+  </div>
+
+  {% block nav_right %}
+  <div class="nav-right">
+    <div class="nav-util">
+      <a href="#">About</a>
+      {% block top_right_link %}
+      {% if user.is_authenticated %}
+      <a href="{% if user.is_staff %}/admin-panel/logout/{% else %}/logout/{% endif %}" class="login-link"><i class="fa fa-sign-out-alt"></i> Logout</a>
+      {% else %}
+      <a href="/admin-panel/login/" class="login-link">LOGIN</a>
+      {% endif %}
+      {% endblock %}
+    </div>
+  </div>
+  {% endblock %}
+</nav>
+
+{% block content %}{% endblock %}
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="footer-left">
+    <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" style="height:28px;width:auto;filter:brightness(0) invert(1);opacity:0.7"/>
+    <span style="color:#ccc;font-weight:700;letter-spacing:1px">GROZ</span>
+    <span>© 2024 Groz Engineering Tools Pvt. Ltd. All rights reserved.</span>
+  </div>
+  <div class="footer-right">
+    <a href="https://groz-tools.com/in/" target="_blank">groz-tools.com</a>
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#"><i class="fab fa-linkedin"></i></a>
+    <a href="#"><i class="fab fa-youtube"></i></a>
+  </div>
+</footer>
+
+<div id="toast-container"></div>
+
+<script src="{% static 'js/base.js' %}"></script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

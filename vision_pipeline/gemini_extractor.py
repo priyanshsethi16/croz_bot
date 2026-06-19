@@ -82,6 +82,11 @@ class GeminiExtractor:
                 return products
 
             except Exception as exc:
+                err = str(exc)
+                # Re-raise 429s so key_rotator can handle rotation/fallback
+                if "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err:
+                    self._last_call_time = time.time()
+                    raise
                 last_error = exc
                 print(f"  [page {page_num}] Gemini attempt {attempt}/{self.max_retries} failed: {exc}")
                 if attempt < self.max_retries:

@@ -102,21 +102,25 @@ class KeyRotator:
             try:
                 return extractor.extract_page(png_path, page_num)
             except Exception as exc:
-                err = str(exc).lower()
-                # Daily quota exhausted → rotate to next key
-                if "429" in err or "quota" in err or "rate" in err:
+                err = str(exc)
+                is_quota = "429" in err or "quota" in err.lower() or "RESOURCE_EXHAUSTED" in err
+                # Daily project-level limit — rotating keys won't help, go straight to Groq
+                is_daily = "PerDay" in err or "per_day" in err.lower()
+
+                if is_quota:
+                    if is_daily:
+                        print(f"\n  Gemini daily project quota hit — falling back to Groq")
+                        self._using_fallback = True
+                        return self._groq_extract(png_path, page_num)
+                    # Per-minute rate limit — rotate key
                     self._active_idx += 1
                     if self._active_idx < len(self._extractors):
-                        print(
-                            f"\n  Gemini key {self._active_idx}/{len(self._extractors)} "
-                            f"daily limit hit — rotating to key {self._active_idx + 1}"
-                        )
+                        print(f"\n  Gemini key {self._active_idx} rate limited — rotating to key {self._active_idx + 1}")
                     else:
-                        print("\n  All Gemini keys exhausted — falling back to Groq Scout")
+                        print("\n  All Gemini keys exhausted — falling back to Groq")
                         self._using_fallback = True
                         return self._groq_extract(png_path, page_num)
                 else:
-                    # Non-rate-limit error — don't rotate, just return empty
                     print(f"  [page {page_num}] Gemini error: {exc}")
                     return []
 

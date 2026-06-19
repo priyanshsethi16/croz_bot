@@ -1,0 +1,587 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{% if is_admin %}Admin{% else %}User{% endif %} Dashboard — GROZ Tools{% endblock %}
+
+{% block nav_center_links %}{% endblock %}
+
+{% block nav_right %}
+  <div class="nav-right">
+    <div class="nav-util">
+      <span style="font-size:12px;color:var(--grey);padding:0 10px">
+        <i class="fa fa-user-circle" style="margin-right:4px;color:var(--orange)"></i>
+        {{ request.user.username }}
+        {% if is_admin %}<span style="background:var(--orange);color:#fff;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:5px">ADMIN</span>{% endif %}
+      </span>
+      <a href="/admin-panel/logout/" class="login-link"><i class="fa fa-sign-out-alt"></i> Logout</a>
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}"/>
+{% endblock %}
+
+{% block content %}
+
+<!-- Sidebar overlay (mobile) -->
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+<div class="admin-layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo">
+      <span>{% if is_admin %}Admin Panel{% else %}User Panel{% endif %}</span>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Overview</div>
+      <button class="sidebar-link active" data-panel="overview" onclick="showPanel('overview')">
+        <i class="fa fa-chart-bar"></i> Dashboard
+      </button>
+    </div>
+
+    {% if is_admin %}
+    <div class="sidebar-section">
+      <div class="sidebar-label">Workflow</div>
+      <button class="sidebar-link" data-panel="upload" onclick="showPanel('upload')">
+        <i class="fa fa-upload"></i> Upload PDF
+        <span class="step-num">1</span>
+      </button>
+      <button class="sidebar-link" data-panel="chunk" onclick="showPanel('chunk')">
+        <i class="fa fa-layer-group"></i> Create Chunks
+        <span class="step-num">2</span>
+      </button>
+      <button class="sidebar-link" data-panel="index" onclick="showPanel('index')">
+        <i class="fa fa-database"></i> Index &amp; Embed
+        <span class="step-num">3</span>
+      </button>
+    </div>
+    {% else %}
+    <div class="sidebar-section">
+      <div class="sidebar-label">Workflow</div>
+      <div style="padding:10px 12px;font-size:12px;color:#555;display:flex;align-items:center;gap:8px;border-radius:6px;background:rgba(255,255,255,0.04)">
+        <i class="fa fa-lock" style="color:#555;font-size:11px"></i> Admin-only features
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Tools</div>
+      <button class="sidebar-link" data-panel="chat" onclick="showPanel('chat')">
+        <i class="fa fa-comments"></i> Chat
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="admin-main">
+
+    <!-- Top bar -->
+    <div class="dash-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="sidebar-toggle" id="sidebar-toggle"><i class="fa fa-bars"></i></button>
+        <div>
+          <h1>{% if is_admin %}Admin <span>Dashboard</span>{% else %}User <span>Dashboard</span>{% endif %}</h1>
+          <p>{% if is_admin %}Manage catalog PDFs — upload, chunk, and index for semantic search{% else %}View catalog status and test product queries{% endif %}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-icon"><i class="fa fa-file-pdf"></i></div>
+        <div>
+          <div class="stat-value" id="stat-pdfs">{{ stats.total_pdfs }}</div>
+          <div class="stat-label">PDFs Uploaded</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i class="fa fa-layer-group"></i></div>
+        <div>
+          <div class="stat-value" id="stat-processed">{{ stats.processed|length }}</div>
+          <div class="stat-label">PDFs Processed</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i class="fa fa-cube"></i></div>
+        <div>
+          <div class="stat-value" id="stat-chunks">{{ stats.indexed }}</div>
+          <div class="stat-label">Chunks Created</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon"><i class="fa fa-database"></i></div>
+        <div>
+          <div class="stat-value" id="stat-indexed">{{ stats.indexed }}</div>
+          <div class="stat-label">Chunks Indexed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Workflow stepper (admin only) -->
+    {% if is_admin %}
+    <div class="workflow-stepper">
+      <div class="step-item active" data-step="upload" onclick="showPanel('upload')">
+        <div class="step-circle">1</div>
+        <div class="step-text">
+          <div class="step-title">Upload PDF</div>
+          <div class="step-sub">Add catalog file</div>
+        </div>
+      </div>
+      <div class="step-item" data-step="chunk" onclick="showPanel('chunk')">
+        <div class="step-circle">2</div>
+        <div class="step-text">
+          <div class="step-title">Create Chunks</div>
+          <div class="step-sub">Extract products via AI</div>
+        </div>
+      </div>
+      <div class="step-item" data-step="index" onclick="showPanel('index')">
+        <div class="step-circle">3</div>
+        <div class="step-text">
+          <div class="step-title">Index &amp; Embed</div>
+          <div class="step-sub">Vector search ready</div>
+        </div>
+      </div>
+      <div class="step-item" data-step="chat" onclick="showPanel('chat')">
+        <div class="step-circle">4</div>
+        <div class="step-text">
+          <div class="step-title">Test Chat</div>
+          <div class="step-sub">Validate results</div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ══ PANEL: Overview ══ -->
+    <div class="panel active" id="panel-overview">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-chart-bar"></i></div>
+            <div>
+              <h3>Catalog Overview</h3>
+              <p>All processed PDFs and their extracted products</p>
+            </div>
+          </div>
+          {% if not is_admin %}
+          <span class="badge badge-blue"><i class="fa fa-eye"></i> View Only</span>
+          {% endif %}
+        </div>
+        <div class="panel-body">
+          {% if stats.processed %}
+          <div class="table-wrap">
+            <table class="catalog-table">
+              <thead>
+                <tr>
+                  <th>PDF Name</th>
+                  <th>Chunks</th>
+                  <th>Products</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+              {% for item in stats.processed %}
+                <tr>
+                  <td>
+                    <div class="pdf-name-cell">
+                      <i class="fa fa-file-pdf"></i>
+                      <span class="pname">{{ item.name }}</span>
+                    </div>
+                  </td>
+                  <td><span class="badge badge-blue">{{ item.chunks }}</span></td>
+                  <td><span class="badge badge-green">{{ item.products }}</span></td>
+                  <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
+                  <td>
+                    <div class="table-actions">
+                      <button class="btn btn-sm btn-secondary" onclick="openChunks('{{ item.name }}')">
+                        <i class="fa fa-layer-group"></i> Chunks
+                      </button>
+                      <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
+                        <i class="fa fa-comments"></i> Test
+                      </button>
+                      {% if is_admin %}
+                      <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
+                        <i class="fa fa-trash"></i> Delete
+                      </button>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+              {% if is_admin %}
+              {% for pdf_name in stats.unprocessed %}
+                <tr>
+                  <td>
+                    <div class="pdf-name-cell">
+                      <i class="fa fa-file-pdf"></i>
+                      <span class="pname">{{ pdf_name }}</span>
+                    </div>
+                  </td>
+                  <td><span class="badge badge-grey">—</span></td>
+                  <td><span class="badge badge-grey">—</span></td>
+                  <td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>
+                  <td>
+                    <div class="table-actions">
+                      <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ pdf_name }}')">
+                        <i class="fa fa-trash"></i> Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+              {% endif %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div style="text-align:center;padding:48px 20px;color:var(--grey)">
+            <i class="fa fa-inbox" style="font-size:40px;margin-bottom:14px;display:block;color:#d0d0d0"></i>
+            <p style="font-size:14px;font-weight:600;margin-bottom:8px">No PDFs processed yet</p>
+            {% if is_admin %}
+            <p style="font-size:13px;margin-bottom:20px">Follow the 3-step workflow to get started.</p>
+            <button class="btn btn-primary" onclick="showPanel('upload')">
+              <i class="fa fa-upload"></i> Upload Your First PDF
+            </button>
+            {% else %}
+            <p style="font-size:13px">No catalog data available yet. Please contact your administrator.</p>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PANEL: Upload (admin only) ══ -->
+    {% if is_admin %}
+    <div class="panel" id="panel-upload">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-upload"></i></div>
+            <div>
+              <h3>Step 1 — Upload PDF Catalog</h3>
+              <p>Upload one or more industrial product catalog PDFs</p>
+            </div>
+          </div>
+          <span class="badge badge-orange">Step 1 of 3</span>
+        </div>
+        <div class="panel-body">
+          <div class="upload-zone" id="upload-zone"
+               onclick="document.getElementById('pdf-file-input').click()">
+            <div class="uz-icon"><i class="fa fa-file-pdf"></i></div>
+            <h4>Drop PDF files here</h4>
+            <p>or <strong>click to browse</strong> from your computer</p>
+            <p class="uz-hint">Accepts .pdf files only &nbsp;·&nbsp; Multiple files supported</p>
+          </div>
+          <input type="file" id="pdf-file-input" accept=".pdf" multiple/>
+          <div class="file-list" id="upload-file-list"></div>
+          <div class="next-step-bar" id="next-to-chunk" style="display:none">
+            <p><i class="fa fa-check-circle"></i> PDF uploaded! Now create product chunks.</p>
+            <button class="btn btn-primary btn-sm" onclick="showPanel('chunk')">
+              Next: Create Chunks <i class="fa fa-arrow-right"></i>
+            </button>
+          </div>
+
+          <!-- ── Text Splitter — appears after upload ── -->
+          <div class="splitter-section" id="splitter-section" style="display:none">
+            <div class="splitter-header">
+              <div class="splitter-header-left">
+                <div class="splitter-icon"><i class="fa fa-cut"></i></div>
+                <div>
+                  <h4>PDF Page Splitter <span style="background:var(--orange);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:middle">Optional</span></h4>
+                  <p>Split this PDF into smaller page-range parts and process each one sequentially</p>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-secondary" id="btn-toggle-splitter" onclick="toggleSplitter()">
+                <i class="fa fa-chevron-up"></i> Collapse
+              </button>
+            </div>
+
+            <div class="splitter-body" id="splitter-body">
+              <!-- PDF info bar -->
+              <div class="splitter-info-bar" id="splitter-info-bar">
+                <i class="fa fa-file-pdf" style="color:var(--orange)"></i>
+                <span id="splitter-pdf-name"></span>
+                <span class="splitter-pages-badge" id="splitter-pages-badge"><i class="fa fa-spinner fa-spin"></i></span>
+              </div>
+
+              <!-- Why use this -->
+              <div style="background:#f8f8f8;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--grey);line-height:1.7">
+                <i class="fa fa-lightbulb" style="color:var(--orange);margin-right:6px"></i>
+                <strong style="color:var(--dark)">Why split?</strong> Large PDFs (50+ pages) take a long time to process in one go.
+                Splitting into smaller parts lets you see progress part-by-part and reduces wait time significantly.
+              </div>
+
+              <!-- Controls -->
+              <div class="splitter-controls">
+                <!-- Mode toggle -->
+                <div style="display:flex;gap:8px;margin-bottom:14px">
+                  <button class="preset-btn active" id="split-mode-uniform" onclick="setSplitMode('uniform')"><i class="fa fa-equals"></i> Uniform Split</button>
+                  <button class="preset-btn" id="split-mode-custom" onclick="setSplitMode('custom')"><i class="fa fa-sliders-h"></i> Custom Ranges</button>
+                </div>
+
+                <!-- Uniform mode -->
+                <div id="uniform-split-controls">
+                  <div class="splitter-control-group">
+                    <label>Pages per part</label>
+                    <div class="splitter-presets">
+                      <button class="preset-btn active" onclick="setPreset(this,5)">5</button>
+                      <button class="preset-btn"        onclick="setPreset(this,10)">10</button>
+                      <button class="preset-btn"        onclick="setPreset(this,20)">20</button>
+                      <button class="preset-btn"        onclick="setPreset(this,50)">50</button>
+                      <input class="preset-custom" id="pages-per-input" type="number" min="1" max="500" value="5" placeholder="Custom"/>
+                    </div>
+                  </div>
+                  <div class="splitter-preview" id="splitter-preview"></div>
+                </div>
+
+                <!-- Custom ranges mode -->
+                <div id="custom-split-controls" style="display:none">
+                  <div class="splitter-control-group">
+                    <label>Define page ranges for each part</label>
+                    <div id="custom-ranges-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+                    <button class="btn btn-sm btn-secondary" onclick="addCustomRange()">
+                      <i class="fa fa-plus"></i> Add Part
+                    </button>
+                  </div>
+                  <div class="splitter-preview" id="custom-split-preview"></div>
+                </div>
+              </div>
+
+              <div class="action-row" style="margin-top:14px">
+                <button class="btn btn-primary" id="btn-split-pdf" onclick="doSplit()">
+                  <i class="fa fa-cut"></i> Split &amp; Process Parts
+                </button>
+                <button class="btn btn-secondary" onclick="showPanel('chunk')">
+                  <i class="fa fa-layer-group"></i> Process Whole PDF Instead
+                </button>
+              </div>
+
+              <!-- Split parts list -->
+              <div class="split-parts-wrap" id="split-parts-wrap" style="display:none">
+                <div class="split-parts-head">
+                  <span id="split-parts-title">Parts</span>
+                  <button class="btn btn-sm btn-primary" id="btn-run-all-splits" onclick="runAllSplits()">
+                    <i class="fa fa-play"></i> Process All Parts
+                  </button>
+                </div>
+                <div class="split-parts-list" id="split-parts-list"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ══ PANEL: Create Chunks (admin only) ══ -->
+    {% if is_admin %}
+    <div class="panel" id="panel-chunk">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-layer-group"></i></div>
+            <div>
+              <h3>Step 2 — Create Product Chunks</h3>
+              <p>AI vision extracts products, specs &amp; variants into individual markdown chunks</p>
+            </div>
+          </div>
+          <span class="badge badge-orange">Step 2 of 3</span>
+        </div>
+        <div class="panel-body">
+          <p style="font-size:13px;color:var(--grey);margin-bottom:16px">
+            Select a PDF to process. The AI model will identify product boundaries, extract
+            names, codes, specifications, variants, and ordering information.
+          </p>
+          <div class="pdf-selector-grid" id="pdf-selector-grid">
+            <p style="color:var(--grey);font-size:13px">Loading PDFs…</p>
+          </div>
+          <div class="action-row">
+            <button class="btn btn-primary" id="btn-run-chunk" onclick="runChunking()" disabled>
+              <i class="fa fa-layer-group"></i> Create Chunks
+            </button>
+            <span style="font-size:12px;color:var(--grey)">Select a PDF above to enable</span>
+          </div>
+          <div class="progress-wrap" id="chunk-progress">
+            <div class="progress-header">
+              <span id="chunk-progress-label">Extracting products…</span>
+              <span class="pct" id="chunk-pct">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="chunk-fill"></div>
+            </div>
+          </div>
+          <div class="log-output" id="chunk-log"></div>
+          <div class="next-step-bar" id="next-to-index" style="display:none">
+            <p><i class="fa fa-check-circle"></i> Chunks created! Now index for semantic search.</p>
+            <button class="btn btn-primary btn-sm" onclick="showPanel('index')">
+              Next: Index &amp; Embed <i class="fa fa-arrow-right"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ══ PANEL: Index (admin only) ══ -->
+    {% if is_admin %}
+    <div class="panel" id="panel-index">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-database"></i></div>
+            <div>
+              <h3>Step 3 — Index &amp; Embed</h3>
+              <p>Create vector embeddings from product chunks for instant semantic search</p>
+            </div>
+          </div>
+          <span class="badge badge-orange">Step 3 of 3</span>
+        </div>
+        <div class="panel-body">
+          <div class="index-options">
+            <div class="index-option-card selected" data-mode="incremental"
+                 onclick="setIndexMode('incremental')">
+              <h4><i class="fa fa-bolt" style="color:var(--orange);margin-right:6px"></i>Incremental</h4>
+              <p>Only embed new chunks not already indexed. Fast and preserves existing data.</p>
+            </div>
+            <div class="index-option-card" data-mode="reset"
+                 onclick="setIndexMode('reset')">
+              <h4><i class="fa fa-redo" style="color:#dc2626;margin-right:6px"></i>Full Reset</h4>
+              <p>Clear all existing embeddings and re-index everything from scratch.</p>
+            </div>
+          </div>
+          <div class="action-row">
+            <button class="btn btn-primary" id="btn-run-index" onclick="runIndexing()">
+              <i class="fa fa-bolt"></i> Run Indexing
+            </button>
+          </div>
+          <div class="progress-wrap" id="index-progress">
+            <div class="progress-header">
+              <span id="index-progress-label">Embedding chunks…</span>
+              <span class="pct" id="index-pct">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="index-fill"></div>
+            </div>
+          </div>
+          <div class="log-output" id="index-log"></div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ══ PANEL: Chat ══ -->
+    <div class="panel" id="panel-chat">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-comments"></i></div>
+            <div>
+              <h3>{% if is_admin %}Admin Chat{% else %}Product Chat{% endif %}</h3>
+              <p>{% if is_admin %}Test the RAG pipeline with product queries{% else %}Ask questions about catalog products{% endif %}</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <div class="admin-chat-layout">
+
+            <!-- Category sidebar -->
+            <aside class="admin-chat-sidebar">
+              <div class="admin-chat-sidebar-head"><i class="fa fa-th-list"></i> Categories</div>
+              <a class="admin-cat-item active" href="#" onclick="adminAskCat('all',this);return false;">
+                <span><i class="fa fa-border-all aci"></i>All Products</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Lubrication Equipment',this);return false;">
+                <span><i class="fa fa-oil-can aci"></i>Lubrication Equipment</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Grease Pumps',this);return false;">
+                <span><i class="fa fa-pump-soap aci"></i>Grease Pumps</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Grease Guns',this);return false;">
+                <span><i class="fa fa-tools aci"></i>Grease Guns</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Hammers',this);return false;">
+                <span><i class="fa fa-hammer aci"></i>Hammers</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Measuring Tools',this);return false;">
+                <span><i class="fa fa-ruler aci"></i>Measuring Tools</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('LED Lighting',this);return false;">
+                <span><i class="fa fa-lightbulb aci"></i>LED Lighting</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Fluid Handling',this);return false;">
+                <span><i class="fa fa-tint aci"></i>Fluid Handling</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <a class="admin-cat-item" href="#" onclick="adminAskCat('Precision Tools',this);return false;">
+                <span><i class="fa fa-drafting-compass aci"></i>Precision Tools</span>
+                <i class="fa fa-chevron-right"></i>
+              </a>
+              <div class="admin-cat-info">
+                <i class="fa fa-info-circle"></i>
+                Answers sourced from the official GROZ product catalog.
+              </div>
+            </aside>
+
+            <!-- Chat area -->
+            <div class="admin-chat-wrap">
+              <div class="admin-msgs" id="admin-msgs">
+                <div class="admin-msg bot">
+                  <div class="admin-msg-avatar">GZ</div>
+                  <div class="admin-msg-bubble">
+                    Hello{% if not is_admin %}, {{ request.user.username }}{% endif %}! Ask me anything about GROZ catalog products.
+                  </div>
+                </div>
+              </div>
+              <div class="admin-input-row">
+                <input type="text" id="admin-chat-input" placeholder="Ask a product query…"
+                       onkeydown="if(event.key==='Enter') adminChat()"/>
+                <button class="btn btn-primary" onclick="adminChat()">
+                  <i class="fa fa-paper-plane"></i> Send
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ══ Chunks Drawer ══ -->
+<div class="chunks-overlay" id="chunks-overlay" onclick="closeChunks()"></div>
+<div class="chunks-drawer" id="chunks-drawer">
+  <div class="chunks-drawer-head">
+    <div>
+      <h3 id="chunks-drawer-title">Chunks</h3>
+      <p id="chunks-drawer-sub">Product markdown chunks</p>
+    </div>
+    <button class="chunks-close" onclick="closeChunks()"><i class="fa fa-times"></i></button>
+  </div>
+  <div class="chunks-drawer-tabs" id="chunks-tabs"></div>
+  <div class="chunks-drawer-body" id="chunks-body">
+    <div class="chunks-loading"><i class="fa fa-spinner fa-spin"></i> Loading chunks…</div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const CSRF = '{{ csrf_token }}';
+  const IS_ADMIN = {{ is_admin|yesno:"true,false" }};
+</script>
+<script src="{% static 'js/dashboard.js' %}"></script>
+{% endblock %}

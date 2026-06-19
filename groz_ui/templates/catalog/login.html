@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Admin Login — GROZ Tools{% endblock %}
+
+{% block nav_center_links %}
+  <a href="/" class="nav-link">Assistant</a>
+{% endblock %}
+
+{% block top_right_link %}<a href="/admin-panel/login/" class="login-link">LOGIN</a>{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{% static 'css/login.css' %}"/>
+{% endblock %}
+
+{% block content %}
+<div class="login-page">
+  <div class="login-right">
+    <div class="login-form-wrap">
+      <div class="form-brand">
+        <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" style="height:44px;width:auto"/>
+        <div><div class="fw">GROZ</div><span class="fs">Admin Panel</span></div>
+      </div>
+      <div class="form-h">Sign In</div>
+      <div class="form-sub">Admin → Dashboard &nbsp;·&nbsp; User → Product Assistant</div>
+      {% if error %}
+      <div class="err-box"><i class="fa fa-exclamation-circle"></i> {{ error }}</div>
+      {% endif %}
+      <form method="post">
+        {% csrf_token %}
+        <div class="fg">
+          <label>Username</label>
+          <input type="text" name="username" placeholder="Enter your username" autofocus required/>
+        </div>
+        <div class="fg">
+          <label>Password</label>
+          <input type="password" name="password" placeholder="Enter your password" required/>
+        </div>
+        <button type="submit" class="login-btn"><i class="fa fa-sign-in-alt"></i> Sign In</button>
+      </form>
+      <div class="back"><a href="/"><i class="fa fa-arrow-left"></i> Back to Product Assistant</a></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

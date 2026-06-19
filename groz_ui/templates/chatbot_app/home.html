@@ -1,0 +1,248 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GROZ Tools — Industrial Products</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"/>
+  <link rel="stylesheet" href="{% static 'css/home.css' %}"/>
+</head>
+<body>
+
+<!-- ── Navbar ── -->
+<nav class="h-nav">
+  <div class="h-nav-top">
+    <div class="h-nav-top-links">
+      <a href="#">About</a>
+      <a href="#">Careers</a>
+      <a href="#">InfoCart <span class="cart-badge">0</span></a>
+      {% if user.is_authenticated %}
+      <a href="{% if user.is_staff %}/admin-panel/logout/{% else %}/logout/{% endif %}" class="h-login"><i class="fa fa-sign-out-alt" style="margin-right:4px"></i>LOGOUT</a>
+      {% else %}
+      <a href="/admin-panel/login/" class="h-login">LOGIN</a>
+      {% endif %}
+      <span class="h-region"><i class="fa fa-globe"></i> India</span>
+    </div>
+  </div>
+  <div class="h-nav-main">
+    <a href="/" class="h-brand">
+      <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" class="h-logo"/>
+      <span class="h-wordmark">GROZ</span>
+    </a>
+    <div class="h-nav-links">
+      <a href="#" class="h-nav-link">Products</a>
+      <a href="#" class="h-nav-link">Resources</a>
+      <a href="#" class="h-nav-link">Contacts</a>
+    </div>
+    <div class="h-search">
+      <input type="text" placeholder="Search entire store here..."/>
+      <button><i class="fa fa-search"></i></button>
+    </div>
+  </div>
+  <div class="h-nav-border"></div>
+</nav>
+
+<!-- ── Hero Slider ── -->
+<div class="h-slider" id="slider">
+
+  <!-- Slide 1 -->
+  <div class="h-slide active">
+    <div class="h-slide-text">
+      <p class="h-slide-sub">High Performance</p>
+      <h1>DUAL PISTON<br><span>LEVER</span><br>GREASE GUN</h1>
+      <p class="h-slide-desc">High-output greasing in less time</p>
+      <a href="#" class="h-more-btn">MORE</a>
+    </div>
+    <div class="h-slide-img">
+      <div class="h-slide-img-placeholder">
+        <i class="fa fa-tools" style="font-size:120px;color:#ddd"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 2 -->
+  <div class="h-slide">
+    <div class="h-slide-text">
+      <p class="h-slide-sub">Professional Choice</p>
+      <h1>HAND OPERATED<br><span>GREASE</span><br>PUMP</h1>
+      <p class="h-slide-desc">Professional's #1 Choice</p>
+      <a href="#" class="h-more-btn">MORE</a>
+    </div>
+    <div class="h-slide-img">
+      <div class="h-slide-img-placeholder">
+        <i class="fa fa-pump-soap" style="font-size:120px;color:#ddd"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 3 -->
+  <div class="h-slide">
+    <div class="h-slide-text">
+      <p class="h-slide-sub">Effortless Greasing</p>
+      <h1>AIR OPERATED<br><span>GREASE RATIO</span><br>PUMP</h1>
+      <p class="h-slide-desc">Effortless greasing each time</p>
+      <a href="#" class="h-more-btn">MORE</a>
+    </div>
+    <div class="h-slide-img">
+      <div class="h-slide-img-placeholder">
+        <i class="fa fa-cog" style="font-size:120px;color:#ddd"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 4 -->
+  <div class="h-slide">
+    <div class="h-slide-text">
+      <p class="h-slide-sub">Precision Engineering</p>
+      <h1>INDUSTRIAL<br><span>MEASURING</span><br>TOOLS</h1>
+      <p class="h-slide-desc">Accuracy you can trust</p>
+      <a href="#" class="h-more-btn">MORE</a>
+    </div>
+    <div class="h-slide-img">
+      <div class="h-slide-img-placeholder">
+        <i class="fa fa-ruler" style="font-size:120px;color:#ddd"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slide 5 -->
+  <div class="h-slide">
+    <div class="h-slide-text">
+      <p class="h-slide-sub">Heavy Duty</p>
+      <h1>PROFESSIONAL<br><span>HAMMER</span><br>SERIES</h1>
+      <p class="h-slide-desc">Built for the toughest jobs</p>
+      <a href="#" class="h-more-btn">MORE</a>
+    </div>
+    <div class="h-slide-img">
+      <div class="h-slide-img-placeholder">
+        <i class="fa fa-hammer" style="font-size:120px;color:#ddd"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dots -->
+  <div class="h-dots" id="slider-dots"></div>
+</div>
+
+<!-- ── Product Categories Section ── -->
+<div class="h-cats-section">
+  <div class="h-cats-inner">
+    <h2>Product <span>Categories</span></h2>
+    <div class="h-cats-grid">
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-oil-can"></i>
+        <span>Lubrication Equipment</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-pump-soap"></i>
+        <span>Grease Pumps</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-tools"></i>
+        <span>Grease Guns</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-hammer"></i>
+        <span>Hammers</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-ruler"></i>
+        <span>Measuring Tools</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-lightbulb"></i>
+        <span>LED Lighting</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-tint"></i>
+        <span>Fluid Handling</span>
+      </a>
+      <a href="#" class="h-cat-card">
+        <i class="fa fa-drafting-compass"></i>
+        <span>Precision Tools</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- ── Footer ── -->
+<footer class="h-footer">
+  <div class="h-footer-left">
+    <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" style="height:26px;width:auto;filter:brightness(0) invert(1);opacity:0.7"/>
+    <span>GROZ</span>
+    <span>© 2024 Groz Engineering Tools Pvt. Ltd. All rights reserved.</span>
+  </div>
+  <div class="h-footer-right">
+    <a href="https://groz-tools.com/in/" target="_blank">groz-tools.com</a>
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#"><i class="fab fa-linkedin"></i></a>
+    <a href="#"><i class="fab fa-youtube"></i></a>
+  </div>
+</footer>
+
+{% if user.is_authenticated and not user.is_staff %}
+<!-- ── Chatbot FAB ── -->
+<div class="chatbot-fab" id="chatbot-fab" onclick="toggleChatbot()">
+  <div class="fab-icon" id="fab-icon">
+    <i class="fa fa-robot"></i>
+  </div>
+  <span class="fab-label">Ask GROZ AI</span>
+  <div class="fab-pulse"></div>
+</div>
+
+<!-- ── Chatbot Widget ── -->
+<div class="chatbot-widget" id="chatbot-widget">
+  <div class="cw-header">
+    <div class="cw-header-left">
+      <div class="cw-avatar"><span>GZ</span></div>
+      <div>
+        <div class="cw-title">GROZ Product Assistant</div>
+        <div class="cw-sub"><span class="cw-online"></span> Online</div>
+      </div>
+    </div>
+    <div class="cw-header-actions">
+      <a href="/assistant/" class="cw-expand-btn" title="Open full assistant">
+        <i class="fa fa-expand-alt"></i>
+      </a>
+      <button class="cw-close-btn" onclick="toggleChatbot()">
+        <i class="fa fa-times"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Category tabs -->
+  <div class="cw-cats">
+    <button class="cw-cat active" onclick="cwAskCat('all',this)">All</button>
+    <button class="cw-cat" onclick="cwAskCat('Lubrication Equipment',this)">Lubrication</button>
+    <button class="cw-cat" onclick="cwAskCat('Grease Pumps',this)">Grease Pumps</button>
+    <button class="cw-cat" onclick="cwAskCat('Grease Guns',this)">Grease Guns</button>
+    <button class="cw-cat" onclick="cwAskCat('Hammers',this)">Hammers</button>
+    <button class="cw-cat" onclick="cwAskCat('Measuring Tools',this)">Measuring</button>
+    <button class="cw-cat" onclick="cwAskCat('LED Lighting',this)">LED</button>
+    <button class="cw-cat" onclick="cwAskCat('Fluid Handling',this)">Fluid</button>
+  </div>
+
+  <div class="cw-messages" id="cw-messages">
+    <div class="cw-msg bot">
+      <div class="cw-msg-avatar"><span>GZ</span></div>
+      <div class="cw-msg-bubble">
+        Hi! Ask me anything about GROZ industrial products — specs, codes, or ordering info.
+      </div>
+    </div>
+  </div>
+
+  <div class="cw-input-row">
+    <input type="text" id="cw-input" placeholder="Ask about any GROZ product..."
+           onkeydown="if(event.key==='Enter') cwSend()"/>
+    <button class="cw-send" onclick="cwSend()"><i class="fa fa-paper-plane"></i></button>
+  </div>
+</div>
+{% endif %}
+
+<script src="{% static 'js/home.js' %}"></script>
+</body>
+</html>
