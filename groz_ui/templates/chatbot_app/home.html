@@ -32,11 +32,7 @@
       <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" class="h-logo"/>
       <span class="h-wordmark">GROZ</span>
     </a>
-    <div class="h-nav-links">
-      <a href="#" class="h-nav-link">Products</a>
-      <a href="#" class="h-nav-link">Resources</a>
-      <a href="#" class="h-nav-link">Contacts</a>
-    </div>
+    
     <div class="h-search">
       <input type="text" placeholder="Search entire store here..."/>
       <button><i class="fa fa-search"></i></button>
@@ -184,7 +180,6 @@
   </div>
 </footer>
 
-{% if user.is_authenticated and not user.is_staff %}
 <!-- ── Chatbot FAB ── -->
 <div class="chatbot-fab" id="chatbot-fab" onclick="toggleChatbot()">
   <div class="fab-icon" id="fab-icon">
@@ -241,7 +236,6 @@
     <button class="cw-send" onclick="cwSend()"><i class="fa fa-paper-plane"></i></button>
   </div>
 </div>
-{% endif %}
 
 <script src="{% static 'js/home.js' %}"></script>
 </body>

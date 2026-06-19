@@ -25,10 +25,8 @@
 
   <div class="nav-links">
     {% block nav_center_links %}
-        <a href="#" class="nav-link">Products</a>
-    <a href="#" class="nav-link">Resources</a>
-    <a href="#" class="nav-link">Contacts</a>
-    <a href="/assistant/" class="nav-link active">Assistant</a>
+
+    <!-- <a href="/assistant/" class="nav-link active">Assistant</a> -->
 
     {% endblock %}
   </div>
@@ -36,12 +34,12 @@
   {% block nav_right %}
   <div class="nav-right">
     <div class="nav-util">
-      <a href="#">About</a>
+
       {% block top_right_link %}
       {% if user.is_authenticated %}
       <a href="{% if user.is_staff %}/admin-panel/logout/{% else %}/logout/{% endif %}" class="login-link"><i class="fa fa-sign-out-alt"></i> Logout</a>
       {% else %}
-      <a href="/admin-panel/login/" class="login-link">LOGIN</a>
+
       {% endif %}
       {% endblock %}
     </div>

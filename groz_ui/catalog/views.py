@@ -65,15 +65,15 @@ def admin_login(request):
         user = authenticate(request,
                             username=request.POST.get('username'),
                             password=request.POST.get('password'))
-        if user and user.is_active:
+        if user and user.is_active and user.is_staff:
             login(request, user)
-            if user.is_staff:
-                panel = request.GET.get('next_panel', '')
-                url = '/admin-panel/' + (f'?panel={panel}' if panel else '')
-            else:
-                url = '/'
+            panel = request.GET.get('next_panel', '')
+            url = '/admin-panel/' + (f'?panel={panel}' if panel else '')
             return redirect(url)
-        error = 'Invalid credentials.'
+        elif user and user.is_active and not user.is_staff:
+            error = 'Access denied. This login is for administrators only.'
+        else:
+            error = 'Invalid credentials.'
     return render(request, 'catalog/login.html', {'error': error})
 
 
@@ -236,6 +236,8 @@ def catalog_stats(request):
 
 # ── API: PDF page count ────────────────────────────────────────────────
 
+_page_count_cache = {}
+
 @login_required
 def pdf_page_count(request):
     if not request.user.is_staff:
@@ -246,10 +248,16 @@ def pdf_page_count(request):
     pdf_path = PROJECT_ROOT / 'input' / filename
     if not pdf_path.exists():
         return JsonResponse({'error': 'File not found.'}, status=404)
+
+    cache_key = f"{filename}:{pdf_path.stat().st_mtime}"
+    if cache_key in _page_count_cache:
+        return JsonResponse({'pages': _page_count_cache[cache_key], 'filename': filename})
+
     try:
         from pypdf import PdfReader
-        reader = PdfReader(str(pdf_path))
-        return JsonResponse({'pages': len(reader.pages), 'filename': filename})
+        pages = len(PdfReader(str(pdf_path)).pages)
+        _page_count_cache[cache_key] = pages
+        return JsonResponse({'pages': pages, 'filename': filename})
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -463,3 +471,84 @@ def list_chunks(request):
             'content': f.read_text(encoding='utf-8'),
         })
     return JsonResponse({'chunks': chunks})
+
+
+# ── API: Get / Save API Keys ──────────────────────────────────────────────────
+
+KEY_NAMES = ['GROQ_API_KEY', 'GEMINI_API_KEY_1', 'GEMINI_API_KEY_2', 'GEMINI_API_KEY_3']
+
+
+def _env_path():
+    return PROJECT_ROOT / '.env'
+
+
+def _read_env_key(name):
+    """Read a single key value from .env file."""
+    env = _env_path()
+    if not env.exists():
+        return ''
+    for line in env.read_text().splitlines():
+        line = line.strip()
+        if line.startswith(f'{name}='):
+            return line[len(name) + 1:].strip()
+    return ''
+
+
+def _write_env_key(name, value):
+    """Update or insert a key in the .env file."""
+    env = _env_path()
+    text = env.read_text() if env.exists() else ''
+    lines = text.splitlines(keepends=True)
+    found = False
+    new_lines = []
+    for line in lines:
+        if line.strip().startswith(f'{name}='):
+            new_lines.append(f'{name}={value}\n')
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f'{name}={value}\n')
+    env.write_text(''.join(new_lines))
+
+
+@login_required
+def get_api_keys(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    from .models import ApiKey
+    keys = {}
+    for name in KEY_NAMES:
+        try:
+            obj = ApiKey.objects.get(name=name)
+            val = obj.value
+        except ApiKey.DoesNotExist:
+            val = _read_env_key(name)
+        # Mask all but last 4 chars for display
+        keys[name] = ('•' * (len(val) - 4) + val[-4:]) if len(val) > 4 else ('•' * len(val))
+    return JsonResponse({'keys': keys})
+
+
+@login_required
+@require_POST
+def save_api_keys(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    from .models import ApiKey
+    saved = []
+    for name in KEY_NAMES:
+        raw = body.get(name, '').strip()
+        if not raw or set(raw) == {'•'}:
+            continue  # skip unchanged masked values
+        ApiKey.objects.update_or_create(name=name, defaults={'value': raw})
+        _write_env_key(name, raw)
+        # Also set in current process env so running pipeline picks it up
+        os.environ[name] = raw
+        saved.append(name)
+
+    return JsonResponse({'message': f'Saved: {", ".join(saved) if saved else "nothing changed"}', 'saved': saved})
