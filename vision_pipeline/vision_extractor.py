@@ -20,185 +20,85 @@ from groq import Groq
 
 # ── Prompt ───────────────────────────────────────────────────────────────────
 
-VISION_PROMPT = """You are an expert industrial product catalog parser with perfect vision and deep knowledge of industrial tools, lubrication equipment, LED lighting, fluid handling systems, and precision instruments.
+VISION_PROMPT = """Expert industrial catalog parser. Extract ALL product data into JSON.
 
-Analyze this catalog page image and extract EVERY piece of information into structured JSON.
-Your goal: capture 100% of visible data so a chatbot can answer ANY question about these products without needing the original PDF.
+## STEP 1 — PAGE STRUCTURE
+Identify: section banner (exact text), number of distinct product headings, page number.
 
----
+## STEP 2 — FAMILY vs CHILD
+NEW HEADING = NEW FAMILY. Scan full page, count headings. Each heading = one array element.
 
-## STEP 1 — READ PAGE STRUCTURE FIRST
+Separate families when: different heading text, different product image, different function.
+Children within one family when: same heading + multiple code badges, same product in different sizes sharing one description, multiple codes under one heading, ordering table with multiple part numbers.
 
-Before touching products, identify:
-- The SECTION BANNER (large coloured header bar e.g. "GREASE PUMPS & ACCESSORIES", "HAMMERS") — read it EXACTLY, never infer
-- How many separate product areas exist — each with its OWN heading block and OWN product image
-- Page number if visible
+## STEP 3 — RULES
 
----
+**Product codes:** Alphanumeric label in coloured badge. Read every character exactly.
+NOT codes: BS, ISO, DIN, ANSI, ASME, BIS, CE, EN, IEC, NF, JIS, GB, UL, CSA, IP, ATEX — these are certifications.
 
-## STEP 2 — FAMILY vs CHILD (most important decision)
-
-**Create SEPARATE families (separate array elements) when:**
-- Different heading text AND different product image → ALWAYS separate families
-- Completely different product function (e.g. ratio pump vs bucket pump on same page) → ALWAYS separate
-- Each has its own description block → separate
-- When in doubt → separate families
-
-**Create CHILDREN inside one family when:**
-- Same heading + multiple coloured code badges (GP0, GP1, GP2...) → ONE family, each badge = one child
-- Same product type, different sizes, sharing one description → ONE family, each size = one child
-- Multiple codes sharing one ordering table → ONE family, multiple children
-
----
-
-## STEP 3 — EXTRACTION RULES
-
-**Product codes:**
-- Short alphanumeric label in a coloured badge = product code — read EVERY character exactly with hyphens and slashes
-- Labels starting with standards prefixes = CERTIFICATIONS, NEVER product codes:
-  BS, ISO, DIN, ANSI, ASME, BIS, CE, EN, IEC, NF, JIS, GB, UL, CSA, IP, ATEX
-
-**Specifications — use dedicated fields, never dump into description:**
-- Flow rate / output rate → specifications.flow_rate (e.g. "1.1 KG/MIN")
-- Pressure values → specifications.pressure
-- Motor/cylinder size → specifications.motor_size
-- Ratio → specifications.ratio (e.g. "50:1")
-- Voltage / battery → specifications.voltage / specifications.battery
-- Capacity → specifications.capacity
-- IP rating → specifications.ip_rating
-- Thread → specifications.thread
-- Lumens, runtime → specifications.lumens, specifications.runtime
-- Weight at family level → specifications.weight
+**Specs — use dedicated fields:**
+flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, thread, lumens, runtime, weight, operating_temp, connection_type. Never dump specs into description.
 
 **Children — NEVER empty:**
-- Every family MUST have at least one child
-- Single-variant product → one child with same code as family
-- All sizes, ordering tables, part numbers → ALWAYS inside children, never at family level
+- Min 1 child per family. Single product → child with same code as family.
+- Sizes/ordering tables → always in children, never at family level.
+- Text under badge → child's product_name (e.g. "750cc High capacity", "Popular in Australia & NZ").
+- SIZES list with no per-row codes → one child per size row, size = product_name, family code = product_code.
+- Shared features/description → family level only, don't repeat in children.
 
-**Capture everything visible:**
-- Section banner → page_metadata.catalog_section (exact text, do not infer)
-- category field → same as catalog_section text, not a generic invented name
-- Badges: NEW, Bestseller, Popular in EUROPE, Patent Pending → notes
-- Safety warnings, fine print → safety_warnings
-- Warranty, country of origin → dedicated fields
-- Any text not fitting schema → raw_text_blocks (nothing dropped silently)
-- ★ star on a size row → "bestseller": true on that row
-- □ symbol on a row → "made_to_order": true on that row
-
----
+**Capture everything:**
+- Section banner → page_metadata.catalog_section (exact, never infer)
+- category = catalog_section text exactly
+- NEW, Bestseller, Popular in EUROPE, Patent Pending → notes
+- ★ on row → "bestseller": true; □ on row → "made_to_order": true
+- Safety warnings, warranty, country of origin → dedicated fields
+- Unclassified text → raw_text_blocks
 
 ## JSON SCHEMA
+Return JSON array only. Each element = one product family.
 
-Return a JSON array. Each element = one product FAMILY.
-
-[
-  {
-    "page_metadata": {
-      "page_number": "page number if visible, else null",
-      "catalog_section": "Exact section banner text e.g. GREASE PUMPS & ACCESSORIES",
-      "brand": "Brand name visible e.g. GROZ"
-    },
-    "product_name": "Exact family name from heading",
-    "product_code": "Primary family code — empty string if none",
-    "category": "Exact section banner text — same as catalog_section, never invent a category",
-    "sub_category": "More specific type e.g. Air Operated Pumps, Ball Peen Hammers",
-    "description": "Full shared description — every sentence, do not summarize",
-    "features": ["every shared feature bullet — exact wording"],
-    "utilities": ["every application/utility bullet"],
-    "materials": {
-      "head_material": "",
-      "handle_material": "",
-      "body_material": "",
-      "finish": "",
-      "other": ""
-    },
-    "specifications": {
-      "standard": "all standards listed e.g. BS 876, DIN 1041",
-      "hardness": "",
-      "ratio": "",
-      "capacity": "",
-      "pressure": "",
-      "flow_rate": "",
-      "motor_size": "",
-      "voltage": "",
-      "battery": "",
-      "lumens": "",
-      "runtime": "",
-      "ip_rating": "",
-      "thread": "",
-      "weight": "",
-      "operating_temp": "",
-      "connection_type": "",
-      "other": "any spec not covered above"
-    },
-    "certifications": [
-      {"standard": "BS 876", "description": "what it certifies if explained on page"}
-    ],
-    "compatibility": {
-      "fits_with": [],
-      "replacement_parts": [],
-      "works_with": ""
-    },
-    "safety_warnings": [],
-    "warranty": "",
-    "country_of_origin": "",
-    "packaging": {
-      "unit_quantity": "",
-      "box_quantity": "",
-      "packaging_type": ""
-    },
-    "notes": "Bestseller, NEW, Popular in EUROPE, Patent Pending, footnotes — all combined",
-    "raw_text_blocks": ["any visible text that does not fit the fields above"],
-    "children": [
-      {
-        "product_code": "GP0",
-        "product_name": "Fits 13.5 kg drums",
-        "description": "variant-specific description — empty string if same as family",
-        "features": [],
-        "materials": {},
-        "specifications": {},
-        "color": "",
-        "sizes": [
-          {
-            "size": "100 gm",
-            "dimensions": "11\" (280 mm)",
-            "cat_no": "",
-            "ean": "",
-            "bestseller": false,
-            "new": false,
-            "made_to_order": false
-          }
-        ],
-        "ordering_table": [
-          {
-            "Cat_No": "",
-            "Ord_No": "",
-            "Size": "",
-            "Weight": "",
-            "Box_Qty": "",
-            "EAN": "",
-            "Price": ""
-          }
-        ],
-        "accessories_included": [],
-        "notes": ""
-      }
-    ]
-  }
-]
-
----
+[{
+  "page_metadata": {"page_number": null, "catalog_section": "", "brand": ""},
+  "product_name": "",
+  "product_code": "",
+  "category": "",
+  "sub_category": "",
+  "description": "",
+  "features": [],
+  "utilities": [],
+  "materials": {"head_material": "", "handle_material": "", "body_material": "", "finish": "", "other": ""},
+  "specifications": {"standard": "", "hardness": "", "ratio": "", "capacity": "", "pressure": "", "flow_rate": "", "motor_size": "", "voltage": "", "battery": "", "lumens": "", "runtime": "", "ip_rating": "", "thread": "", "weight": "", "operating_temp": "", "connection_type": "", "other": ""},
+  "certifications": [{"standard": "", "description": ""}],
+  "compatibility": {"fits_with": [], "replacement_parts": [], "works_with": ""},
+  "safety_warnings": [],
+  "warranty": "",
+  "country_of_origin": "",
+  "packaging": {"unit_quantity": "", "box_quantity": "", "packaging_type": ""},
+  "notes": "",
+  "raw_text_blocks": [],
+  "children": [{
+    "product_code": "",
+    "product_name": "",
+    "description": "",
+    "features": [],
+    "materials": {},
+    "specifications": {},
+    "color": "",
+    "sizes": [{"size": "", "dimensions": "", "cat_no": "", "ean": "", "bestseller": false, "new": false, "made_to_order": false}],
+    "ordering_table": [{"Cat_No": "", "Ord_No": "", "Size": "", "Weight": "", "Box_Qty": "", "EAN": "", "Price": ""}],
+    "accessories_included": [],
+    "notes": ""
+  }]
+}]
 
 ## FINAL RULES
-
-1. children is NEVER empty — minimum one child per family
-2. Capture EVERY size and ordering row — never skip or truncate
-3. Read product codes character by character — never guess or abbreviate
-4. category = exact section banner text from the page — never invent names like "Lubrication Equipment"
-5. Different heading + different image = always separate families, even on same page
-6. Specs like flow rate, pressure, ratio belong in specifications fields — not in description
-7. Return ONLY the JSON array — no markdown fences, no explanation
-8. If page is a cover, TOC, or section divider with no products, return []
+1. children NEVER empty — min 1 child per family
+2. Capture EVERY size and ordering row
+3. Read product codes character by character
+4. category = exact section banner text
+5. Different heading + image = separate families
+6. Return ONLY the JSON array — no markdown, no explanation
+7. Cover/TOC/divider page with no products → return []
 """
 
 
