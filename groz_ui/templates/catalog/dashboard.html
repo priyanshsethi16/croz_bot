@@ -290,17 +290,99 @@
               <span class="ph-sub" id="preview-sub">Page preview</span>
             </div>
             <div class="pdf-preview-body">
-              <div class="pdf-thumb-strip" id="pdf-thumb-strip">
-                <div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Loading pages…</div>
-              </div>
-              <div class="pdf-page-viewer" id="pdf-page-viewer">
-                <div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px">
-                  <i class="fa fa-hand-pointer"></i> Select a page to preview
+              <div class="pdf-preview-main">
+                <div class="pdf-thumb-strip" id="pdf-thumb-strip">
+                  <div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Loading pages…</div>
                 </div>
-                <div class="pdf-viewer-scroll">
-                  <div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div>
+                <div class="pdf-page-viewer" id="pdf-page-viewer">
+                  <div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px">
+                    <i class="fa fa-hand-pointer"></i> Select a page to preview
+                  </div>
+                  <div class="pdf-viewer-scroll">
+                    <div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div>
+                  </div>
                 </div>
               </div>
+
+              <!-- Split controls stay beside the preview so ranges can be chosen while reading pages. -->
+              <aside class="splitter-section splitter-preview-panel" id="splitter-section" style="display:none">
+                <div class="splitter-header">
+                  <div class="splitter-header-left">
+                    <div class="splitter-icon"><i class="fa fa-cut"></i></div>
+                    <div>
+                      <h4>PDF Page Splitter <span class="splitter-optional">Optional</span></h4>
+                      <p>Read pages and define split ranges together</p>
+                    </div>
+                  </div>
+                  <button class="splitter-collapse-btn" id="btn-toggle-splitter" onclick="toggleSplitter()" title="Collapse splitter">
+                    <i class="fa fa-chevron-up"></i>
+                  </button>
+                </div>
+
+                <div class="splitter-body" id="splitter-body">
+                  <div class="splitter-info-bar" id="splitter-info-bar">
+                    <i class="fa fa-file-pdf" style="color:var(--orange)"></i>
+                    <span id="splitter-pdf-name"></span>
+                    <span class="splitter-pages-badge" id="splitter-pages-badge"><i class="fa fa-spinner fa-spin"></i></span>
+                  </div>
+
+                  <div class="splitter-why">
+                    <i class="fa fa-lightbulb"></i>
+                    <span><strong>Why split?</strong> Smaller parts process faster and show progress part-by-part.</span>
+                  </div>
+
+                  <div class="splitter-controls">
+                    <div class="split-mode-toggle">
+                      <button class="preset-btn active" id="split-mode-uniform" onclick="setSplitMode('uniform')"><i class="fa fa-equals"></i> Uniform</button>
+                      <button class="preset-btn" id="split-mode-custom" onclick="setSplitMode('custom')"><i class="fa fa-sliders-h"></i> Custom Ranges</button>
+                    </div>
+
+                    <div id="uniform-split-controls">
+                      <div class="splitter-control-group">
+                        <label>Pages per part</label>
+                        <div class="splitter-presets">
+                          <button class="preset-btn active" onclick="setPreset(this,5)">5</button>
+                          <button class="preset-btn" onclick="setPreset(this,10)">10</button>
+                          <button class="preset-btn" onclick="setPreset(this,20)">20</button>
+                          <button class="preset-btn" onclick="setPreset(this,50)">50</button>
+                          <input class="preset-custom" id="pages-per-input" type="number" min="1" max="500" value="5" placeholder="Custom"/>
+                        </div>
+                      </div>
+                      <div class="splitter-preview" id="splitter-preview"></div>
+                    </div>
+
+                    <div id="custom-split-controls" style="display:none">
+                      <div class="splitter-control-group">
+                        <label>Define page ranges for each part</label>
+                        <div id="custom-ranges-list" class="custom-ranges-list"></div>
+                        <button class="btn btn-sm btn-secondary" onclick="addCustomRange()">
+                          <i class="fa fa-plus"></i> Add Part
+                        </button>
+                      </div>
+                      <div class="splitter-preview" id="custom-split-preview"></div>
+                    </div>
+                  </div>
+
+                  <div class="splitter-actions">
+                    <button class="btn btn-primary" id="btn-split-pdf" onclick="doSplit()">
+                      <i class="fa fa-cut"></i> Split &amp; Process Parts
+                    </button>
+                    <button class="btn btn-secondary" onclick="showPanel('chunk')">
+                      <i class="fa fa-layer-group"></i> Process Whole PDF
+                    </button>
+                  </div>
+
+                  <div class="split-parts-wrap" id="split-parts-wrap" style="display:none">
+                    <div class="split-parts-head">
+                      <span id="split-parts-title">Parts</span>
+                      <button class="btn btn-sm btn-primary" id="btn-run-all-splits" onclick="runAllSplits()">
+                        <i class="fa fa-play"></i> Process All
+                      </button>
+                    </div>
+                    <div class="split-parts-list" id="split-parts-list"></div>
+                  </div>
+                </div>
+              </aside>
             </div>
           </div>
 
@@ -311,93 +393,6 @@
             </button>
           </div>
 
-          <!-- ── Text Splitter — appears after upload ── -->
-          <div class="splitter-section" id="splitter-section" style="display:none">
-            <div class="splitter-header">
-              <div class="splitter-header-left">
-                <div class="splitter-icon"><i class="fa fa-cut"></i></div>
-                <div>
-                  <h4>PDF Page Splitter <span style="background:var(--orange);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;margin-left:6px;vertical-align:middle">Optional</span></h4>
-                  <p>Split this PDF into smaller page-range parts and process each one sequentially</p>
-                </div>
-              </div>
-              <button class="btn btn-sm btn-secondary" id="btn-toggle-splitter" onclick="toggleSplitter()">
-                <i class="fa fa-chevron-up"></i> Collapse
-              </button>
-            </div>
-
-            <div class="splitter-body" id="splitter-body">
-              <!-- PDF info bar -->
-              <div class="splitter-info-bar" id="splitter-info-bar">
-                <i class="fa fa-file-pdf" style="color:var(--orange)"></i>
-                <span id="splitter-pdf-name"></span>
-                <span class="splitter-pages-badge" id="splitter-pages-badge"><i class="fa fa-spinner fa-spin"></i></span>
-              </div>
-
-              <!-- Why use this -->
-              <div style="background:#f8f8f8;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:var(--grey);line-height:1.7">
-                <i class="fa fa-lightbulb" style="color:var(--orange);margin-right:6px"></i>
-                <strong style="color:var(--dark)">Why split?</strong> Large PDFs (50+ pages) take a long time to process in one go.
-                Splitting into smaller parts lets you see progress part-by-part and reduces wait time significantly.
-              </div>
-
-              <!-- Controls -->
-              <div class="splitter-controls">
-                <!-- Mode toggle -->
-                <div style="display:flex;gap:8px;margin-bottom:14px">
-                  <button class="preset-btn active" id="split-mode-uniform" onclick="setSplitMode('uniform')"><i class="fa fa-equals"></i> Uniform Split</button>
-                  <button class="preset-btn" id="split-mode-custom" onclick="setSplitMode('custom')"><i class="fa fa-sliders-h"></i> Custom Ranges</button>
-                </div>
-
-                <!-- Uniform mode -->
-                <div id="uniform-split-controls">
-                  <div class="splitter-control-group">
-                    <label>Pages per part</label>
-                    <div class="splitter-presets">
-                      <button class="preset-btn active" onclick="setPreset(this,5)">5</button>
-                      <button class="preset-btn"        onclick="setPreset(this,10)">10</button>
-                      <button class="preset-btn"        onclick="setPreset(this,20)">20</button>
-                      <button class="preset-btn"        onclick="setPreset(this,50)">50</button>
-                      <input class="preset-custom" id="pages-per-input" type="number" min="1" max="500" value="5" placeholder="Custom"/>
-                    </div>
-                  </div>
-                  <div class="splitter-preview" id="splitter-preview"></div>
-                </div>
-
-                <!-- Custom ranges mode -->
-                <div id="custom-split-controls" style="display:none">
-                  <div class="splitter-control-group">
-                    <label>Define page ranges for each part</label>
-                    <div id="custom-ranges-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
-                    <button class="btn btn-sm btn-secondary" onclick="addCustomRange()">
-                      <i class="fa fa-plus"></i> Add Part
-                    </button>
-                  </div>
-                  <div class="splitter-preview" id="custom-split-preview"></div>
-                </div>
-              </div>
-
-              <div class="action-row" style="margin-top:14px">
-                <button class="btn btn-primary" id="btn-split-pdf" onclick="doSplit()">
-                  <i class="fa fa-cut"></i> Split &amp; Process Parts
-                </button>
-                <button class="btn btn-secondary" onclick="showPanel('chunk')">
-                  <i class="fa fa-layer-group"></i> Process Whole PDF Instead
-                </button>
-              </div>
-
-              <!-- Split parts list -->
-              <div class="split-parts-wrap" id="split-parts-wrap" style="display:none">
-                <div class="split-parts-head">
-                  <span id="split-parts-title">Parts</span>
-                  <button class="btn btn-sm btn-primary" id="btn-run-all-splits" onclick="runAllSplits()">
-                    <i class="fa fa-play"></i> Process All Parts
-                  </button>
-                </div>
-                <div class="split-parts-list" id="split-parts-list"></div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -75,7 +75,6 @@ async function uploadFile(file) {
       showToast(data.message || 'Uploaded successfully!', 'success');
       refreshStats();
       document.getElementById('next-to-chunk').style.display = 'flex';
-      showSplitterForPdf(file.name);
       loadPdfPreview(file.name);
     }
   } catch(e) {
@@ -123,6 +122,7 @@ async function loadPdfPreview(filename) {
   const subEl   = document.getElementById('preview-sub');
 
   section.style.display = 'block';
+  showSplitterForPdf(filename);
   nameEl.textContent    = filename;
   countEl.textContent   = '';
   subEl.textContent     = 'Loading pages…';
@@ -148,7 +148,7 @@ async function loadPdfPreview(filename) {
       </div>`).join('');
 
     window._previewPages = data.pages;
-    if (data.pages.length) selectPreviewPage(0);
+    if (data.pages.length) renderContinuousPreview(data.pages);
 
   } catch(e) {
     strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Failed to load preview.</div>';
@@ -156,10 +156,9 @@ async function loadPdfPreview(filename) {
 }
 
 let _zoomLevel = 100;
+let _previewScrollFrame = null;
 
-function selectPreviewPage(idx) {
-  const pages  = window._previewPages || [];
-  if (!pages[idx]) return;
+function renderContinuousPreview(pages) {
   _zoomLevel = 100;
   const viewer = document.getElementById('pdf-page-viewer');
   viewer.innerHTML = `
@@ -168,25 +167,82 @@ function selectPreviewPage(idx) {
       <span class="zoom-level" id="zoom-level-label">100%</span>
       <button class="zoom-btn" onclick="adjustZoom(25)" title="Zoom in"><i class="fa fa-plus"></i></button>
       <button class="zoom-btn" onclick="adjustZoom(0)" title="Reset zoom"><i class="fa fa-compress-arrows-alt"></i></button>
-      <span class="page-label">Page ${pages[idx].num} of ${pages.length}</span>
+      <span class="scroll-hint"><i class="fa fa-mouse"></i> Scroll continuously</span>
+      <span class="page-label" id="preview-current-page">Page ${pages[0].num} of ${pages.length}</span>
     </div>
     <div class="pdf-viewer-scroll" id="viewer-scroll">
-      <img src="${pages[idx].full}" id="viewer-img" alt="Page ${pages[idx].num}" style="width:100%;max-width:100%;height:auto"/>
+      <div class="pdf-page-stack" id="pdf-page-stack">
+        ${pages.map((page, idx) => `
+          <figure class="pdf-page-sheet" id="preview-page-${idx}" data-page-index="${idx}">
+            <img src="${page.full}" alt="Page ${page.num}" loading="${idx < 2 ? 'eager' : 'lazy'}"/>
+            <figcaption>Page ${page.num}</figcaption>
+          </figure>`).join('')}
+      </div>
     </div>`;
+
+  const scroll = document.getElementById('viewer-scroll');
+  scroll.addEventListener('scroll', () => {
+    if (_previewScrollFrame) return;
+    _previewScrollFrame = requestAnimationFrame(() => {
+      _previewScrollFrame = null;
+      syncPreviewPageFromScroll();
+    });
+  }, { passive: true });
+  setActivePreviewPage(0);
+}
+
+function selectPreviewPage(idx) {
+  const pages  = window._previewPages || [];
+  if (!pages[idx]) return;
+  const scroll = document.getElementById('viewer-scroll');
+  const page   = document.getElementById('preview-page-' + idx);
+  const first  = document.getElementById('preview-page-0');
+  if (!scroll || !page || !first) return;
+  scroll.scrollTo({ top: page.offsetTop - first.offsetTop, behavior: 'smooth' });
+  setActivePreviewPage(idx);
+}
+
+function syncPreviewPageFromScroll() {
+  const scroll = document.getElementById('viewer-scroll');
+  const sheets = [...document.querySelectorAll('.pdf-page-sheet')];
+  if (!scroll || !sheets.length) return;
+
+  const firstOffset = sheets[0].offsetTop;
+  const marker = scroll.scrollTop + Math.min(120, scroll.clientHeight * 0.25);
+  let activeIdx = 0;
+  sheets.forEach((sheet, idx) => {
+    if (sheet.offsetTop - firstOffset <= marker) activeIdx = idx;
+  });
+  setActivePreviewPage(activeIdx);
+}
+
+function setActivePreviewPage(idx) {
+  const pages = window._previewPages || [];
+  if (!pages[idx]) return;
   document.querySelectorAll('.pdf-thumb-item').forEach((el, i) => {
     el.classList.toggle('active', i === idx);
   });
-  document.getElementById('thumb-' + idx)?.scrollIntoView({ block: 'nearest' });
+  const label = document.getElementById('preview-current-page');
+  if (label) label.textContent = `Page ${pages[idx].num} of ${pages.length}`;
+
+  const strip = document.getElementById('pdf-thumb-strip');
+  const thumb = document.getElementById('thumb-' + idx);
+  if (strip && thumb) {
+    if (thumb.offsetTop < strip.scrollTop) {
+      strip.scrollTop = thumb.offsetTop;
+    } else if (thumb.offsetTop + thumb.offsetHeight > strip.scrollTop + strip.clientHeight) {
+      strip.scrollTop = thumb.offsetTop + thumb.offsetHeight - strip.clientHeight;
+    }
+  }
 }
 
 function adjustZoom(delta) {
-  const img   = document.getElementById('viewer-img');
+  const stack = document.getElementById('pdf-page-stack');
   const label = document.getElementById('zoom-level-label');
-  if (!img) return;
+  if (!stack) return;
   if (delta === 0) { _zoomLevel = 100; }
   else { _zoomLevel = Math.min(300, Math.max(25, _zoomLevel + delta)); }
-  img.style.width    = _zoomLevel + '%';
-  img.style.maxWidth = 'none';
+  stack.style.width = _zoomLevel + '%';
   label.textContent  = _zoomLevel + '%';
 }
 
@@ -441,6 +497,7 @@ async function refreshStats() {
 let _splitMode = 'uniform'; // 'uniform' | 'custom'
 let _customRangeCount = 0;
 let _totalPages = 0;
+let _splitterOpen = true;
 
 function setSplitMode(mode) {
   _splitMode = mode;
@@ -457,18 +514,17 @@ function addCustomRange() {
   const list = document.getElementById('custom-ranges-list');
   const row  = document.createElement('div');
   row.id = `cr-row-${idx}`;
-  row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fafafa;border:1.5px solid var(--border);border-radius:8px';
+  row.className = 'custom-range-row';
   row.innerHTML = `
-    <span style="font-size:12px;font-weight:700;color:var(--grey);min-width:52px">Part ${idx}</span>
-    <span style="font-size:12px;color:var(--grey)">Pages</span>
+    <span class="custom-range-part">Part ${idx}</span>
     <input type="number" id="cr-start-${idx}" min="1" value="" placeholder="From"
-      style="width:70px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;outline:none"
+      class="custom-range-input"
       oninput="_validateCustomRanges()"/>
-    <span style="font-size:12px;color:var(--grey)">to</span>
+    <span class="custom-range-to">to</span>
     <input type="number" id="cr-end-${idx}" min="1" value="" placeholder="To"
-      style="width:70px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;outline:none"
+      class="custom-range-input"
       oninput="_validateCustomRanges()"/>
-    <button onclick="removeCustomRange(${idx})" style="margin-left:auto;background:none;border:none;color:#ccc;cursor:pointer;font-size:14px;padding:2px 6px" title="Remove">
+    <button class="custom-range-remove" onclick="removeCustomRange(${idx})" title="Remove">
       <i class="fa fa-times"></i>
     </button>`;
   list.appendChild(row);
@@ -537,7 +593,9 @@ function showSplitterForPdf(filename) {
   _splitStem  = filename.replace(/\.pdf$/i, '');
   _splitParts = [];
 
-  document.getElementById('splitter-section').style.display = 'block';
+  const splitterSection = document.getElementById('splitter-section');
+  splitterSection.style.display = 'block';
+  splitterSection.classList.remove('collapsed');
   _splitterOpen = true;
   _splitMode = 'uniform';
   _customRangeCount = 0;
@@ -546,11 +604,17 @@ function showSplitterForPdf(filename) {
   document.getElementById('split-mode-custom').classList.remove('active');
   document.getElementById('uniform-split-controls').style.display = 'block';
   document.getElementById('custom-split-controls').style.display  = 'none';
+  document.querySelectorAll('.splitter-presets .preset-btn').forEach((button, idx) => {
+    button.classList.toggle('active', idx === 0);
+  });
+  document.getElementById('pages-per-input').value = 5;
+  _pagesPerPart = 5;
   document.getElementById('custom-ranges-list').innerHTML = '';
   document.getElementById('custom-split-preview').className = 'splitter-preview';
   document.getElementById('splitter-body').style.display = 'block';
-  document.getElementById('btn-toggle-splitter').innerHTML =
-    '<i class="fa fa-chevron-up"></i> Collapse';
+  const toggleButton = document.getElementById('btn-toggle-splitter');
+  toggleButton.innerHTML = '<i class="fa fa-chevron-up"></i>';
+  toggleButton.title = 'Collapse splitter';
   document.getElementById('split-parts-wrap').style.display = 'none';
   document.getElementById('split-parts-list').innerHTML = '';
   document.getElementById('splitter-preview').className = 'splitter-preview';
@@ -568,9 +632,11 @@ let _pagesPerPart = 5;
 
 function toggleSplitter() {
   _splitterOpen = !_splitterOpen;
+  document.getElementById('splitter-section').classList.toggle('collapsed', !_splitterOpen);
   document.getElementById('splitter-body').style.display    = _splitterOpen ? 'block' : 'none';
-  document.getElementById('btn-toggle-splitter').innerHTML  =
-    `<i class="fa fa-chevron-${_splitterOpen?'up':'down'}" id="splitter-chevron"></i> ${_splitterOpen?'Collapse':'Expand'}`;
+  const toggleButton = document.getElementById('btn-toggle-splitter');
+  toggleButton.innerHTML = `<i class="fa fa-chevron-${_splitterOpen?'up':'down'}"></i>`;
+  toggleButton.title = _splitterOpen ? 'Collapse splitter' : 'Expand splitter';
   if (_splitterOpen && selectedPdf) _loadPageCount(selectedPdf);
 }
 
@@ -598,7 +664,7 @@ async function _loadPageCount(pdf) {
 }
 
 function setPreset(btn, val) {
-  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.splitter-presets .preset-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('pages-per-input').value = val;
   _pagesPerPart = val;
@@ -614,7 +680,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const v = parseInt(customInput.value);
       if (v > 0) {
         _pagesPerPart = v;
-        document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.splitter-presets .preset-btn').forEach(b => b.classList.remove('active'));
         const badge = document.getElementById('splitter-pages-badge').textContent;
         const total  = parseInt(badge);
         if (!isNaN(total)) _updateSplitterPreview(total);
