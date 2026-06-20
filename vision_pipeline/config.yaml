@@ -1,8 +1,8 @@
 # Vision Pipeline Configuration
-# Set `provider` to "groq" or "gemini"
-# API keys loaded from .env (GROQ_API_KEY or GEMINI_API_KEY)
+# Gemini is the chunk-extraction provider. The admin UI overrides model/key settings.
+# CLI runs load GEMINI_API_KEY from .env and may set GEMINI_VISION_MODEL.
 
-provider: "gemini"   # switch to "gemini" to use Google Gemini 2.5 Flash
+provider: "gemini"
 
 groq:
   vision_model: "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -13,7 +13,7 @@ groq:
   request_delay: 5.0   # seconds between calls (free tier: ~15 RPM)
 
 gemini:
-  gemini_model: "gemini-3.5-flash"   # starting tier — auto-falls back to 2.5-flash → 2.5-flash-lite
+  gemini_model: "gemini-2.5-flash"   # overridden by admin Models & Keys
   max_tokens: 8192
   max_retries: 2        # 1 attempt per key — rotation handles failures
   retry_delay: 1.0

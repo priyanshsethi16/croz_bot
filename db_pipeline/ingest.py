@@ -139,27 +139,16 @@ def delete_by_pdf(conn, source_pdf: str):
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 
 def get_chroma_collection(chroma_path: str = "db_pipeline/chroma_db"):
-    import chromadb
-    from chromadb.utils import embedding_functions
-
-    client = chromadb.PersistentClient(path=chroma_path)
-    ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
-    collection = client.get_or_create_collection(
-        name="catalog_products",
-        embedding_function=ef,
-        metadata={"hnsw:space": "cosine"},
-    )
-    return collection
+    from rag_pipeline.providers import build_vector_store
+    return build_vector_store(persist_directory=chroma_path)
 
 
 def insert_chroma(collection, chunk: dict, pg_id: int, source_pdf: str):
     """Upsert one chunk embedding into Chroma."""
     doc_id = f"pg_{pg_id}"
-    collection.upsert(
+    collection.add_texts(
+        texts=[chunk["markdown_text"]],
         ids=[doc_id],
-        documents=[chunk["markdown_text"]],
         metadatas=[{
             "postgres_id": pg_id,
             "product_code": chunk["product_code"] or "",

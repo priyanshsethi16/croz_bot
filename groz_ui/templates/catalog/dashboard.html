@@ -71,6 +71,11 @@
       <button class="sidebar-link" data-panel="chat" onclick="showPanel('chat')">
         <i class="fa fa-comments"></i> Chat
       </button>
+      {% if is_admin %}
+      <button class="sidebar-link" data-panel="models" onclick="showPanel('models')">
+        <i class="fa fa-key"></i> Models &amp; Keys
+      </button>
+      {% endif %}
     </div>
   </aside>
 
@@ -489,6 +494,114 @@
             </div>
           </div>
           <div class="log-output" id="index-log"></div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ══ PANEL: Models & Keys (admin only) ══ -->
+    {% if is_admin %}
+    <div class="panel" id="panel-models">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-key"></i></div>
+            <div>
+              <h3>Models &amp; Keys</h3>
+              <p>Configure embedding, vision extraction, and chat providers</p>
+            </div>
+          </div>
+          <span class="badge badge-orange"><i class="fa fa-lock"></i> Admin only</span>
+        </div>
+        <div class="panel-body">
+          <div class="model-security-note">
+            <i class="fa fa-shield-alt"></i>
+            <div>
+              <strong>Keys are encrypted at rest.</strong>
+              Saved keys are never returned to the browser. Leave a key field blank to keep the current key.
+            </div>
+          </div>
+
+          <div class="model-settings-grid">
+            <section class="model-settings-card">
+              <div class="model-card-head">
+                <div class="provider-logo openai-logo">AI</div>
+                <div>
+                  <h4>OpenAI</h4>
+                  <p>Semantic search embeddings and optional chat</p>
+                </div>
+                <span class="key-status" id="openai-key-status">Checking…</span>
+              </div>
+              <div class="model-field">
+                <label for="openai-api-key">OpenAI API key</label>
+                <div class="secret-input-wrap">
+                  <input type="password" id="openai-api-key" autocomplete="new-password" placeholder="Enter a new OpenAI key"/>
+                  <button type="button" onclick="toggleSecretVisibility('openai-api-key', this)" title="Show or hide key"><i class="fa fa-eye"></i></button>
+                </div>
+                <label class="clear-key-option"><input type="checkbox" id="clear-openai-key"/> Remove saved OpenAI key</label>
+              </div>
+              <div class="model-field">
+                <label for="embedding-model">Embedding model</label>
+                <input type="text" id="embedding-model" value="text-embedding-3-small" readonly/>
+                <small>Fixed model · 1536 dimensions · requires a fresh OpenAI index.</small>
+              </div>
+            </section>
+
+            <section class="model-settings-card">
+              <div class="model-card-head">
+                <div class="provider-logo gemini-logo"><i class="fa fa-gem"></i></div>
+                <div>
+                  <h4>Google Gemini</h4>
+                  <p>Vision-language model for PDF chunk extraction</p>
+                </div>
+                <span class="key-status" id="gemini-key-status">Checking…</span>
+              </div>
+              <div class="model-field">
+                <label for="gemini-api-key">Gemini API key</label>
+                <div class="secret-input-wrap">
+                  <input type="password" id="gemini-api-key" autocomplete="new-password" placeholder="Enter a new Gemini key"/>
+                  <button type="button" onclick="toggleSecretVisibility('gemini-api-key', this)" title="Show or hide key"><i class="fa fa-eye"></i></button>
+                </div>
+                <label class="clear-key-option"><input type="checkbox" id="clear-gemini-key"/> Remove saved Gemini key</label>
+              </div>
+              <div class="model-field">
+                <label for="vision-model">PDF extraction VLM</label>
+                <select id="vision-model"></select>
+                <small>Used by Create Chunks for page-image understanding.</small>
+              </div>
+            </section>
+
+            <section class="model-settings-card chat-routing-card">
+              <div class="model-card-head">
+                <div class="provider-logo chat-logo"><i class="fa fa-comments"></i></div>
+                <div>
+                  <h4>Chat routing</h4>
+                  <p>Choose the provider and model used by admin and public product chat</p>
+                </div>
+              </div>
+              <div class="chat-routing-fields">
+                <div class="model-field">
+                  <label for="chat-provider">Chat provider</label>
+                  <select id="chat-provider" onchange="refreshChatModelOptions()">
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openai">OpenAI</option>
+                  </select>
+                </div>
+                <div class="model-field">
+                  <label for="chat-model">Chat model</label>
+                  <select id="chat-model" onchange="refreshChatRoutingSummary()"></select>
+                </div>
+              </div>
+              <div class="routing-summary" id="routing-summary"></div>
+            </section>
+          </div>
+
+          <div class="model-save-bar">
+            <span id="model-config-message">Changes affect new chunking, indexing, and chat requests.</span>
+            <button class="btn btn-primary" id="btn-save-model-config" onclick="saveModelConfiguration()">
+              <i class="fa fa-save"></i> Save Models &amp; Keys
+            </button>
+          </div>
         </div>
       </div>
     </div>

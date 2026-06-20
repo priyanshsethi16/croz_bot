@@ -21,14 +21,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-import chromadb
-from sentence_transformers import SentenceTransformer
+from langchain_core.documents import Document
+
+from rag_pipeline.providers import CHROMA_DIR, COLLECTION, EMBED_MODEL, build_vector_store
 
 # Absolute path — works regardless of which directory the process runs from
-_HERE       = Path(__file__).resolve().parent          # rag_pipeline/
-CHROMA_DIR  = str(_HERE / "chroma_db")
-COLLECTION  = "catalog_products"
-EMBED_MODEL = "all-MiniLM-L6-v2"
+_HERE = Path(__file__).resolve().parent
 
 
 # ── Metadata extractor (generic — works for any md layout) ───────────────────
@@ -177,21 +175,13 @@ def ingest(data_dir: str = str(_HERE.parent / "vision_pipeline" / "data"), reset
         return 0
 
     print(f"Total product chunks found: {len(pairs)}")
-    print(f"Loading embedding model: {EMBED_MODEL} ...")
-    model = SentenceTransformer(EMBED_MODEL)
-
-    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    print(f"Embedding provider: OpenAI / {EMBED_MODEL}")
+    vector_store = build_vector_store()
     if reset:
-        try:
-            client.delete_collection(COLLECTION)
-            print("Existing collection deleted.")
-        except Exception:
-            pass
+        vector_store.reset_collection()
+        print("Existing OpenAI embedding collection reset.")
 
-    collection = client.get_or_create_collection(
-        name=COLLECTION,
-        metadata={"hnsw:space": "cosine"},
-    )
+    collection = vector_store._collection
 
     # Build full list of (id, md_text, metadata) for all found chunks
     all_ids, all_texts, all_metas = [], [], []
@@ -223,17 +213,18 @@ def ingest(data_dir: str = str(_HERE.parent / "vision_pipeline" / "data"), reset
     new_metas = [all_metas[i] for i in new_indices]
     new_ids   = [all_ids[i]   for i in new_indices]
 
-    vecs = model.encode(new_texts, show_progress_bar=True, batch_size=32)
-    embeddings = [v.tolist() for v in vecs]
-
     batch = 100
     for start in range(0, len(new_ids), batch):
-        collection.upsert(
-            ids=new_ids[start : start + batch],
-            documents=new_texts[start : start + batch],
-            embeddings=embeddings[start : start + batch],
-            metadatas=new_metas[start : start + batch],
+        stop = start + batch
+        documents = [
+            Document(page_content=text, metadata=metadata)
+            for text, metadata in zip(new_texts[start:stop], new_metas[start:stop])
+        ]
+        vector_store.add_documents(
+            documents=documents,
+            ids=new_ids[start:stop],
         )
+        print(f"  Embedded {min(stop, len(new_ids))}/{len(new_ids)} chunks")
 
     print(f"\nAdded {len(new_ids)} new product chunks into ChromaDB at '{CHROMA_DIR}'")
     print(f"Collection '{COLLECTION}' now has {collection.count()} documents.")

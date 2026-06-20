@@ -1,16 +1,18 @@
 """
 rag_pipeline/llm.py
 --------------------
-Builds a grounded prompt from retrieved .md chunks and calls Groq (Qwen3-32b).
+Builds a grounded prompt from retrieved .md chunks and calls the configured
+OpenAI or Google Gemini chat model through LangChain.
 Context is the raw markdown — no field assumptions, works for any PDF layout.
 """
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
-from groq import Groq
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 SYSTEM_PROMPT = """You are an expert industrial product catalog assistant.
 
@@ -76,10 +78,39 @@ def build_context(chunks: list[dict[str, Any]]) -> str:
     return "\n\n{'='*60}\n\n".join(parts)
 
 
+def _message_text(message) -> str:
+    text = getattr(message, "text", None)
+    if isinstance(text, str) and text:
+        return text
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return str(content or "")
+
+
 class LLMAnswerer:
-    def __init__(self, groq_api_key: str, model: str = "qwen/qwen3-32b"):
-        self._client = Groq(api_key=groq_api_key)
-        self.model   = model
+    def __init__(self, provider: str, api_key: str, model: str):
+        self.provider = provider.lower().strip()
+        self.model = model
+        if not api_key:
+            raise ValueError(f"API key is required for {self.provider} chat.")
+        if self.provider == "openai":
+            self._model = ChatOpenAI(model=model, api_key=api_key, max_retries=3)
+        elif self.provider == "gemini":
+            self._model = ChatGoogleGenerativeAI(
+                model=model,
+                api_key=api_key,
+                temperature=0.1,
+                max_retries=3,
+            )
+        else:
+            raise ValueError("Chat provider must be either openai or gemini.")
 
     def answer(self, query: str, chunks: list[dict[str, Any]]) -> str:
         if not chunks:
@@ -88,15 +119,10 @@ class LLMAnswerer:
         context      = build_context(chunks)
         user_message = f"CATALOG CONTEXT:\n\n{context}\n\nQUESTION: {query}"
 
-        response = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": user_message},
-            ],
-            temperature=0.1,
-            max_tokens=1024,
-        )
-        raw = response.choices[0].message.content or ""
+        response = self._model.invoke([
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=user_message),
+        ])
+        raw = _message_text(response)
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
         return _bullets_to_table(raw)

@@ -6,7 +6,7 @@ Ingests catalog `.md` chunks into PostgreSQL (structured) + ChromaDB (semantic e
 
 **1. Install dependencies:**
 ```bash
-pip install psycopg2-binary chromadb sentence-transformers
+pip install psycopg2-binary chromadb langchain-openai langchain-chroma
 ```
 
 **2. Install and start PostgreSQL (WSL):**
@@ -19,7 +19,10 @@ sudo -u postgres psql -c "CREATE DATABASE catalog_db;"
 **3. Add to `.env`:**
 ```
 POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/catalog_db
+OPENAI_API_KEY=your_openai_key
 ```
+
+Semantic embeddings use OpenAI `text-embedding-3-small`; no local embedding model is loaded.
 
 ## Usage
 

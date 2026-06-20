@@ -8,18 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
-import chromadb
-from sentence_transformers import SentenceTransformer
-
-from rag_pipeline.ingest import CHROMA_DIR, COLLECTION, EMBED_MODEL
+from rag_pipeline.providers import build_vector_store
 
 
 class Retriever:
-    def __init__(self, top_k: int = 5):
+    def __init__(self, top_k: int = 5, api_key: str | None = None):
         self.top_k = top_k
-        self._model = SentenceTransformer(EMBED_MODEL)
-        client = chromadb.PersistentClient(path=CHROMA_DIR)
-        self._collection = client.get_collection(COLLECTION)
+        self._vector_store = build_vector_store(api_key)
 
     def retrieve(self, query: str) -> list[dict[str, Any]]:
         """
@@ -30,27 +25,18 @@ class Retriever:
         if not query:
             return []
 
-        vec = self._model.encode([query])[0].tolist()
-        n   = min(self.top_k, self._collection.count())
+        n = min(self.top_k, self._vector_store._collection.count())
         if n == 0:
             return []
 
-        results = self._collection.query(
-            query_embeddings=[vec],
-            n_results=n,
-            include=["documents", "metadatas", "distances"],
-        )
+        results = self._vector_store.similarity_search_with_relevance_scores(query, k=n)
 
         chunks = []
-        for doc, meta, dist in zip(
-            results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
-        ):
+        for document, score in results:
             chunks.append({
-                "text":     doc,
-                "metadata": meta,
-                "score":    round(1 - dist, 4),
+                "text": document.page_content,
+                "metadata": document.metadata,
+                "score": round(float(score), 4),
             })
 
         return chunks

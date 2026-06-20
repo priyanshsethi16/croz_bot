@@ -10,6 +10,10 @@ pdf2image>=1.17.0   # Requires poppler: sudo apt-get install poppler-utils (Linu
 
 # LLM
 groq>=0.9.0
+langchain>=1.0.0
+langchain-openai>=1.0.0
+langchain-google-genai>=4.0.0
+langchain-chroma>=1.0.0
 
 # Vision (Gemini provider)
 google-genai>=1.0.0
@@ -20,12 +24,12 @@ tqdm>=4.66.0
 # DB pipeline
 psycopg2-binary>=2.9.0
 chromadb>=0.5.0
-sentence-transformers>=3.0.0
 
 # Web UI
 django>=5.2.0
 djangorestframework>=3.15.0
 PyMuPDF>=1.24.0
+cryptography>=43.0.0
 
 # Dev / testing
 pytest>=8.0.0

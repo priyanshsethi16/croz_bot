@@ -21,6 +21,7 @@ function showPanel(name) {
   closeSidebar();
   if (name === 'chunk') loadPdfList();
   if (name === 'upload') loadExistingUploads();
+  if (name === 'models') loadModelConfiguration();
 }
 
 async function loadExistingUploads() {
@@ -404,6 +405,122 @@ async function runIndexing() {
 function markStepDone(name) {
   const s = document.querySelector(`.step-item[data-step="${name}"]`);
   if (s) { s.classList.add('done'); s.querySelector('.step-circle').innerHTML = '<i class="fa fa-check"></i>'; }
+}
+
+// ── Models & encrypted API keys ──────────────────────────────────────────────
+let _modelOptions = { vision_models: [], chat_models: { gemini: [], openai: [] } };
+let _savedChatModel = '';
+
+function fillModelSelect(selectId, options, selectedValue) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+  select.innerHTML = (options || []).map(option =>
+    `<option value="${escHtml(option.value)}"${option.value === selectedValue ? ' selected' : ''}>${escHtml(option.label)}</option>`
+  ).join('');
+}
+
+function setKeyStatus(provider, keyInfo) {
+  const status = document.getElementById(`${provider}-key-status`);
+  const input = document.getElementById(`${provider}-api-key`);
+  if (!status || !input) return;
+  status.className = `key-status ${keyInfo.configured ? 'configured' : 'missing'}`;
+  status.innerHTML = keyInfo.configured
+    ? `<i class="fa fa-check-circle"></i> Configured ${escHtml(keyInfo.masked)}`
+    : '<i class="fa fa-exclamation-circle"></i> Not configured';
+  input.value = '';
+  input.placeholder = keyInfo.configured ? 'Leave blank to keep current key' : `Enter ${provider === 'openai' ? 'an OpenAI' : 'a Gemini'} key`;
+}
+
+async function loadModelConfiguration(force = false) {
+  if (!IS_ADMIN) return;
+  const message = document.getElementById('model-config-message');
+  if (message) message.textContent = 'Loading secure model configuration…';
+  try {
+    const res = await fetch('/admin-panel/api/model-config/');
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not load model configuration.');
+
+    _modelOptions = data.options;
+    _savedChatModel = data.configuration.chat_model;
+    document.getElementById('embedding-model').value = data.configuration.embedding_model;
+    fillModelSelect('vision-model', data.options.vision_models, data.configuration.vision_model);
+    document.getElementById('chat-provider').value = data.configuration.chat_provider;
+    refreshChatModelOptions(data.configuration.chat_model);
+    setKeyStatus('openai', data.keys.openai);
+    setKeyStatus('gemini', data.keys.gemini);
+    document.getElementById('clear-openai-key').checked = false;
+    document.getElementById('clear-gemini-key').checked = false;
+    if (message) message.textContent = 'Configuration loaded. Blank key fields keep the saved encrypted keys.';
+  } catch (error) {
+    if (message) message.textContent = error.message;
+    showToast(error.message, 'error');
+  }
+}
+
+function refreshChatModelOptions(selectedValue = '') {
+  const provider = document.getElementById('chat-provider')?.value || 'gemini';
+  const options = _modelOptions.chat_models?.[provider] || [];
+  const candidate = selectedValue || (options.some(option => option.value === _savedChatModel) ? _savedChatModel : options[0]?.value);
+  fillModelSelect('chat-model', options, candidate);
+  refreshChatRoutingSummary();
+}
+
+function refreshChatRoutingSummary() {
+  const provider = document.getElementById('chat-provider')?.value || 'gemini';
+  const options = _modelOptions.chat_models?.[provider] || [];
+  const selected = options.find(option => option.value === document.getElementById('chat-model')?.value);
+  const summary = document.getElementById('routing-summary');
+  if (summary) {
+    summary.innerHTML = `<i class="fa fa-route"></i> Product chat will use <strong>${provider === 'openai' ? 'OpenAI' : 'Google Gemini'}</strong>${selected ? ` · ${escHtml(selected.label)}` : ''}.`;
+  }
+}
+
+function toggleSecretVisibility(inputId, button) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.type = input.type === 'password' ? 'text' : 'password';
+  button.innerHTML = `<i class="fa fa-${input.type === 'password' ? 'eye' : 'eye-slash'}"></i>`;
+}
+
+async function saveModelConfiguration() {
+  const button = document.getElementById('btn-save-model-config');
+  const message = document.getElementById('model-config-message');
+  const payload = {
+    openai_api_key: document.getElementById('openai-api-key').value.trim(),
+    gemini_api_key: document.getElementById('gemini-api-key').value.trim(),
+    clear_openai_key: document.getElementById('clear-openai-key').checked,
+    clear_gemini_key: document.getElementById('clear-gemini-key').checked,
+    vision_model: document.getElementById('vision-model').value,
+    chat_provider: document.getElementById('chat-provider').value,
+    chat_model: document.getElementById('chat-model').value,
+  };
+
+  button.disabled = true;
+  button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving securely…';
+  if (message) message.textContent = 'Encrypting and saving configuration…';
+  try {
+    const res = await fetch('/admin-panel/api/model-config/save/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not save model configuration.');
+    _modelOptions = data.options;
+    _savedChatModel = data.configuration.chat_model;
+    setKeyStatus('openai', data.keys.openai);
+    setKeyStatus('gemini', data.keys.gemini);
+    document.getElementById('clear-openai-key').checked = false;
+    document.getElementById('clear-gemini-key').checked = false;
+    if (message) message.textContent = data.message;
+    showToast(data.message, 'success');
+  } catch (error) {
+    if (message) message.textContent = error.message;
+    showToast(error.message, 'error');
+  } finally {
+    button.disabled = false;
+    button.innerHTML = '<i class="fa fa-save"></i> Save Models &amp; Keys';
+  }
 }
 
 // ── Admin Chat ────────────────────────────────────────────────────────────────

@@ -97,17 +97,8 @@ def fetch_by_ids(pg_ids: list[int]) -> list[dict]:
 # ── ChromaDB helpers ──────────────────────────────────────────────────────────
 
 def get_chroma_collection(chroma_path: str = "db_pipeline/chroma_db"):
-    import chromadb
-    from chromadb.utils import embedding_functions
-
-    client = chromadb.PersistentClient(path=chroma_path)
-    ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
-    return client.get_or_create_collection(
-        name="catalog_products",
-        embedding_function=ef,
-    )
+    from rag_pipeline.providers import build_vector_store
+    return build_vector_store(persist_directory=chroma_path)
 
 
 def semantic_search(
@@ -121,7 +112,7 @@ def semantic_search(
     Semantic search via ChromaDB embeddings.
     Returns full product data fetched from PostgreSQL.
     """
-    collection = get_chroma_collection(chroma_path)
+    vector_store = get_chroma_collection(chroma_path)
 
     where: dict = {}
     if category_filter:
@@ -129,23 +120,21 @@ def semantic_search(
     if source_pdf_filter:
         where["source_pdf"] = {"$contains": source_pdf_filter}
 
-    results = collection.query(
-        query_texts=[query],
-        n_results=top_k,
-        where=where if where else None,
-        include=["metadatas", "distances"],
+    results = vector_store.similarity_search_with_relevance_scores(
+        query,
+        k=top_k,
+        filter=where if where else None,
     )
 
-    if not results["ids"] or not results["ids"][0]:
+    if not results:
         return []
 
-    pg_ids = [int(m["postgres_id"]) for m in results["metadatas"][0]]
-    distances = results["distances"][0]
+    pg_ids = [int(document.metadata["postgres_id"]) for document, _ in results]
 
     products = fetch_by_ids(pg_ids)
 
     # Attach similarity score (1 - cosine distance)
-    id_to_score = {pg_ids[i]: round(1 - distances[i], 4) for i in range(len(pg_ids))}
+    id_to_score = {pg_ids[i]: round(float(results[i][1]), 4) for i in range(len(pg_ids))}
     for p in products:
         p["similarity"] = id_to_score.get(p["id"], 0.0)
 

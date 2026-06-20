@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,8 +42,9 @@ def _get_catalog_stats():
 
     try:
         import chromadb
-        client = chromadb.PersistentClient(path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db'))
-        col = client.get_collection('catalog_products')
+        from rag_pipeline.providers import CHROMA_DIR, COLLECTION
+        client = chromadb.PersistentClient(path=CHROMA_DIR)
+        col = client.get_collection(COLLECTION)
         indexed = col.count()
     except Exception:
         indexed = 0
@@ -133,9 +133,14 @@ def run_pipeline(request):
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
     try:
+        from .model_config import get_runtime_config, subprocess_environment
+        runtime = get_runtime_config()
+        if not runtime.gemini_api_key:
+            return JsonResponse({'error': 'Gemini API key is not configured. Open Models & Keys.'}, status=400)
         result = subprocess.run(
             [sys.executable, '-m', 'vision_pipeline.main', '--pdf', str(pdf_path)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
+            env=subprocess_environment(),
         )
         output = result.stdout + result.stderr
         if result.returncode != 0:
@@ -212,8 +217,13 @@ def run_ingest(request):
         cmd.append('--reset')
 
     try:
+        from .model_config import get_runtime_config, subprocess_environment
+        runtime = get_runtime_config()
+        if not runtime.openai_api_key:
+            return JsonResponse({'error': 'OpenAI API key is required for embeddings. Open Models & Keys.'}, status=400)
         result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=300
+            cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=300,
+            env=subprocess_environment(),
         )
         output = result.stdout + result.stderr
         if result.returncode != 0:
@@ -238,13 +248,21 @@ def admin_chat(request):
         return JsonResponse({'error': 'Empty query.'}, status=400)
 
     try:
-        from dotenv import load_dotenv
-        load_dotenv(PROJECT_ROOT / '.env')
+        from .model_config import get_runtime_config
         from rag_pipeline.retriever import Retriever
         from rag_pipeline.llm import LLMAnswerer
 
-        retriever = Retriever(top_k=5)
-        llm       = LLMAnswerer(os.getenv('GROQ_API_KEY'))
+        runtime = get_runtime_config()
+        if not runtime.openai_api_key:
+            return JsonResponse({'error': 'OpenAI API key is required for retrieval embeddings.'}, status=400)
+        if not runtime.chat_api_key:
+            return JsonResponse({'error': f'{runtime.chat_provider.title()} API key is not configured.'}, status=400)
+        retriever = Retriever(top_k=5, api_key=runtime.openai_api_key)
+        llm = LLMAnswerer(
+            provider=runtime.chat_provider,
+            api_key=runtime.chat_api_key,
+            model=runtime.chat_model,
+        )
         chunks    = retriever.retrieve(query)
         answer    = llm.answer(query, chunks)
         sources   = [
@@ -367,9 +385,14 @@ def run_pipeline_split(request):
         return JsonResponse({'error': f'Split file not found: {part_file}'}, status=404)
 
     try:
+        from .model_config import get_runtime_config, subprocess_environment
+        runtime = get_runtime_config()
+        if not runtime.gemini_api_key:
+            return JsonResponse({'error': 'Gemini API key is not configured. Open Models & Keys.'}, status=400)
         result = subprocess.run(
             [sys.executable, '-m', 'vision_pipeline.main', '--pdf', str(pdf_path)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
+            env=subprocess_environment(),
         )
         output = result.stdout + result.stderr
         if result.returncode != 0:
@@ -470,8 +493,9 @@ def delete_pdf(request):
 
     try:
         import chromadb
-        client  = chromadb.PersistentClient(path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db'))
-        col     = client.get_collection('catalog_products')
+        from rag_pipeline.providers import CHROMA_DIR, COLLECTION
+        client  = chromadb.PersistentClient(path=CHROMA_DIR)
+        col     = client.get_collection(COLLECTION)
         results = col.get(where={'source_pdf': stem})
         if results['ids']:
             col.delete(ids=results['ids'])
@@ -504,65 +528,22 @@ def list_chunks(request):
     return JsonResponse({'chunks': chunks})
 
 
-# ── API: Get / Save API Keys ──────────────────────────────────────────────────
-
-KEY_NAMES = ['GROQ_API_KEY', 'GEMINI_API_KEY_1', 'GEMINI_API_KEY_2', 'GEMINI_API_KEY_3']
-
-
-def _env_path():
-    return PROJECT_ROOT / '.env'
-
-
-def _read_env_key(name):
-    """Read a single key value from .env file."""
-    env = _env_path()
-    if not env.exists():
-        return ''
-    for line in env.read_text().splitlines():
-        line = line.strip()
-        if line.startswith(f'{name}='):
-            return line[len(name) + 1:].strip()
-    return ''
-
-
-def _write_env_key(name, value):
-    """Update or insert a key in the .env file."""
-    env = _env_path()
-    text = env.read_text() if env.exists() else ''
-    lines = text.splitlines(keepends=True)
-    found = False
-    new_lines = []
-    for line in lines:
-        if line.strip().startswith(f'{name}='):
-            new_lines.append(f'{name}={value}\n')
-            found = True
-        else:
-            new_lines.append(line)
-    if not found:
-        new_lines.append(f'{name}={value}\n')
-    env.write_text(''.join(new_lines))
-
+# ── API: Models & encrypted provider keys ─────────────────────────────────────
 
 @login_required
-def get_api_keys(request):
+def get_model_configuration(request):
     if not request.user.is_staff:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
-    from .models import ApiKey
-    keys = {}
-    for name in KEY_NAMES:
-        try:
-            obj = ApiKey.objects.get(name=name)
-            val = obj.value
-        except ApiKey.DoesNotExist:
-            val = _read_env_key(name)
-        # Mask all but last 4 chars for display
-        keys[name] = ('•' * (len(val) - 4) + val[-4:]) if len(val) > 4 else ('•' * len(val))
-    return JsonResponse({'keys': keys})
+    from .model_config import configuration_payload
+    try:
+        return JsonResponse(configuration_payload())
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=500)
 
 
 @login_required
 @require_POST
-def save_api_keys(request):
+def save_model_configuration(request):
     if not request.user.is_staff:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
     try:
@@ -570,16 +551,10 @@ def save_api_keys(request):
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
 
-    from .models import ApiKey
-    saved = []
-    for name in KEY_NAMES:
-        raw = body.get(name, '').strip()
-        if not raw or set(raw) == {'•'}:
-            continue  # skip unchanged masked values
-        ApiKey.objects.update_or_create(name=name, defaults={'value': raw})
-        _write_env_key(name, raw)
-        # Also set in current process env so running pipeline picks it up
-        os.environ[name] = raw
-        saved.append(name)
-
-    return JsonResponse({'message': f'Saved: {", ".join(saved) if saved else "nothing changed"}', 'saved': saved})
+    from .model_config import update_configuration
+    try:
+        payload = update_configuration(body, user=request.user)
+        payload['message'] = 'Models and API keys saved securely.'
+        return JsonResponse(payload)
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)

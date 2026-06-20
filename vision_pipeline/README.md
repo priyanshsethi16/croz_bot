@@ -1,11 +1,11 @@
 # Vision Pipeline
 
-A layout-aware product catalog parser that extracts structured product data directly from PDF page images using Llama 4 Scout vision model on Groq — no OCR step needed.
+A layout-aware product catalog parser that extracts structured product data directly from PDF page images using an admin-selected Gemini vision-language model via LangChain — no OCR step needed.
 
 ## How It Works
 
 ```
-PDF → PNG pages → Llama 4 Scout (vision) → product JSON → markdown chunks
+PDF → PNG pages → Gemini VLM (LangChain) → product JSON → markdown chunks
 ```
 
 Each page image is sent directly to the vision model, which reads columns, tables, badges, and layout visually. This avoids the column-layout confusion that OCR-based pipelines suffer from.
@@ -15,7 +15,7 @@ Each page image is sent directly to the vision model, which reads columns, table
 ```
 vision_pipeline/
 ├── main.py               # Entry point
-├── vision_extractor.py   # Sends page PNG to Llama Vision, returns product JSON
+├── gemini_extractor.py   # Sends page PNG to Gemini through LangChain
 ├── chunk_writer.py       # Converts product JSON to markdown files
 ├── pdf_to_images.py      # Rasterizes PDF pages to PNG
 ├── config.yaml           # Model, DPI, rate limits, output paths
@@ -30,24 +30,20 @@ vision_pipeline/
 
 **1. Install dependencies** (from project root):
 ```bash
-pip install pdf2image groq pyyaml python-dotenv pypdf tqdm pillow
-pip install google-genai   # only needed for Gemini provider
+pip install pdf2image pyyaml python-dotenv pypdf tqdm pillow langchain-google-genai
 sudo apt-get install -y poppler-utils   # Linux / WSL
 ```
 
 **2. Set your API key(s)** in `.env` (project root):
 ```
-GROQ_API_KEY=your_groq_key        # for Groq / Llama Scout (free)
-GEMINI_API_KEY=your_gemini_key    # for Google Gemini (free, better accuracy)
+GEMINI_API_KEY=your_gemini_key
 ```
 
-- Groq key: [console.groq.com](https://console.groq.com) — no credit card
 - Gemini key: [aistudio.google.com](https://aistudio.google.com) — no credit card
 
-**3. Set provider** in `vision_pipeline/config.yaml`:
-```yaml
-provider: "groq"     # or "gemini"
-```
+When using the Django UI, configure the encrypted key and VLM from **Admin → Models & Keys** instead of editing `.env`.
+
+**3. Select the Gemini model** in **Admin → Models & Keys**. CLI runs may set `GEMINI_VISION_MODEL`.
 
 ## Usage
 
@@ -91,16 +87,13 @@ Each file contains:
 
 The pipeline adds a 5-second delay between calls to stay under the per-minute limit. If the daily limit is hit, the checkpoint is saved — just re-run the next day and it resumes from where it stopped.
 
-To process more pages per day, use multiple Groq API keys (one per account) and the pipeline will rotate through them when a daily limit is reached.
+The pipeline can rotate `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, etc. for CLI batch jobs. The admin UI uses the single encrypted Gemini key configured by the administrator.
 
 ## Models
 
-| Provider | Model | Vision | Free | Accuracy |
-|---|---|---|---|---|
-| Groq | `meta-llama/llama-4-scout-17b-16e-instruct` | ✅ | ✅ | Good |
-| Gemini | `gemini-2.5-flash-preview-05-20` | ✅ | ✅ | Better (recommended) |
-
-Switch providers in `config.yaml` by changing `provider: "groq"` to `provider: "gemini"`.
+| Provider | Example model | Vision | Selection |
+|---|---|---|---|
+| Gemini | `gemini-2.5-flash` | ✅ | Admin → Models & Keys |
 
 ## Known Limitations
 

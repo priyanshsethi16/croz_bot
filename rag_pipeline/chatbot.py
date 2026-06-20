@@ -22,20 +22,26 @@ from rag_pipeline.llm import LLMAnswerer
 
 
 def run_chatbot(top_k: int = 5):
-    groq_key = os.getenv("GROQ_API_KEY", "")
-    if not groq_key:
-        print("ERROR: GROQ_API_KEY not set in .env")
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    provider = os.getenv("CHAT_PROVIDER", "gemini").lower()
+    model = os.getenv("CHAT_MODEL", "gemini-2.5-flash")
+    chat_key = openai_key if provider == "openai" else os.getenv("GEMINI_API_KEY", "")
+    if not openai_key:
+        print("ERROR: OPENAI_API_KEY is required for retrieval embeddings")
+        return
+    if not chat_key:
+        print(f"ERROR: API key not set for {provider} chat")
         return
 
     print("Loading retriever...")
     try:
-        retriever = Retriever(top_k=top_k)
+        retriever = Retriever(top_k=top_k, api_key=openai_key)
     except Exception as e:
         print(f"ERROR: Could not load ChromaDB collection: {e}")
         print("Run first:  python -m rag_pipeline.ingest")
         return
 
-    llm = LLMAnswerer(groq_key)
+    llm = LLMAnswerer(provider=provider, api_key=chat_key, model=model)
 
     print("\n" + "=" * 60)
     print("  GROZ Industrial Catalog Chatbot")

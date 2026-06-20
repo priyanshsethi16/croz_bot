@@ -1,5 +1,4 @@
 import json
-import os
 from django.conf import settings
 from django.contrib.auth import logout
 from django.http import JsonResponse
@@ -34,13 +33,21 @@ def chat_query(request):
         return JsonResponse({'error': 'Empty query.'}, status=400)
 
     try:
-        from dotenv import load_dotenv
-        load_dotenv(PROJECT_ROOT / '.env')
+        from catalog.model_config import get_runtime_config
         from rag_pipeline.retriever import Retriever
         from rag_pipeline.llm import LLMAnswerer
 
-        retriever = Retriever(top_k=5)
-        llm       = LLMAnswerer(os.getenv('GROQ_API_KEY'))
+        runtime = get_runtime_config()
+        if not runtime.openai_api_key:
+            return JsonResponse({'error': 'Search is not configured. Ask an admin to add the OpenAI key.'}, status=503)
+        if not runtime.chat_api_key:
+            return JsonResponse({'error': 'Chat model is not configured. Ask an admin to add its API key.'}, status=503)
+        retriever = Retriever(top_k=5, api_key=runtime.openai_api_key)
+        llm = LLMAnswerer(
+            provider=runtime.chat_provider,
+            api_key=runtime.chat_api_key,
+            model=runtime.chat_model,
+        )
         chunks    = retriever.retrieve(query)
         answer    = llm.answer(query, chunks)
         sources   = [

@@ -803,6 +803,104 @@
 /* File item preview button */
 .file-preview-btn { margin-left: 8px; flex-shrink: 0; }
 
+/* ── Models & Keys ──────────────────────────────────────────────────────── */
+.model-security-note {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 13px 15px; margin-bottom: 18px;
+  border: 1px solid #bbf7d0; border-radius: 9px;
+  background: #f0fdf4; color: #166534;
+  font-size: 12px; line-height: 1.55;
+}
+.model-security-note > i { margin-top: 2px; font-size: 16px; }
+.model-security-note strong { display: block; color: #14532d; }
+
+.model-settings-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px;
+}
+.model-settings-card {
+  padding: 18px; border: 1.5px solid var(--border);
+  border-radius: 10px; background: #fff;
+}
+.model-settings-card.chat-routing-card { grid-column: 1 / -1; }
+.model-card-head {
+  display: flex; align-items: center; gap: 11px;
+  padding-bottom: 14px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.model-card-head > div:nth-child(2) { flex: 1; min-width: 0; }
+.model-card-head h4 { font-size: 14px; font-weight: 800; color: var(--dark); }
+.model-card-head p { margin-top: 2px; font-size: 11px; color: var(--grey); }
+.provider-logo {
+  width: 38px; height: 38px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 9px; font-size: 13px; font-weight: 900;
+}
+.openai-logo { background: #111; color: #fff; }
+.gemini-logo { background: linear-gradient(135deg, #4285f4, #a855f7); color: #fff; }
+.chat-logo { background: var(--orange-light); color: var(--orange); }
+.key-status {
+  padding: 4px 8px; border-radius: 12px;
+  font-size: 10px; font-weight: 700; white-space: nowrap;
+}
+.key-status.configured { background: #dcfce7; color: #15803d; }
+.key-status.missing { background: #fef2f2; color: #b91c1c; }
+
+.model-field { margin-bottom: 14px; }
+.model-field:last-child { margin-bottom: 0; }
+.model-field > label:first-child {
+  display: block; margin-bottom: 6px;
+  color: var(--dark); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .45px;
+}
+.model-field input[type="text"],
+.model-field input[type="password"],
+.model-field select {
+  width: 100%; min-height: 39px; padding: 8px 11px;
+  border: 1.5px solid var(--border); border-radius: 7px;
+  background: #fff; color: var(--dark); outline: none;
+  font: 12px inherit;
+}
+.model-field input:focus, .model-field select:focus { border-color: var(--orange); }
+.model-field input[readonly] { background: #f8f8f8; color: #555; }
+.model-field small { display: block; margin-top: 5px; color: var(--grey); font-size: 10px; line-height: 1.45; }
+.secret-input-wrap { display: flex; }
+.secret-input-wrap input { border-radius: 7px 0 0 7px !important; }
+.secret-input-wrap button {
+  width: 40px; flex-shrink: 0;
+  border: 1.5px solid var(--border); border-left: 0;
+  border-radius: 0 7px 7px 0; background: #fafafa;
+  color: var(--grey); cursor: pointer;
+}
+.secret-input-wrap button:hover { color: var(--orange); }
+.clear-key-option {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 7px; color: #b91c1c; font-size: 10px; cursor: pointer;
+}
+.clear-key-option input { accent-color: #dc2626; }
+.chat-routing-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.routing-summary {
+  padding: 10px 12px; border-radius: 7px;
+  background: var(--orange-light); color: #9a3412;
+  font-size: 11px;
+}
+.routing-summary i { margin-right: 6px; }
+.model-save-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 18px; padding: 14px 16px;
+  border: 1px solid var(--border); border-radius: 9px; background: #fafafa;
+}
+.model-save-bar > span { color: var(--grey); font-size: 11px; }
+
+@media (max-width: 800px) {
+  .model-settings-grid { grid-template-columns: 1fr; }
+  .model-settings-card.chat-routing-card { grid-column: auto; }
+  .chat-routing-fields { grid-template-columns: 1fr; gap: 0; }
+  .model-save-bar { align-items: stretch; flex-direction: column; }
+  .model-save-bar .btn { justify-content: center; }
+  .model-card-head { flex-wrap: wrap; }
+  .key-status { margin-left: 49px; }
+}
+
 @media (max-width: 1100px) {
   .pdf-preview-body { flex-direction: column; }
   .pdf-preview-main { min-height: 520px; }

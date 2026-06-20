@@ -18,6 +18,6 @@ urlpatterns = [
     path('api/split-pdf-custom/', views.split_pdf_custom,   name='split_pdf_custom'),
     path('api/pipeline-split/', views.run_pipeline_split, name='run_pipeline_split'),
     path('api/delete-pdf/',      views.delete_pdf,         name='delete_pdf'),
-    path('api/api-keys/',         views.get_api_keys,       name='get_api_keys'),
-    path('api/api-keys/save/',    views.save_api_keys,      name='save_api_keys'),
+    path('api/model-config/',      views.get_model_configuration,  name='get_model_configuration'),
+    path('api/model-config/save/', views.save_model_configuration, name='save_model_configuration'),
 ]

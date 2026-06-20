@@ -29,18 +29,20 @@ class GeminiExtractor:
 
     def __init__(self, api_key: str, config: dict):
         try:
-            from google import genai
-            from google.genai import types
+            from langchain_google_genai import ChatGoogleGenerativeAI
         except ImportError:
             raise ImportError(
-                "google-genai is required for Gemini provider.\n"
-                "Install with: pip install google-genai"
+                "langchain-google-genai is required for Gemini provider.\n"
+                "Install with: pip install langchain-google-genai"
             )
 
-        from google import genai
-        self._genai = genai
-        self._client = genai.Client(api_key=api_key)
-        self.model = config.get("gemini_model", self.DEFAULT_MODEL)
+        self.model = config.get("gemini_model") or self.DEFAULT_MODEL
+        self._model = ChatGoogleGenerativeAI(
+            model=self.model,
+            api_key=api_key,
+            temperature=0.0,
+            max_retries=0,
+        )
         self.max_tokens = int(config.get("max_tokens", 8192))
         self.max_retries = int(config.get("max_retries", 3))
         self.retry_delay = float(config.get("retry_delay", 2.0))
@@ -55,27 +57,32 @@ class GeminiExtractor:
 
     def extract_page(self, png_path: Path, page_num: int) -> list[dict[str, Any]]:
         """Send one page PNG to Gemini. Returns list of product dicts."""
-        from google.genai import types
+        from langchain_core.messages import HumanMessage
 
         self._throttle()
         image_bytes = png_path.read_bytes()
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
 
         last_error: Exception | None = None
         for attempt in range(1, self.max_retries + 1):
             try:
-                response = self._client.models.generate_content(
-                    model=self.model,
-                    contents=[
-                        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-                        types.Part.from_text(text=VISION_PROMPT),
-                    ],
-                    config=types.GenerateContentConfig(
-                        max_output_tokens=self.max_tokens,
-                        temperature=0.0,
-                    ),
-                )
+                response = self._model.invoke([
+                    HumanMessage(content=[
+                        {"type": "text", "text": VISION_PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": f"data:image/png;base64,{image_b64}",
+                        },
+                    ])
+                ])
                 self._last_call_time = time.time()
-                raw = response.text or ""
+                raw = getattr(response, "text", "") or response.content or ""
+                if isinstance(raw, list):
+                    raw = "".join(
+                        block.get("text", "")
+                        for block in raw
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
                 products = _repair_json(raw)
                 for p in products:
                     p["page_num"] = page_num

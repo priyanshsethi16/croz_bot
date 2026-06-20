@@ -1,10 +1,14 @@
 from pathlib import Path
 import sys, os
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent   # croz_bot/
+load_dotenv(PROJECT_ROOT / '.env')
 
-SECRET_KEY = 'groz-django-secret-key-change-in-production'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'groz-django-secret-key-change-in-production')
+MODEL_CONFIG_ENCRYPTION_KEY = os.getenv('MODEL_CONFIG_ENCRYPTION_KEY', SECRET_KEY)
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 
