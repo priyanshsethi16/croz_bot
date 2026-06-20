@@ -64,3 +64,4 @@ vision_pipeline/config.local.yaml
 
 # Keep logs directory structure if needed
 !logs/.gitkeep
+*.sql

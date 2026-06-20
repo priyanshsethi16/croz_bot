@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys, os
+from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
@@ -53,10 +54,19 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'groz_ui.wsgi.application'
+postgres_url = os.getenv('POSTGRES_URL')
+if not postgres_url:
+    raise RuntimeError('POSTGRES_URL must be set in .env')
+
+parsed_db_url = urlparse(postgres_url)
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': parsed_db_url.path.lstrip('/'),
+        'USER': unquote(parsed_db_url.username or ''),
+        'PASSWORD': unquote(parsed_db_url.password or ''),
+        'HOST': parsed_db_url.hostname or 'localhost',
+        'PORT': parsed_db_url.port or 5432,
     }
 }
 
