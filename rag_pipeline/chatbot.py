@@ -1,7 +1,10 @@
 """
 rag_pipeline/chatbot.py
 -----------------------
-CLI chatbot for industrial product catalog queries.
+CLI chatbot using the LangChain RAG pipeline.
+  - Hybrid BM25 + semantic retrieval
+  - Cross-encoder reranking
+  - ConversationBufferWindowMemory (k=1)
 
 Usage:
     python -m rag_pipeline.chatbot
@@ -17,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from rag_pipeline.retriever import Retriever
+from rag_pipeline.retriever import HybridRetriever
 from rag_pipeline.llm import LLMAnswerer
 
 
@@ -27,23 +30,21 @@ def run_chatbot(top_k: int = 5):
         print("ERROR: GROQ_API_KEY not set in .env")
         return
 
-    print("Loading retriever...")
+    print("Loading hybrid retriever (BM25 + semantic)...")
     try:
-        retriever = Retriever(top_k=top_k)
+        retriever = HybridRetriever(top_k=top_k)
     except Exception as e:
-        print(f"ERROR: Could not load ChromaDB collection: {e}")
-        print("Run first:  python -m rag_pipeline.ingest")
+        print(f"ERROR: {e}\nRun first: python -m rag_pipeline.ingest")
         return
 
     llm = LLMAnswerer(groq_key)
 
     print("\n" + "=" * 60)
-    print("  GROZ Industrial Catalog Chatbot")
-    print("  Type 'quit' or 'exit' to stop")
-    print("  Type 'sources' after any answer to see retrieved chunks")
+    print("  GROZ Industrial Catalog Chatbot  [LangChain RAG]")
+    print("  Commands: 'quit' | 'sources' | 'clear' (reset memory)")
     print("=" * 60 + "\n")
 
-    last_chunks = []
+    last_chunks: list = []
 
     while True:
         try:
@@ -57,7 +58,10 @@ def run_chatbot(top_k: int = 5):
         if query.lower() in ("quit", "exit"):
             print("Goodbye!")
             break
-
+        if query.lower() == "clear":
+            llm.clear_memory()
+            print("Memory cleared.\n")
+            continue
         if query.lower() == "sources":
             if not last_chunks:
                 print("No previous query.\n")
@@ -69,16 +73,14 @@ def run_chatbot(top_k: int = 5):
                 print()
             continue
 
-        # Retrieve + answer
-        chunks = retriever.retrieve(query)
+        chunks      = retriever.retrieve(query)
         last_chunks = chunks
-        answer = llm.answer(query, chunks)
-
+        answer      = llm.answer(query, chunks)
         print(f"\nAssistant: {answer}\n")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--top-k", type=int, default=5, help="Number of chunks to retrieve")
+    parser.add_argument("--top-k", type=int, default=5)
     args = parser.parse_args()
     run_chatbot(args.top_k)

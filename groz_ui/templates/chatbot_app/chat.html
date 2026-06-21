@@ -19,38 +19,12 @@
       <span><i class="fa fa-border-all cat-icon"></i>All Products</span>
       <i class="fa fa-chevron-right"></i>
     </a>
-    <a class="cat-item" href="#" onclick="askCat('Lubrication Equipment',this);return false;">
-      <span><i class="fa fa-oil-can cat-icon"></i>Lubrication Equipment</span>
+    {% for cat in categories %}
+    <a class="cat-item" href="#" title="{{ cat }}" onclick="askCat('{{ cat|escapejs }}',this);return false;">
+      <span><i class="fa fa-circle cat-icon" style="font-size:7px"></i>{{ cat }}</span>
       <i class="fa fa-chevron-right"></i>
     </a>
-    <a class="cat-item" href="#" onclick="askCat('Grease Pumps',this);return false;">
-      <span><i class="fa fa-pump-soap cat-icon"></i>Grease Pumps</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Grease Guns',this);return false;">
-      <span><i class="fa fa-tools cat-icon"></i>Grease Guns</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Hammers',this);return false;">
-      <span><i class="fa fa-hammer cat-icon"></i>Hammers</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Measuring Tools',this);return false;">
-      <span><i class="fa fa-ruler cat-icon"></i>Measuring Tools</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('LED Lighting',this);return false;">
-      <span><i class="fa fa-lightbulb cat-icon"></i>LED Lighting</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Fluid Handling',this);return false;">
-      <span><i class="fa fa-tint cat-icon"></i>Fluid Handling</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Precision Tools',this);return false;">
-      <span><i class="fa fa-drafting-compass cat-icon"></i>Precision Tools</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
+    {% endfor %}
 
     <div class="cat-info-box">
       <i class="fa fa-info-circle"></i>
@@ -64,11 +38,11 @@
     <!-- Quick filter chips -->
     <div class="filter-bar">
       <span class="filter-label">Quick:</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-tachometer-alt"></i> 7500 PSI Products</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-list-ul"></i> Grease Pump Variants</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-barcode"></i> Z-Swivel Cat No.</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-cube"></i> Aluminium Body Valve</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-archive"></i> Grease Gun Holder</span>
+      <span id="quick-chips">
+        {% for name in product_names|slice:":5" %}
+        <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-circle" style="font-size:7px"></i> {{ name }}</span>
+        {% endfor %}
+      </span>
     </div>
 
     <!-- Messages -->
@@ -80,24 +54,11 @@
           <p style="margin-top:8px">Ask me anything about GROZ industrial products — product codes, specifications, pressure ratings, ordering information, and variants.</p>
         </div>
         <div class="quick-cats">
-          <div class="quick-cat" onclick="quickAsk2('Show lubrication equipment products')">
-            <i class="fa fa-oil-can"></i><span>Lubrication</span>
+          {% for name in product_names|slice:":6" %}
+          <div class="quick-cat" onclick="quickAsk2('Tell me about {{ name|escapejs }}')">
+            <i class="fa fa-tag"></i><span>{{ name|truncatechars:18 }}</span>
           </div>
-          <div class="quick-cat" onclick="quickAsk2('Show all grease pump products')">
-            <i class="fa fa-pump-soap"></i><span>Grease Pumps</span>
-          </div>
-          <div class="quick-cat" onclick="quickAsk2('Show hand tools')">
-            <i class="fa fa-hammer"></i><span>Hand Tools</span>
-          </div>
-          <div class="quick-cat" onclick="quickAsk2('Show measuring tools')">
-            <i class="fa fa-ruler"></i><span>Measuring</span>
-          </div>
-          <div class="quick-cat" onclick="quickAsk2('Show LED lighting products')">
-            <i class="fa fa-lightbulb"></i><span>LED Lighting</span>
-          </div>
-          <div class="quick-cat" onclick="quickAsk2('Show fluid handling products')">
-            <i class="fa fa-tint"></i><span>Fluid Handling</span>
-          </div>
+          {% endfor %}
         </div>
       </div>
     </div>
@@ -122,6 +83,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>const CSRF = '{{ csrf_token }}';</script>
 <script src="{% static 'js/chat.js' %}"></script>
 {% endblock %}

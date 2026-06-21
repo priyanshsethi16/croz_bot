@@ -9,20 +9,63 @@ function showToast(msg, type='info', duration=4000) {
 
 function renderMarkdown(text) {
   if (!text) return '';
-  text = text.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g,(_,header,rows)=>{
-    const ths=header.split('|').filter(s=>s.trim()).map(s=>`<th>${s.trim()}</th>`).join('');
-    const trs=rows.trim().split('\n').map(row=>{
-      const tds=row.split('|').filter(s=>s.trim()).map(s=>`<td>${s.trim()}</td>`).join('');
-      return `<tr>${tds}</tr>`;
-    }).join('');
-    return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
-  });
-  text=text.replace(/^### (.+)$/gm,'<h3>$1</h3>');
-  text=text.replace(/^## (.+)$/gm,'<h3>$1</h3>');
-  text=text.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  text=text.replace(/`([^`]+)`/g,'<code>$1</code>');
-  text=text.replace(/^[-*] (.+)$/gm,'<li>$1</li>');
-  text=text.replace(/(<li>[\s\S]*?<\/li>)/g,m=>`<ul>${m}</ul>`);
-  text=text.replace(/\n\n+/g,'</p><p>').replace(/\n/g,'<br>');
-  return `<p>${text}</p>`;
+
+  function inlineFormat(t) {
+    t=t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
+    return t;
+  }
+
+  function isTableSep(line) {
+    return /^\s*\|[\s|:\-]+\|\s*$/.test(line);
+  }
+
+  function parseTable(lines, start) {
+    // start = header row index, start+1 = separator row
+    const headers = lines[start].split('|')
+      .slice(1,-1).map(s=>`<th>${inlineFormat(s.trim())}</th>`).join('');
+    let i = start + 2;
+    const bodyRows = [];
+    while (i < lines.length && /^\s*\|/.test(lines[i])) {
+      const tds = lines[i].split('|')
+        .slice(1,-1).map(s=>`<td>${inlineFormat(s.trim())}</td>`).join('');
+      bodyRows.push(`<tr>${tds}</tr>`);
+      i++;
+    }
+    return {
+      html: `<table><thead><tr>${headers}</tr></thead><tbody>${bodyRows.join('')}</tbody></table>`,
+      nextIndex: i
+    };
+  }
+
+  const lines = text.split(/\r?\n/);
+  // Group lines into blocks: tables vs text
+  const blocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^\s*\|/.test(lines[i]) && i+1 < lines.length && isTableSep(lines[i+1])) {
+      const {html, nextIndex} = parseTable(lines, i);
+      blocks.push({type:'table', html});
+      i = nextIndex;
+    } else {
+      if (!blocks.length || blocks[blocks.length-1].type !== 'text')
+        blocks.push({type:'text', lines:[]});
+      blocks[blocks.length-1].lines.push(lines[i]);
+      i++;
+    }
+  }
+
+  return blocks.map(b => {
+    if (b.type === 'table') return b.html;
+    let t = b.lines.join('\n');
+    t=t.replace(/^#{4} (.+)$/gm,'<h4>$1</h4>');
+    t=t.replace(/^#{3} (.+)$/gm,'<h3>$1</h3>');
+    t=t.replace(/^#{2} (.+)$/gm,'<h3>$1</h3>');
+    t=inlineFormat(t);
+    t=t.replace(/^[-*] (.+)$/gm,'<li>$1</li>');
+    t=t.replace(/(<li>.*?<\/li>\n?)+/g,m=>`<ul>${m}</ul>`);
+    t=t.replace(/\n{2,}/g,'</p><p>').replace(/\n/g,'<br>');
+    t=t.replace(/^---+$/gm,'<hr>');
+    return `<p>${t}</p>`;
+  }).join('');
 }

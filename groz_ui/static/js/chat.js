@@ -1,3 +1,20 @@
+function updateQuickChips(sources) {
+  const names = sources.map(s => s.name).filter(n => n && n.trim());
+  if (!names.length) return;
+  const container = document.getElementById('quick-chips');
+  if (!container) return;
+  container.innerHTML = names.map(n =>
+    `<span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-circle" style="font-size:7px"></i> ${n}</span>`
+  ).join('');
+}
+
+function getCsrf(){
+  return document.cookie.split(';').reduce((v,c)=>{
+    const [k,val]=c.trim().split('=');
+    return k==='csrftoken'?decodeURIComponent(val):v;
+  },'');
+}
+
 const msgsEl = document.getElementById('messages');
 const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
@@ -61,7 +78,7 @@ async function sendMessage(){
   try{
     const res=await fetch('/api/chat/',{
       method:'POST',
-      headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+      headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
       body:JSON.stringify({query:q})
     });
     const data=await res.json();
@@ -70,6 +87,7 @@ async function sendMessage(){
       addMsg('bot',`<span style="color:var(--orange)"><i class="fa fa-exclamation-triangle"></i> ${data.error}</span>`);
     }else{
       addMsg('bot',renderMarkdown(data.answer),data.sources||[]);
+      updateQuickChips(data.sources||[]);
     }
   }catch(e){
     document.getElementById('typing')?.remove();

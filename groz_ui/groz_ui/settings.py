@@ -1,8 +1,12 @@
-from pathlib import Path
 import sys, os
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent   # croz_bot/
+
+# Load .env so DB_* vars are available
+from dotenv import load_dotenv
+load_dotenv(PROJECT_ROOT / '.env')
 
 SECRET_KEY = 'groz-django-secret-key-change-in-production'
 DEBUG = True
@@ -53,6 +57,14 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+    },
+    'postgres': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'HOST':     os.getenv('DB_HOST', 'localhost'),
+        'PORT':     os.getenv('DB_PORT', '5432'),
+        'NAME':     os.getenv('DB_NAME', 'croz_bot'),
+        'USER':     os.getenv('DB_USER', 'croz_user'),
+        'PASSWORD': os.getenv('DB_PASSWORD', ''),
     }
 }
 

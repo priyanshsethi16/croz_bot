@@ -720,3 +720,40 @@
 
 /* File item preview button */
 .file-preview-btn { margin-left: 8px; flex-shrink: 0; }
+
+/* ── API Keys Panel ── */
+.apikey-group { display: flex; flex-direction: column; gap: 6px; }
+.apikey-label { font-size: 12px; font-weight: 700; color: var(--dark); display: flex; align-items: center; gap: 6px; }
+.apikey-hint { font-weight: 400; color: var(--grey); font-size: 11px; }
+.apikey-input-row { display: flex; gap: 0; border: 1.5px solid var(--border); border-radius: 6px; overflow: hidden; transition: border-color .2s; }
+.apikey-input-row:focus-within { border-color: var(--orange); }
+.apikey-input {
+  flex: 1; border: none; outline: none; padding: 10px 14px;
+  font-size: 13px; font-family: 'Courier New', monospace; background: #fafafa;
+  color: var(--dark);
+}
+.apikey-eye {
+  width: 40px; border: none; background: var(--light); cursor: pointer;
+  color: var(--grey); font-size: 13px; transition: all .15s; flex-shrink: 0;
+}
+.apikey-eye:hover { background: var(--orange-light); color: var(--orange); }
+
+/* ── Chunk Edit Mode ── */
+.chunk-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 0 12px; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.chunk-save-status {
+  font-size: 12px; font-weight: 600; margin-left: 4px;
+}
+.chunk-editor { display: none; } /* hidden — using contenteditable instead */
+.chunk-editable {
+  border: 1.5px solid var(--orange) !important;
+  border-radius: 6px;
+  padding: 14px !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(232,80,10,0.08);
+  min-height: 200px;
+  cursor: text;
+}

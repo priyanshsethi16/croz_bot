@@ -20,19 +20,17 @@ function showPanel(name) {
 
   closeSidebar();
   if (name === 'chunk') loadPdfList();
+  if (name === 'index') loadIndexList();
   if (name === 'upload') loadExistingUploads();
 }
 
 async function loadExistingUploads() {
   const list = document.getElementById('upload-file-list');
-  if (list.children.length > 0) return; // already populated this session
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
-    (data.pdfs || []).forEach(name => {
-      const item = addFileItem(name, '', 'success', '✓ Uploaded');
-      // hide the preview btn until status is known — it's already there
-    });
+    list.innerHTML = '';
+    (data.pdfs || []).forEach(name => addFileItem(name, '', 'success', '✓ Uploaded'));
   } catch(e) {}
 }
 
@@ -294,6 +292,69 @@ function setIndexMode(mode) {
   document.querySelector(`.index-option-card[data-mode="${mode}"]`).classList.add('selected');
 }
 
+async function loadIndexList() {
+  try {
+    const [pdfRes, statsRes] = await Promise.all([
+      fetch('/admin-panel/api/pdfs/'),
+      fetch('/admin-panel/api/stats/'),
+    ]);
+    const pdfData   = await pdfRes.json();
+    const statsData = await statsRes.json();
+
+    // Build set of PDF stems that have chunks
+    const chunked = new Set(pdfData.chunked || []);
+    // Build set of PDF stems that have indexed docs in chroma
+    const indexedCount = statsData.indexed || 0;
+    // We mark a PDF as "indexed" if it has chunks (chroma count > 0 means something is indexed)
+    // Use processed list to show per-PDF status
+    const processed = statsData.processed || [];
+    const processedMap = {};
+    processed.forEach(p => { processedMap[p.name] = p; });
+
+    let container = document.getElementById('index-pdf-list');
+    if (!container) {
+      // Insert before the index-options div
+      const optionsEl = document.querySelector('#panel-index .index-options');
+      if (optionsEl) {
+        container = document.createElement('div');
+        container.id = 'index-pdf-list';
+        container.style.cssText = 'margin-bottom:16px;display:flex;flex-direction:column;gap:8px;';
+        optionsEl.parentNode.insertBefore(container, optionsEl);
+      }
+    }
+    if (!container) return;
+
+    const pdfs = pdfData.pdfs || [];
+    if (!pdfs.length) {
+      container.innerHTML = '<p style="color:var(--grey);font-size:13px">No PDFs found.</p>';
+      return;
+    }
+
+    container.innerHTML = pdfs.map(name => {
+      const stem      = name.replace(/\.pdf$/i, '');
+      const hasChunks = chunked.has(stem);
+      const info      = processedMap[stem];
+      const isIndexed = hasChunks && indexedCount > 0;
+      const badge = isIndexed
+        ? '<span class="badge badge-green"><i class="fa fa-check-circle"></i> Indexed</span>'
+        : hasChunks
+          ? '<span class="badge badge-orange"><i class="fa fa-clock"></i> Not indexed</span>'
+          : '<span class="badge badge-grey"><i class="fa fa-minus"></i> No chunks</span>';
+      const chunksInfo = info ? `${info.chunks} chunks` : '';
+      return `
+        <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;
+             border:1px solid var(--border);border-radius:8px;background:#fafafa">
+          <i class="fa fa-file-pdf" style="color:var(--orange);font-size:16px;flex-shrink:0"></i>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(name)}</div>
+            ${chunksInfo ? `<div style="font-size:11px;color:var(--grey);margin-top:2px">${chunksInfo}</div>` : ''}
+          </div>
+          ${badge}
+        </div>`;
+    }).join('');
+  } catch(e) {}
+}
+
 async function runIndexing() {
   const reset = indexMode === 'reset';
   const btn   = document.getElementById('btn-run-index');
@@ -335,6 +396,7 @@ async function runIndexing() {
       showToast('Indexing complete!', 'success');
       refreshStats();
       markStepDone('index');
+      loadIndexList();
     }
   } catch(e) {
     clearInterval(ticker);
@@ -417,15 +479,38 @@ async function deletePdf(filename) {
     const data = await res.json();
     if (data.error) { showToast(data.error, 'error'); return; }
     showToast(data.message, 'success');
+
+    const stem = filename.replace(/\.pdf$/i, '');
+
+    // 1. Remove ALL matching rows from catalog table (stem or full filename)
+    document.querySelectorAll('.catalog-table tbody tr').forEach(row => {
+      const pname = row.querySelector('.pname')?.textContent?.trim();
+      if (pname === stem || pname === filename) row.remove();
+    });
+
+    // 2. Remove from upload list
+    document.querySelectorAll('#upload-file-list .file-item').forEach(item => {
+      const fname = item.querySelector('.fname')?.textContent?.trim();
+      if (fname === filename || fname === stem) item.remove();
+    });
+
+    // 3. Remove from chunk panel grid
+    document.querySelectorAll('#pdf-selector-grid .pdf-select-card').forEach(card => {
+      if (card.dataset.pdf === filename || card.dataset.pdf === stem) card.remove();
+    });
+
+    // 4. Invalidate chunks cache
+    delete _chunksCache[stem];
+    delete _chunksCache[filename];
+
+    // 5. Refresh stats counters + reload both live lists
     refreshStats();
     loadPdfList();
-    document.querySelectorAll('.catalog-table tbody tr').forEach(row => {
-      if (row.querySelector('.pname')?.textContent === filename) row.remove();
-    });
+    loadExistingUploads();
   } catch(e) { showToast('Delete failed.', 'error'); }
 }
 
-// -- Stats refresh -------------------------------------------------------------────────────
+// -- Stats refresh + table rebuild -------------------------------------------
 async function refreshStats() {
   try {
     const res  = await fetch('/admin-panel/api/stats/');
@@ -433,8 +518,65 @@ async function refreshStats() {
     document.getElementById('stat-pdfs').textContent      = data.total_pdfs ?? '—';
     document.getElementById('stat-processed').textContent = (data.processed||[]).length;
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
-    document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
+    document.getElementById('stat-chunks').textContent    = data.total_chunks ?? '—';
+    _rebuildCatalogTable(data);
   } catch(e) {}
+}
+
+function _rebuildCatalogTable(data) {
+  const processed   = data.processed   || [];
+  const unprocessed = data.unprocessed || [];
+  const allEmpty    = processed.length === 0 && unprocessed.length === 0;
+
+  // If nothing at all, show empty state and hide table
+  const tableWrap = document.querySelector('#panel-overview .table-wrap');
+  const emptyEl   = document.getElementById('catalog-empty');
+
+  if (allEmpty) {
+    if (tableWrap) tableWrap.style.display = 'none';
+    if (emptyEl)   emptyEl.style.display   = 'block';
+    return;
+  }
+
+  // We have rows — ensure table is visible, empty state hidden
+  if (emptyEl)   emptyEl.style.display   = 'none';
+  if (tableWrap) tableWrap.style.display = '';
+
+  const tbody = document.getElementById('catalog-tbody');
+  if (!tbody) { location.reload(); return; }
+
+  var rows = [];
+
+  processed.forEach(function(item) {
+    var adminBtns = IS_ADMIN
+      ? '<button class="btn btn-sm btn-danger" onclick="deletePdf(\'' + escHtml(item.name) + '.pdf\')"><i class="fa fa-trash"></i> Delete</button>'
+      : '';
+    rows.push('<tr>'
+      + '<td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname">' + escHtml(item.name) + '</span></div></td>'
+      + '<td><span class="badge badge-blue">' + item.chunks + '</span></td>'
+      + '<td><span class="badge badge-green">' + item.products + '</span></td>'
+      + '<td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>'
+      + '<td><div class="table-actions">'
+      + '<button class="btn btn-sm btn-secondary" onclick="openChunks(\'' + escHtml(item.name) + '\')"><i class="fa fa-layer-group"></i> Chunks</button>'
+      + '<button class="btn btn-sm btn-secondary" onclick="showPanel(\'chat\')"><i class="fa fa-comments"></i> Test</button>'
+      + adminBtns
+      + '</div></td></tr>');
+  });
+
+  if (IS_ADMIN) {
+    unprocessed.forEach(function(pdf_name) {
+      rows.push('<tr>'
+        + '<td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname">' + escHtml(pdf_name) + '</span></div></td>'
+        + '<td><span class="badge badge-grey">&mdash;</span></td>'
+        + '<td><span class="badge badge-grey">&mdash;</span></td>'
+        + '<td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>'
+        + '<td><div class="table-actions">'
+        + '<button class="btn btn-sm btn-danger" onclick="deletePdf(\'' + escHtml(pdf_name) + '\')"><i class="fa fa-trash"></i> Delete</button>'
+        + '</div></td></tr>');
+    });
+  }
+
+  tbody.innerHTML = rows.join('');
 }
 
 // ── Text Splitter ────────────────────────────────────
@@ -785,15 +927,142 @@ function renderChunks(pdfName, chunks) {
     return;
   }
 
+  // Store for edit access
+  _currentChunks  = chunks;
+  _currentPdfName = pdfName;
+
   // Build tabs
   tabs.innerHTML = chunks.map((c, i) =>
     `<button class="chunk-tab${i===0?' active':''}" onclick="switchChunk(${i})">${escHtml(c.filename.replace(/\.md$/, ''))}</button>`
   ).join('');
 
-  // Build content panes
-  body.innerHTML = chunks.map((c, i) =>
-    `<div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">${mdToHtml(c.content)}</div>`
-  ).join('');
+  // Build content panes — each has view + edit mode
+  body.innerHTML = chunks.map((c, i) => `
+    <div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">
+      <div class="chunk-toolbar">
+        <button class="btn btn-sm btn-secondary chunk-edit-btn" id="edit-btn-${i}" onclick="startEditChunk(${i})">
+          <i class="fa fa-pen"></i> Edit
+        </button>
+        <button class="btn btn-sm btn-primary chunk-save-btn" id="save-btn-${i}" onclick="saveChunk(${i})" style="display:none">
+          <i class="fa fa-save"></i> Save
+        </button>
+        <button class="btn btn-sm btn-secondary chunk-cancel-btn" id="cancel-btn-${i}" onclick="cancelEditChunk(${i})" style="display:none">
+          <i class="fa fa-times"></i> Cancel
+        </button>
+        <span class="chunk-save-status" id="save-status-${i}"></span>
+      </div>
+      <div id="chunk-view-${i}">${mdToHtml(c.content)}</div>
+      <textarea id="chunk-edit-${i}" class="chunk-editor" style="display:none">${escHtml(c.content)}</textarea>
+    </div>
+  `).join('');
+}
+
+let _currentChunks  = [];
+let _currentPdfName = '';
+
+function startEditChunk(i) {
+  const viewEl = document.getElementById(`chunk-view-${i}`);
+  // Make the rendered view directly editable
+  viewEl.contentEditable = 'true';
+  viewEl.classList.add('chunk-editable');
+  viewEl.focus();
+  document.getElementById(`chunk-edit-${i}`).style.display = 'none'; // keep hidden
+  document.getElementById(`edit-btn-${i}`).style.display   = 'none';
+  document.getElementById(`save-btn-${i}`).style.display   = 'inline-flex';
+  document.getElementById(`cancel-btn-${i}`).style.display = 'inline-flex';
+}
+
+function cancelEditChunk(i) {
+  const viewEl = document.getElementById(`chunk-view-${i}`);
+  viewEl.contentEditable = 'false';
+  viewEl.classList.remove('chunk-editable');
+  // Restore original rendered content
+  viewEl.innerHTML = mdToHtml(_currentChunks[i].content);
+  document.getElementById(`edit-btn-${i}`).style.display   = 'inline-flex';
+  document.getElementById(`save-btn-${i}`).style.display   = 'none';
+  document.getElementById(`cancel-btn-${i}`).style.display = 'none';
+  document.getElementById(`save-status-${i}`).textContent  = '';
+}
+
+function _htmlToMd(html) {
+  // Convert edited HTML back to clean markdown
+  return html
+    .replace(/<h1[^>]*>(.*?)<\/h1>/gi,  (_, t) => `# ${t.replace(/<[^>]+>/g,'')}\n`)
+    .replace(/<h2[^>]*>(.*?)<\/h2>/gi,  (_, t) => `## ${t.replace(/<[^>]+>/g,'')}\n`)
+    .replace(/<h3[^>]*>(.*?)<\/h3>/gi,  (_, t) => `### ${t.replace(/<[^>]+>/g,'')}\n`)
+    .replace(/<h4[^>]*>(.*?)<\/h4>/gi,  (_, t) => `#### ${t.replace(/<[^>]+>/g,'')}\n`)
+    .replace(/<strong>(.*?)<\/strong>/gi,(_, t) => `**${t}**`)
+    .replace(/<code>(.*?)<\/code>/gi,    (_, t) => `\`${t}\``)
+    .replace(/<li>(.*?)<\/li>/gi,        (_, t) => `- ${t.replace(/<[^>]+>/g,'')}\n`)
+    .replace(/<ul>|<\/ul>|<ol>|<\/ol>/gi, '')
+    .replace(/<p>(.*?)<\/p>/gi,          (_, t) => `${t.replace(/<[^>]+>/g,'')}\n`)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<hr\s*\/?>/gi, '---\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function saveChunk(i) {
+  const chunk    = _currentChunks[i];
+  const viewEl   = document.getElementById(`chunk-view-${i}`);
+  const newMd    = _htmlToMd(viewEl.innerHTML);
+  const statusEl = document.getElementById(`save-status-${i}`);
+  const saveBtn  = document.getElementById(`save-btn-${i}`);
+
+  saveBtn.disabled = true;
+  statusEl.textContent = 'Saving…';
+  statusEl.style.color = 'var(--grey)';
+
+  try {
+    const res  = await fetch('/admin-panel/api/chunk-save/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ part: chunk.part, filename: chunk.filename, content: newMd }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Save failed.');
+
+    // Update cache with new markdown
+    _currentChunks[i].content = newMd;
+    delete _chunksCache[_currentPdfName];
+
+    // Exit edit mode
+    cancelEditChunk(i);
+    statusEl.textContent = '✓ Saved — indexing started…';
+    statusEl.style.color = '#16a34a';
+
+    // Auto run incremental indexing in background
+    _autoReindex(statusEl);
+  } catch (e) {
+    statusEl.textContent = '✗ ' + e.message;
+    statusEl.style.color = '#dc2626';
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+async function _autoReindex(statusEl) {
+  try {
+    const res  = await fetch('/admin-panel/api/ingest/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ reset: false }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (statusEl) { statusEl.textContent = '✓ Saved & indexed successfully'; statusEl.style.color = '#16a34a'; }
+      showToast('Chunk saved & re-indexed!', 'success');
+      refreshStats();
+      loadIndexList();
+    } else {
+      if (statusEl) { statusEl.textContent = '✓ Saved — indexing failed: ' + (data.error || ''); statusEl.style.color = '#dc2626'; }
+      showToast('Saved but indexing failed.', 'error');
+    }
+  } catch(e) {
+    if (statusEl) { statusEl.textContent = '✓ Saved — indexing error: ' + e.message; statusEl.style.color = '#dc2626'; }
+  }
 }
 
 function switchChunk(idx) {
@@ -847,3 +1116,68 @@ function mdToHtml(md) {
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
+// ── API Keys Panel ─────────────────────────────────────────────────────────────
+
+function toggleKeyVis(name) {
+  const inp = document.getElementById(`key-${name}`);
+  if (!inp) return;
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+async function loadApiKeys() {
+  try {
+    const res  = await fetch('/admin-panel/api/api-keys/', { headers: { 'X-CSRFToken': CSRF } });
+    const data = await res.json();
+    if (data.keys) {
+      for (const [name, val] of Object.entries(data.keys)) {
+        const inp = document.getElementById(`key-${name}`);
+        if (inp) inp.value = val;
+      }
+      _showApiMsg('Current keys loaded (masked). Enter new value to update.', 'info');
+    }
+  } catch (e) {
+    _showApiMsg('Failed to load keys: ' + e.message, 'error');
+  }
+}
+
+async function saveApiKeys() {
+  const keyNames = ['GROQ_API_KEY', 'GEMINI_API_KEY_1', 'GEMINI_API_KEY_2', 'GEMINI_API_KEY_3'];
+  const body = {};
+  keyNames.forEach(n => {
+    const inp = document.getElementById(`key-${n}`);
+    if (inp) body[n] = inp.value.trim();
+  });
+  try {
+    const res  = await fetch('/admin-panel/api/api-keys/save/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      _showApiMsg(`✓ ${data.message}`, 'success');
+    } else {
+      _showApiMsg(data.error || 'Save failed.', 'error');
+    }
+  } catch (e) {
+    _showApiMsg('Network error: ' + e.message, 'error');
+  }
+}
+
+function _showApiMsg(msg, type) {
+  const el = document.getElementById('apikeys-msg');
+  if (!el) return;
+  const colors = { success: '#16a34a', error: '#dc2626', info: '#2563eb' };
+  el.style.display = 'block';
+  el.style.color = colors[type] || '#666';
+  el.textContent = msg;
+}
+
+// Auto-load keys when API Keys panel is opened
+const _origShowPanel = typeof showPanel === 'function' ? showPanel : null;
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('[data-panel="apikeys"]').forEach(btn => {
+    btn.addEventListener('click', () => { setTimeout(loadApiKeys, 100); });
+  });
+});

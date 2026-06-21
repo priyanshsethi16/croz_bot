@@ -71,6 +71,11 @@
       <button class="sidebar-link" data-panel="chat" onclick="showPanel('chat')">
         <i class="fa fa-comments"></i> Chat
       </button>
+      {% if is_admin %}
+      <button class="sidebar-link" data-panel="apikeys" onclick="showPanel('apikeys')">
+        <i class="fa fa-key"></i> API Keys
+      </button>
+      {% endif %}
     </div>
   </aside>
 
@@ -170,7 +175,7 @@
           {% endif %}
         </div>
         <div class="panel-body">
-          {% if stats.processed %}
+          {% if stats.processed or stats.unprocessed %}
           <div class="table-wrap">
             <table class="catalog-table">
               <thead>
@@ -182,54 +187,30 @@
                   <th>Actions</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody id="catalog-tbody">
               {% for item in stats.processed %}
                 <tr>
-                  <td>
-                    <div class="pdf-name-cell">
-                      <i class="fa fa-file-pdf"></i>
-                      <span class="pname">{{ item.name }}</span>
-                    </div>
-                  </td>
+                  <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname">{{ item.name }}</span></div></td>
                   <td><span class="badge badge-blue">{{ item.chunks }}</span></td>
                   <td><span class="badge badge-green">{{ item.products }}</span></td>
                   <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
-                  <td>
-                    <div class="table-actions">
-                      <button class="btn btn-sm btn-secondary" onclick="openChunks('{{ item.name }}')">
-                        <i class="fa fa-layer-group"></i> Chunks
-                      </button>
-                      <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
-                        <i class="fa fa-comments"></i> Test
-                      </button>
-                      {% if is_admin %}
-                      <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
-                        <i class="fa fa-trash"></i> Delete
-                      </button>
-                      {% endif %}
-                    </div>
-                  </td>
+                  <td><div class="table-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="openChunks('{{ item.name }}')"><i class="fa fa-layer-group"></i> Chunks</button>
+                    <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')"><i class="fa fa-comments"></i> Test</button>
+                    {% if is_admin %}<button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}.pdf')"><i class="fa fa-trash"></i> Delete</button>{% endif %}
+                  </div></td>
                 </tr>
               {% endfor %}
               {% if is_admin %}
               {% for pdf_name in stats.unprocessed %}
                 <tr>
-                  <td>
-                    <div class="pdf-name-cell">
-                      <i class="fa fa-file-pdf"></i>
-                      <span class="pname">{{ pdf_name }}</span>
-                    </div>
-                  </td>
-                  <td><span class="badge badge-grey">—</span></td>
-                  <td><span class="badge badge-grey">—</span></td>
+                  <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname">{{ pdf_name }}</span></div></td>
+                  <td><span class="badge badge-grey">&mdash;</span></td>
+                  <td><span class="badge badge-grey">&mdash;</span></td>
                   <td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>
-                  <td>
-                    <div class="table-actions">
-                      <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ pdf_name }}')">
-                        <i class="fa fa-trash"></i> Delete
-                      </button>
-                    </div>
-                  </td>
+                  <td><div class="table-actions">
+                    <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ pdf_name }}')"><i class="fa fa-trash"></i> Delete</button>
+                  </div></td>
                 </tr>
               {% endfor %}
               {% endif %}
@@ -237,14 +218,12 @@
             </table>
           </div>
           {% else %}
-          <div style="text-align:center;padding:48px 20px;color:var(--grey)">
+          <div id="catalog-empty" style="text-align:center;padding:48px 20px;color:var(--grey)">
             <i class="fa fa-inbox" style="font-size:40px;margin-bottom:14px;display:block;color:#d0d0d0"></i>
-            <p style="font-size:14px;font-weight:600;margin-bottom:8px">No PDFs processed yet</p>
+            <p style="font-size:14px;font-weight:600;margin-bottom:8px">No PDFs uploaded yet</p>
             {% if is_admin %}
             <p style="font-size:13px;margin-bottom:20px">Follow the 3-step workflow to get started.</p>
-            <button class="btn btn-primary" onclick="showPanel('upload')">
-              <i class="fa fa-upload"></i> Upload Your First PDF
-            </button>
+            <button class="btn btn-primary" onclick="showPanel('upload')"><i class="fa fa-upload"></i> Upload Your First PDF</button>
             {% else %}
             <p style="font-size:13px">No catalog data available yet. Please contact your administrator.</p>
             {% endif %}
@@ -582,6 +561,69 @@
         </div>
       </div>
     </div>
+
+    <!-- ══ PANEL: API Keys (admin only) ══ -->
+    {% if is_admin %}
+    <div class="panel" id="panel-apikeys">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-key"></i></div>
+            <div>
+              <h3>API Keys</h3>
+              <p>Update keys used for chunk creation (Gemini) and chatbot responses (Groq)</p>
+            </div>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div style="max-width:520px;display:flex;flex-direction:column;gap:18px" id="apikeys-form">
+
+            <div class="apikey-group">
+              <div class="apikey-label"><i class="fa fa-robot" style="color:var(--orange)"></i> Groq API Key <span class="apikey-hint">— used for chatbot responses</span></div>
+              <div class="apikey-input-row">
+                <input type="password" id="key-GROQ_API_KEY" class="apikey-input" placeholder="gsk_…" autocomplete="off"/>
+                <button class="apikey-eye" onclick="toggleKeyVis('GROQ_API_KEY')"><i class="fa fa-eye"></i></button>
+              </div>
+            </div>
+
+            <div class="apikey-group">
+              <div class="apikey-label"><i class="fa fa-gem" style="color:var(--orange)"></i> Gemini API Key 1 <span class="apikey-hint">— used for chunk creation</span></div>
+              <div class="apikey-input-row">
+                <input type="password" id="key-GEMINI_API_KEY_1" class="apikey-input" placeholder="AIza…" autocomplete="off"/>
+                <button class="apikey-eye" onclick="toggleKeyVis('GEMINI_API_KEY_1')"><i class="fa fa-eye"></i></button>
+              </div>
+            </div>
+
+            <div class="apikey-group">
+              <div class="apikey-label"><i class="fa fa-gem" style="color:var(--orange)"></i> Gemini API Key 2 <span class="apikey-hint">— rotation key 2</span></div>
+              <div class="apikey-input-row">
+                <input type="password" id="key-GEMINI_API_KEY_2" class="apikey-input" placeholder="AIza…" autocomplete="off"/>
+                <button class="apikey-eye" onclick="toggleKeyVis('GEMINI_API_KEY_2')"><i class="fa fa-eye"></i></button>
+              </div>
+            </div>
+
+            <div class="apikey-group">
+              <div class="apikey-label"><i class="fa fa-gem" style="color:var(--orange)"></i> Gemini API Key 3 <span class="apikey-hint">— rotation key 3</span></div>
+              <div class="apikey-input-row">
+                <input type="password" id="key-GEMINI_API_KEY_3" class="apikey-input" placeholder="AIza…" autocomplete="off"/>
+                <button class="apikey-eye" onclick="toggleKeyVis('GEMINI_API_KEY_3')"><i class="fa fa-eye"></i></button>
+              </div>
+            </div>
+
+            <div class="action-row">
+              <button class="btn btn-primary" onclick="saveApiKeys()">
+                <i class="fa fa-save"></i> Save Keys
+              </button>
+              <button class="btn btn-secondary" onclick="loadApiKeys()">
+                <i class="fa fa-sync"></i> Load Current
+              </button>
+            </div>
+            <div id="apikeys-msg" style="font-size:13px;display:none"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
 
   </main>
 </div>

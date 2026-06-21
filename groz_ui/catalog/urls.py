@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/chat/',     views.admin_chat,    name='admin_chat'),
     path('api/stats/',    views.catalog_stats, name='catalog_stats'),
     path('api/chunks/',       views.list_chunks,        name='list_chunks'),
+    path('api/chunk-save/',    views.save_chunk,         name='save_chunk'),
     path('api/pdf-pages/',     views.pdf_page_count,     name='pdf_page_count'),
     path('api/split-pdf/',      views.split_pdf,          name='split_pdf'),
     path('api/split-pdf-custom/', views.split_pdf_custom,   name='split_pdf_custom'),

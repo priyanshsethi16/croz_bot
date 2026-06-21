@@ -16,44 +16,64 @@ from django.views.decorators.http import require_POST
 PROJECT_ROOT = settings.PROJECT_ROOT
 
 
+def _get_pdf_stem(folder_name: str, pdf_stems: set) -> str:
+    """Map a data folder name back to its source PDF stem."""
+    if folder_name in pdf_stems:
+        return folder_name
+    for stem in sorted(pdf_stems, key=len, reverse=True):
+        # Match: stem_custom_p..., stem_p..., or stem_ (any suffix)
+        if (folder_name.startswith(stem + '_') or
+            folder_name.startswith(stem + 'p')):
+            return stem
+    return folder_name
+
+
 def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
-    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+    data_dir  = PROJECT_ROOT / 'vision_pipeline' / 'data'
     input_dir = PROJECT_ROOT / 'input'
 
     pdfs      = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
-    processed = []
+    pdf_stems = {p.stem for p in pdfs}
+
+    # Aggregate chunks/products by parent PDF stem (groups split parts together)
+    aggregated: dict[str, dict] = {}
     if data_dir.exists():
         for d in sorted(data_dir.iterdir()):
-            if d.is_dir():
-                chunks = list((d / 'chunks').glob('*.md')) if (d / 'chunks').exists() else []
-                prod_json = d / 'products.json'
-                products = []
-                if prod_json.exists():
-                    try:
-                        products = json.loads(prod_json.read_text())
-                    except Exception:
-                        pass
-                if chunks:
-                    processed.append({
-                        'name': d.name,
-                        'chunks': len(chunks),
-                        'products': len(products),
-                    })
+            if not d.is_dir():
+                continue
+            chunks = list((d / 'chunks').glob('*.md')) if (d / 'chunks').exists() else []
+            if not chunks:
+                continue
+            prod_json = d / 'products.json'
+            products  = []
+            if prod_json.exists():
+                try:
+                    products = json.loads(prod_json.read_text())
+                except Exception:
+                    pass
+            parent = _get_pdf_stem(d.name, pdf_stems)
+            if parent not in aggregated:
+                aggregated[parent] = {'name': parent, 'chunks': 0, 'products': 0}
+            aggregated[parent]['chunks']   += len(chunks)
+            aggregated[parent]['products'] += len(products)
+
+    processed = list(aggregated.values())
 
     try:
         import chromadb
         client = chromadb.PersistentClient(path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db'))
-        col = client.get_collection('catalog_products')
+        col    = client.get_collection('catalog_products')
         indexed = col.count()
     except Exception:
         indexed = 0
 
+    processed_stems = {d['name'] for d in processed}
     return {
-        'total_pdfs': len(pdfs),
-        'processed': processed,
-        'unprocessed': [p.name for p in pdfs if p.stem not in {d['name'] for d in processed}],
-        'indexed': indexed,
+        'total_pdfs':   len(pdfs),
+        'processed':    processed,
+        'unprocessed':  [p.name for p in pdfs if p.stem not in processed_stems],
+        'indexed':      indexed,
     }
 
 
@@ -153,13 +173,15 @@ def run_pipeline(request):
 def list_pdfs(request):
     input_dir = PROJECT_ROOT / 'input'
     data_dir  = PROJECT_ROOT / 'vision_pipeline' / 'data'
-    pdfs = sorted(p.name for p in input_dir.glob('*.pdf')) if input_dir.exists() else []
-    # Build set of stems that already have chunks
+    pdfs      = sorted(p.name for p in input_dir.glob('*.pdf')) if input_dir.exists() else []
+    pdf_stems = {Path(p).stem for p in pdfs}
+
     chunked = set()
     if data_dir.exists():
         for d in data_dir.iterdir():
             if d.is_dir() and (d / 'chunks').exists() and list((d / 'chunks').glob('*.md')):
-                chunked.add(d.name)
+                parent = _get_pdf_stem(d.name, pdf_stems)
+                chunked.add(parent)
     return JsonResponse({'pdfs': pdfs, 'chunked': list(chunked)})
 
 
@@ -240,10 +262,10 @@ def admin_chat(request):
     try:
         from dotenv import load_dotenv
         load_dotenv(PROJECT_ROOT / '.env')
-        from rag_pipeline.retriever import Retriever
+        from rag_pipeline.retriever import HybridRetriever
         from rag_pipeline.llm import LLMAnswerer
 
-        retriever = Retriever(top_k=5)
+        retriever = HybridRetriever(top_k=5)
         llm       = LLMAnswerer(os.getenv('GROQ_API_KEY'))
         chunks    = retriever.retrieve(query)
         answer    = llm.answer(query, chunks)
@@ -262,7 +284,16 @@ def admin_chat(request):
 
 @login_required
 def catalog_stats(request):
-    return JsonResponse(_get_catalog_stats())
+    stats = _get_catalog_stats()
+    # Compute total chunks from data folders (not chroma) for accurate display
+    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+    total_chunks = 0
+    if data_dir.exists():
+        for d in data_dir.iterdir():
+            if d.is_dir() and (d / 'chunks').exists():
+                total_chunks += len(list((d / 'chunks').glob('*.md')))
+    stats['total_chunks'] = total_chunks
+    return JsonResponse(stats)
 
 
 # ── API: PDF page count ────────────────────────────────────────────────
@@ -438,6 +469,57 @@ def split_pdf_custom(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
+# -- API: Save (edit) a single chunk file ------------------------------------
+
+@login_required
+@require_POST
+def save_chunk(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body     = json.loads(request.body)
+        part     = body.get('part', '').strip()      # data sub-folder name
+        filename = body.get('filename', '').strip()  # e.g. 0001_grease_gun.md
+        content  = body.get('content', '')
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not part or not filename:
+        return JsonResponse({'error': 'Missing part or filename.'}, status=400)
+
+    # Safety: prevent path traversal
+    if '..' in part or '..' in filename or '/' in filename:
+        return JsonResponse({'error': 'Invalid path.'}, status=400)
+
+    chunk_path = PROJECT_ROOT / 'vision_pipeline' / 'data' / part / 'chunks' / filename
+    if not chunk_path.exists():
+        return JsonResponse({'error': f'Chunk not found: {filename}'}, status=404)
+
+    # Write the updated markdown
+    chunk_path.write_text(content, encoding='utf-8')
+
+    # Remove this chunk from Chroma so re-index picks up the new content
+    try:
+        import chromadb, hashlib, re as _re
+        client = chromadb.PersistentClient(
+            path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db')
+        )
+        col      = client.get_collection('catalog_products')
+        all_data = col.get(include=['metadatas'])
+        stem     = Path(filename).stem  # e.g. 0001_grease_gun
+        ids_to_del = [
+            doc_id for doc_id, meta in zip(all_data['ids'], all_data['metadatas'])
+            if stem[:8] in str(meta.get('chunk_path', ''))
+            or stem[:8] in doc_id
+        ]
+        if ids_to_del:
+            col.delete(ids=ids_to_del)
+    except Exception:
+        pass  # Chroma cleanup is best-effort; re-index will handle it
+
+    return JsonResponse({'message': f'{filename} saved. Re-index to apply changes.'})
+
+
 # -- API: Delete PDF + all associated data ------------------------------------
 
 @login_required
@@ -457,24 +539,34 @@ def delete_pdf(request):
     stem     = Path(filename).stem
     pdf_path = PROJECT_ROOT / 'input' / filename
 
+    # 1. Delete the PDF file
     if pdf_path.exists():
         pdf_path.unlink()
 
+    # 2. Delete splits folder
     splits_dir = PROJECT_ROOT / 'input' / 'splits' / stem
     if splits_dir.exists():
         shutil.rmtree(splits_dir)
 
-    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / stem
-    if data_dir.exists():
-        shutil.rmtree(data_dir)
+    # 3. Delete ALL data folders: exact match + split parts (stem_custom_p*, stem_p*, etc.)
+    data_root = PROJECT_ROOT / 'vision_pipeline' / 'data'
+    if data_root.exists():
+        for d in data_root.iterdir():
+            if d.is_dir() and (d.name == stem or d.name.startswith(stem + '_') or d.name.startswith(stem + 'p')):
+                shutil.rmtree(d)
 
+    # 4. Remove from Chroma — source_pdf is stored as path variants, match all
     try:
         import chromadb
         client  = chromadb.PersistentClient(path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db'))
         col     = client.get_collection('catalog_products')
-        results = col.get(where={'source_pdf': stem})
-        if results['ids']:
-            col.delete(ids=results['ids'])
+        all_data = col.get(include=['metadatas'])
+        ids_to_del = [
+            doc_id for doc_id, meta in zip(all_data['ids'], all_data['metadatas'])
+            if stem in str(meta.get('source_pdf', ''))
+        ]
+        if ids_to_del:
+            col.delete(ids=ids_to_del)
     except Exception:
         pass
 
@@ -491,16 +583,26 @@ def list_chunks(request):
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
 
-    chunks_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks'
-    if not chunks_dir.exists():
-        return JsonResponse({'chunks': []})
+    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+    chunks   = []
 
-    chunks = []
-    for f in sorted(chunks_dir.glob('*.md')):
-        chunks.append({
-            'filename': f.name,
-            'content': f.read_text(encoding='utf-8'),
-        })
+    if data_dir.exists():
+        for d in sorted(data_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            # Match exact folder OR split parts that start with this stem
+            if d.name != pdf_name and not d.name.startswith(pdf_name):
+                continue
+            chunks_dir = d / 'chunks'
+            if not chunks_dir.exists():
+                continue
+            for f in sorted(chunks_dir.glob('*.md')):
+                chunks.append({
+                    'filename': f.name,
+                    'part':     d.name,
+                    'content':  f.read_text(encoding='utf-8'),
+                })
+
     return JsonResponse({'chunks': chunks})
 
 
