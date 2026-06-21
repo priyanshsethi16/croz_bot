@@ -243,6 +243,45 @@ async function loadPdfPreview(filename) {
   }
 }
 
+async function loadSplitPartPreview(idx) {
+  const part = _splitParts[idx];
+  if (!part || !_splitStem) return;
+  const section = document.getElementById('pdf-preview-section');
+  const strip   = document.getElementById('pdf-thumb-strip');
+  const viewer  = document.getElementById('pdf-page-viewer');
+  const nameEl  = document.getElementById('preview-pdf-name');
+  const countEl = document.getElementById('preview-page-count');
+  const subEl   = document.getElementById('preview-sub');
+
+  section.style.display = 'block';
+  nameEl.textContent    = part.filename;
+  countEl.textContent   = `${part.page_count} page${part.page_count !== 1 ? 's' : ''}`;
+  subEl.textContent     = `Split part · original pages ${part.pages}`;
+  strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering split part…</div>';
+  viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Loading split preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
+  document.querySelectorAll('.split-part-item').forEach((el, i) => el.classList.toggle('active', i === idx));
+
+  try {
+    const url = `/admin-panel/api/pdf-preview/?stem=${encodeURIComponent(_splitStem)}&part=${encodeURIComponent(part.filename)}`;
+    const res  = await fetch(url);
+    const data = await res.json();
+    if (data.error) {
+      strip.innerHTML = `<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> ${data.error}</div>`;
+      return;
+    }
+    countEl.textContent = `${data.total} page${data.total !== 1 ? 's' : ''}`;
+    strip.innerHTML = data.pages.map((p, i) => `
+      <div class="pdf-thumb-item${i === 0 ? ' active' : ''}" onclick="selectPreviewPage(${i})" id="thumb-${i}">
+        <img src="${p.thumb}" alt="Page ${p.num}" loading="lazy"/>
+        <span class="thumb-num">${p.num}</span>
+      </div>`).join('');
+    window._previewPages = data.pages;
+    if (data.pages.length) renderContinuousPreview(data.pages);
+  } catch(e) {
+    strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Failed to load split preview.</div>';
+  }
+}
+
 let _zoomLevel = 100;
 let _previewScrollFrame = null;
 
@@ -368,6 +407,20 @@ async function loadPdfList() {
 }
 
 let selectedPdf = null;
+function getParsingInstructions() {
+  return (document.getElementById('chunk-parsing-instructions')?.value
+    || document.getElementById('split-parsing-instructions')?.value
+    || '').trim();
+}
+
+function syncParsingInstructions(source) {
+  const value = source.value;
+  ['chunk-parsing-instructions', 'split-parsing-instructions'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && el !== source) el.value = value;
+  });
+}
+
 function selectPdf(card, name) {
   document.querySelectorAll('.pdf-select-card').forEach(c => c.classList.remove('selected'));
   card.classList.add('selected');
@@ -403,7 +456,10 @@ async function runChunking() {
     const res  = await fetch('/admin-panel/api/pipeline/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ filename: selectedPdf })
+      body: JSON.stringify({
+        filename: selectedPdf,
+        parsing_instructions: getParsingInstructions()
+      })
     });
     const data = await res.json();
     clearInterval(ticker);
@@ -635,7 +691,67 @@ async function refreshStats() {
     document.getElementById('stat-processed').textContent = (data.processed||[]).length;
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
     document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
+    updateWorkflowProgress(data);
   } catch(e) {}
+}
+
+function _num(value) {
+  const parsed = parseInt(String(value ?? '0').replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function updateWorkflowProgress(data = {}) {
+  const root = document.getElementById('workflow-progress');
+  if (!root) return;
+
+  const totalPdfs = _num(data.total_pdfs ?? document.getElementById('stat-pdfs')?.textContent);
+  const processed = Array.isArray(data.processed) ? data.processed.length : _num(document.getElementById('stat-processed')?.textContent);
+  const chunks    = _num(data.total_chunks ?? data.chunks ?? document.getElementById('stat-chunks')?.textContent);
+  const indexed   = _num(data.indexed ?? document.getElementById('stat-indexed')?.textContent);
+
+  let percent = 0;
+  let stepNo = 0;
+  let active = 'upload';
+  let title = 'Catalog setup progress';
+  let sub = 'Upload a PDF to start the catalog pipeline.';
+
+  if (totalPdfs > 0) {
+    percent = 25; stepNo = 1; active = 'chunk';
+    title = 'PDF uploaded';
+    sub = 'Next step: create product chunks from the uploaded catalog.';
+  }
+  if (processed > 0 || chunks > 0) {
+    percent = 75; stepNo = 3; active = 'index';
+    title = 'Chunks created';
+    sub = 'Product chunks are ready. Index them for semantic search.';
+  }
+  if (indexed > 0) {
+    percent = 100; stepNo = 4; active = 'chat';
+    title = 'Catalog search ready';
+    sub = 'Chunks are indexed. You can validate answers in Test Chat.';
+  }
+
+  document.getElementById('workflow-step-label').textContent = `Step ${stepNo} of 4`;
+  document.getElementById('workflow-progress-title').textContent = title;
+  document.getElementById('workflow-progress-sub').textContent = sub;
+  document.getElementById('workflow-progress-percent').textContent = `${percent}%`;
+  document.getElementById('workflow-progress-fill').style.width = `${percent}%`;
+
+  document.getElementById('progress-upload-count').textContent = `${totalPdfs} uploaded`;
+  document.getElementById('progress-chunk-count').textContent = `${chunks} chunk${chunks === 1 ? '' : 's'}`;
+  document.getElementById('progress-index-count').textContent = `${indexed} indexed`;
+
+  const done = {
+    upload: totalPdfs > 0,
+    chunk: chunks > 0 || processed > 0,
+    index: indexed > 0,
+    chat: indexed > 0,
+  };
+  document.querySelectorAll('[data-progress-step]').forEach(item => {
+    const key = item.dataset.progressStep;
+    item.classList.toggle('done', Boolean(done[key]));
+    item.classList.toggle('active', key === active && !done[key]);
+  });
 }
 
 // ── Text Splitter ────────────────────────────────────
@@ -762,6 +878,8 @@ function showSplitterForPdf(filename) {
   toggleButton.title = 'Collapse splitter';
   document.getElementById('split-parts-wrap').style.display = 'none';
   document.getElementById('split-parts-list').innerHTML = '';
+  const wholeBtn = document.getElementById('btn-process-whole-pdf');
+  if (wholeBtn) wholeBtn.style.display = '';
   document.getElementById('splitter-preview').className = 'splitter-preview';
   document.getElementById('splitter-preview').innerHTML = '';
   document.getElementById('splitter-pdf-name').textContent = filename;
@@ -819,6 +937,8 @@ function setPreset(btn, val) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  updateWorkflowProgress();
+  refreshStats();
   const customInput = document.getElementById('pages-per-input');
   if (customInput) {
     customInput.addEventListener('input', () => {
@@ -878,18 +998,25 @@ function renderSplitParts(parts) {
 
   wrap.style.display = 'block';
   title.textContent  = `${parts.length} parts ready to process`;
+  document.getElementById('next-to-chunk').style.display = 'none';
+  const wholeBtn = document.getElementById('btn-process-whole-pdf');
+  if (wholeBtn) wholeBtn.style.display = 'none';
   list.innerHTML = parts.map((p, i) => `
-    <div class="split-part-item" id="split-part-${i}">
+    <div class="split-part-item" id="split-part-${i}" onclick="loadSplitPartPreview(${i})" title="Preview this split part">
       <div class="split-part-num">${i+1}</div>
       <div class="split-part-info">
         <div class="part-name">${escHtml(p.filename)}</div>
         <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;·&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
       </div>
       <span class="split-part-status pending" id="split-status-${i}">Pending</span>
-      <button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="runSingleSplit(${i})">
+      <button class="btn btn-sm btn-secondary split-preview-btn" onclick="event.stopPropagation();loadSplitPartPreview(${i})">
+        <i class="fa fa-eye"></i>
+      </button>
+      <button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})">
         <i class="fa fa-play"></i> Run
       </button>
     </div>`).join('');
+  if (parts.length) loadSplitPartPreview(0);
 }
 
 async function runSingleSplit(idx) {
@@ -908,7 +1035,11 @@ async function runSingleSplit(idx) {
     const res  = await fetch('/admin-panel/api/pipeline-split/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ stem: _splitStem, part_file: part.filename })
+      body: JSON.stringify({
+        stem: _splitStem,
+        part_file: part.filename,
+        parsing_instructions: getParsingInstructions()
+      })
     });
     const data = await res.json();
     if (data.error) {
@@ -1002,9 +1133,65 @@ function renderChunks(pdfName, chunks) {
   ).join('');
 
   // Build content panes
-  body.innerHTML = chunks.map((c, i) =>
-    `<div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">${mdToHtml(c.content)}</div>`
-  ).join('');
+  body.innerHTML = chunks.map((c, i) => `
+    <div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">
+      <div class="chunk-toolbar">
+        <span>${escHtml(c.filename)}</span>
+        <div>
+          <button class="btn btn-sm btn-secondary" id="chunk-edit-${i}" onclick="editChunk(${i})"><i class="fa fa-edit"></i> Edit</button>
+          <button class="btn btn-sm btn-primary" id="chunk-save-${i}" onclick="saveChunk(${i})" style="display:none"><i class="fa fa-save"></i> Save</button>
+          <button class="btn btn-sm btn-secondary" id="chunk-cancel-${i}" onclick="cancelEditChunk(${i})" style="display:none">Cancel</button>
+        </div>
+      </div>
+      <div class="chunk-rendered" id="chunk-rendered-${i}">${mdToHtml(c.content)}</div>
+      <textarea class="chunk-editor" id="chunk-editor-${i}" style="display:none">${escHtml(c.content)}</textarea>
+    </div>`).join('');
+}
+
+function editChunk(idx) {
+  document.getElementById(`chunk-rendered-${idx}`).style.display = 'none';
+  document.getElementById(`chunk-editor-${idx}`).style.display = 'block';
+  document.getElementById(`chunk-edit-${idx}`).style.display = 'none';
+  document.getElementById(`chunk-save-${idx}`).style.display = 'inline-flex';
+  document.getElementById(`chunk-cancel-${idx}`).style.display = 'inline-flex';
+}
+
+function cancelEditChunk(idx) {
+  const pane = document.getElementById(`chunk-pane-${idx}`);
+  const pdfName = document.getElementById('chunks-drawer-title').textContent;
+  const chunk = _chunksCache[pdfName]?.[idx];
+  pane.querySelector(`#chunk-editor-${idx}`).value = chunk?.content || '';
+  document.getElementById(`chunk-rendered-${idx}`).style.display = 'block';
+  document.getElementById(`chunk-editor-${idx}`).style.display = 'none';
+  document.getElementById(`chunk-edit-${idx}`).style.display = 'inline-flex';
+  document.getElementById(`chunk-save-${idx}`).style.display = 'none';
+  document.getElementById(`chunk-cancel-${idx}`).style.display = 'none';
+}
+
+async function saveChunk(idx) {
+  const pdfName = document.getElementById('chunks-drawer-title').textContent;
+  const chunk = _chunksCache[pdfName]?.[idx];
+  if (!chunk) return;
+  const content = document.getElementById(`chunk-editor-${idx}`).value;
+  const btn = document.getElementById(`chunk-save-${idx}`);
+  btn.disabled = true;
+  try {
+    const res = await fetch('/admin-panel/api/chunks/save/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ pdf: pdfName, filename: chunk.filename, content })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Save failed.');
+    chunk.content = content;
+    document.getElementById(`chunk-rendered-${idx}`).innerHTML = mdToHtml(content);
+    cancelEditChunk(idx);
+    showToast('Chunk saved. Re-index after review.', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function switchChunk(idx) {

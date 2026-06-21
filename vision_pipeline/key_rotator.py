@@ -12,6 +12,8 @@ class KeyRotator:
 
     def __init__(self, cfg: dict):
         self._gemini_cfg = dict(cfg.get("gemini", {}))
+        if cfg.get("parsing_instructions"):
+            self._gemini_cfg["parsing_instructions"] = cfg["parsing_instructions"]
         self._model = (
             os.getenv("GEMINI_VISION_MODEL", "").strip()
             or self._gemini_cfg.get("gemini_model")

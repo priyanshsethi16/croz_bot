@@ -71,6 +71,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-pdf", default="", help="Original PDF filename used for citations")
     parser.add_argument("--output-slug", default="", help="Stable artifact folder name, normally the document UUID")
     parser.add_argument(
+        "--parsing-instructions",
+        default="",
+        help="Optional PDF-specific admin instructions for VLM extraction",
+    )
+    parser.add_argument(
         "--page-offset",
         type=int,
         default=0,
@@ -86,6 +91,13 @@ def parse_args() -> argparse.Namespace:
 def main():
     args = parse_args()
     cfg = load_config(args.config)
+    parsing_instructions = (
+        args.parsing_instructions.strip()
+        or os.getenv("PDF_PARSING_INSTRUCTIONS", "").strip()
+    )
+    if parsing_instructions:
+        cfg["parsing_instructions"] = parsing_instructions[:4000]
+        cfg.setdefault("gemini", {})["parsing_instructions"] = cfg["parsing_instructions"]
 
     pdf_path = args.pdf
     if not Path(pdf_path).exists():

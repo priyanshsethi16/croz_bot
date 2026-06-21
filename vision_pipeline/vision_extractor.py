@@ -108,6 +108,30 @@ Return JSON array only. Each element = one product family.
 """
 
 
+def build_vision_prompt(config: dict | None = None) -> str:
+    """Return base prompt plus optional admin PDF-specific parsing guidance."""
+    instructions = ""
+    if config:
+        instructions = str(config.get("parsing_instructions") or "").strip()
+    if not instructions:
+        return VISION_PROMPT
+
+    instructions = instructions[:4000]
+    return f"""{VISION_PROMPT}
+
+## ADMIN PDF-SPECIFIC INSTRUCTIONS
+Use these instructions only for this PDF/layout. They may refine product boundaries,
+tables, headings, ignored sections, or field mapping.
+
+If these instructions conflict with the JSON schema or FINAL RULES above, follow the
+JSON schema and FINAL RULES.
+
+{instructions}
+
+Return ONLY the JSON array — no markdown, no explanation.
+"""
+
+
 # ── JSON repair ───────────────────────────────────────────────────────────────
 
 def _repair_json(text: str) -> list[dict]:
@@ -143,6 +167,7 @@ class VisionExtractor:
 
     def __init__(self, groq_api_key: str, config: dict):
         self.client = Groq(api_key=groq_api_key)
+        self.prompt = build_vision_prompt(config)
         self.model = config.get("vision_model", "meta-llama/llama-4-scout-17b-16e-instruct")
         self.temperature = float(config.get("temperature", 0.1))
         self.max_tokens = int(config.get("max_tokens", 8192))
@@ -187,7 +212,7 @@ class VisionExtractor:
                                 },
                                 {
                                     "type": "text",
-                                    "text": VISION_PROMPT,
+                                    "text": self.prompt,
                                 },
                             ],
                         }

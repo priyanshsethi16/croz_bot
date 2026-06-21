@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=pdf-instructions-20260621"/>
 {% endblock %}
 
 {% block content %}
@@ -154,6 +154,44 @@
         <div class="step-text">
           <div class="step-title">Test Chat</div>
           <div class="step-sub">Validate results</div>
+        </div>
+      </div>
+    </div>
+    <div class="workflow-progress" id="workflow-progress">
+      <div class="progress-head">
+        <div>
+          <div class="progress-eyebrow" id="workflow-step-label">Step 0 of 4</div>
+          <h3 id="workflow-progress-title">Catalog setup progress</h3>
+          <p id="workflow-progress-sub">Upload a PDF to start the catalog pipeline.</p>
+        </div>
+        <div class="progress-percent">
+          <span>Progress</span>
+          <strong id="workflow-progress-percent">0%</strong>
+        </div>
+      </div>
+      <div class="progress-rail" aria-label="Catalog workflow progress">
+        <div class="progress-fill" id="workflow-progress-fill" style="width:0%"></div>
+      </div>
+      <div class="progress-milestones">
+        <div class="milestone" data-progress-step="upload">
+          <span><i class="fa fa-upload"></i></span>
+          <b>Upload PDF</b>
+          <small id="progress-upload-count">0 uploaded</small>
+        </div>
+        <div class="milestone" data-progress-step="chunk">
+          <span><i class="fa fa-layer-group"></i></span>
+          <b>Create Chunks</b>
+          <small id="progress-chunk-count">0 chunks</small>
+        </div>
+        <div class="milestone" data-progress-step="index">
+          <span><i class="fa fa-database"></i></span>
+          <b>Index &amp; Embed</b>
+          <small id="progress-index-count">0 indexed</small>
+        </div>
+        <div class="milestone" data-progress-step="chat">
+          <span><i class="fa fa-comments"></i></span>
+          <b>Test Chat</b>
+          <small>Ready after indexing</small>
         </div>
       </div>
     </div>
@@ -336,6 +374,16 @@
                     <span><strong>Why split?</strong> Smaller parts process faster and show progress part-by-part.</span>
                   </div>
 
+                  <div class="pdf-instruction-card compact">
+                    <label for="split-parsing-instructions">
+                      <i class="fa fa-pen"></i> PDF-specific parsing instructions
+                    </label>
+                    <textarea id="split-parsing-instructions" maxlength="4000"
+                      oninput="syncParsingInstructions(this)"
+                      placeholder="Optional: e.g. Ignore cover/intro pages. Treat each orange code badge as a product code. Table rows are variants."></textarea>
+                    <small>Optional. Sent only with this PDF/split processing run.</small>
+                  </div>
+
                   <div class="splitter-controls">
                     <div class="split-mode-toggle">
                       <button class="preset-btn active" id="split-mode-uniform" onclick="setSplitMode('uniform')"><i class="fa fa-equals"></i> Uniform</button>
@@ -372,7 +420,7 @@
                     <button class="btn btn-primary" id="btn-split-pdf" onclick="doSplit()">
                       <i class="fa fa-cut"></i> Split &amp; Process Parts
                     </button>
-                    <button class="btn btn-secondary" onclick="showPanel('chunk')">
+                    <button class="btn btn-secondary" id="btn-process-whole-pdf" onclick="showPanel('chunk')">
                       <i class="fa fa-layer-group"></i> Process Whole PDF
                     </button>
                   </div>
@@ -424,6 +472,15 @@
           </p>
           <div class="pdf-selector-grid" id="pdf-selector-grid">
             <p style="color:var(--grey);font-size:13px">Loading PDFs…</p>
+          </div>
+          <div class="pdf-instruction-card">
+            <label for="chunk-parsing-instructions">
+              <i class="fa fa-pen"></i> PDF-specific parsing instructions
+            </label>
+            <textarea id="chunk-parsing-instructions" maxlength="4000"
+              oninput="syncParsingInstructions(this)"
+              placeholder="Optional: Give layout/product extraction hints for the selected PDF. Blank = default parser prompt."></textarea>
+            <small>Use this when a catalog has unusual headings, tables, badges, or pages to ignore.</small>
           </div>
           <div class="action-row">
             <button class="btn btn-primary" id="btn-run-chunk" onclick="runChunking()" disabled>
@@ -695,5 +752,5 @@
   const IS_ADMIN = {{ is_admin|yesno:"true,false" }};
   const V2_INGEST_ENABLED = {{ v2_ingest_enabled|yesno:"true,false" }};
 </script>
-<script src="{% static 'js/dashboard.js' %}"></script>
+<script src="{% static 'js/dashboard.js' %}?v=pdf-instructions-20260621"></script>
 {% endblock %}

@@ -112,6 +112,110 @@
   transform: translateY(-50%) rotate(45deg); z-index: 1;
 }
 
+.workflow-progress {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.06);
+  margin: -8px 0 24px;
+  padding: 18px 20px 16px;
+}
+.progress-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.progress-eyebrow {
+  color: var(--orange);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.progress-head h3 {
+  color: var(--dark);
+  font-size: 15px;
+  margin: 4px 0 2px;
+}
+.progress-head p {
+  color: var(--grey);
+  font-size: 12px;
+  margin: 0;
+}
+.progress-percent {
+  min-width: 82px;
+  text-align: right;
+}
+.progress-percent span {
+  color: var(--grey);
+  display: block;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.progress-percent strong {
+  color: var(--dark);
+  font-size: 20px;
+  line-height: 1;
+}
+.progress-rail {
+  background: #eef2f7;
+  border-radius: 999px;
+  height: 9px;
+  margin: 18px 0 14px;
+  overflow: hidden;
+}
+.progress-fill {
+  background: linear-gradient(90deg, var(--orange), #22c55e);
+  border-radius: inherit;
+  height: 100%;
+  transition: width .35s ease;
+}
+.progress-milestones {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.milestone {
+  align-items: center;
+  color: var(--grey);
+  display: grid;
+  gap: 2px 9px;
+  grid-template-columns: 34px 1fr;
+  opacity: .72;
+}
+.milestone span {
+  align-items: center;
+  background: #eef2f7;
+  border-radius: 50%;
+  color: #94a3b8;
+  display: flex;
+  grid-row: span 2;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+.milestone b {
+  color: var(--dark);
+  font-size: 12px;
+}
+.milestone small {
+  font-size: 11px;
+}
+.milestone.done,
+.milestone.active {
+  opacity: 1;
+}
+.milestone.done span {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.milestone.active span {
+  background: var(--orange-light);
+  box-shadow: 0 0 0 5px rgba(255, 85, 0, .08);
+  color: var(--orange);
+}
+
 /* ── Panels ── */
 .panel { display: none; }
 .panel.active { display: block; }
@@ -404,6 +508,7 @@
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .index-options { grid-template-columns: 1fr; }
   .workflow-stepper { flex-direction: column; }
+  .progress-milestones { grid-template-columns: repeat(2, 1fr); }
   .step-item { border-right: none; border-bottom: 1px solid var(--border); }
   .step-item:last-child { border-bottom: none; }
   .step-arrow { display: none; }
@@ -414,6 +519,10 @@
   .stat-card { padding: 14px; }
   .stat-card .stat-value { font-size: 20px; }
   .workflow-stepper { display: none; }
+  .workflow-progress { margin-top: 0; padding: 16px; }
+  .progress-head { flex-direction: column; gap: 10px; }
+  .progress-percent { text-align: left; }
+  .progress-milestones { grid-template-columns: 1fr; }
   .action-row { flex-direction: column; align-items: stretch; }
   .btn { justify-content: center; }
   .pdf-selector-grid { grid-template-columns: 1fr 1fr; }
@@ -485,6 +594,52 @@
 .splitter-why > i { color: var(--orange); margin-top: 2px; }
 .splitter-why strong { color: var(--dark); }
 
+.pdf-instruction-card {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+.pdf-instruction-card.compact {
+  margin: 12px 0;
+  padding: 12px;
+  background: var(--light);
+}
+.pdf-instruction-card label {
+  display: block;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--dark);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.pdf-instruction-card label i { color: var(--orange); margin-right: 6px; }
+.pdf-instruction-card textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  outline: none;
+}
+.pdf-instruction-card.compact textarea { min-height: 86px; }
+.pdf-instruction-card textarea:focus {
+  border-color: var(--orange);
+  box-shadow: 0 0 0 3px rgba(239, 78, 16, .10);
+}
+.pdf-instruction-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--grey);
+  font-size: 11px;
+}
+
 .splitter-controls { margin-bottom: 4px; }
 .split-mode-toggle { display: flex; gap: 6px; margin-bottom: 12px; }
 .split-mode-toggle .preset-btn { flex: 1; padding-left: 8px; padding-right: 8px; }
@@ -555,7 +710,10 @@
   display: flex; align-items: center; gap: 12px;
   padding: 11px 14px; border: 1.5px solid var(--border);
   border-radius: 8px; background: #fafafa; transition: all .15s;
+  cursor: pointer;
 }
+.split-part-item:hover,
+.split-part-item.active { border-color: var(--orange); background: var(--orange-light); }
 .split-part-item.running  { border-color: var(--orange); background: var(--orange-light); }
 .split-part-item.done     { border-color: #22c55e; background: #f0fdf4; }
 .split-part-item.errored  { border-color: #f87171; background: #fff5f5; }
@@ -576,6 +734,7 @@
 .split-part-status.running { color: var(--orange); }
 .split-part-status.done    { color: #16a34a; }
 .split-part-status.errored { color: #dc2626; }
+.split-preview-btn { padding: 8px 10px; }
 
 /* ── Chunks Drawer ── */
 .chunks-overlay {
@@ -628,6 +787,30 @@
   scrollbar-width: thin; scrollbar-color: #e0e0e0 transparent;
 }
 .chunks-loading { text-align: center; padding: 48px; color: var(--grey); font-size: 14px; }
+.chunk-toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -18px -18px 16px;
+  padding: 12px 18px;
+  position: sticky;
+  top: 0;
+  background: var(--white);
+  z-index: 1;
+}
+.chunk-toolbar span { font-size: 12px; font-weight: 700; color: var(--grey); }
+.chunk-toolbar > div { display: flex; gap: 8px; }
+.chunk-editor {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  min-height: 62vh;
+  padding: 14px;
+  resize: vertical;
+  width: 100%;
+}
 
 .chunk-content {
   display: none; font-size: 13px; line-height: 1.75; color: var(--dark);

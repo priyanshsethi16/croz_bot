@@ -15,6 +15,11 @@ from django.views.decorators.http import require_POST
 PROJECT_ROOT = settings.PROJECT_ROOT
 
 
+def _clean_parsing_instructions(value) -> str:
+    """Limit optional admin PDF-specific VLM instructions before subprocess use."""
+    return str(value or '').strip()[:4000]
+
+
 def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
     data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
@@ -144,6 +149,7 @@ def run_pipeline(request):
     try:
         body     = json.loads(request.body)
         filename = body.get('filename', '')
+        parsing_instructions = _clean_parsing_instructions(body.get('parsing_instructions'))
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
 
@@ -156,10 +162,13 @@ def run_pipeline(request):
         runtime = get_runtime_config()
         if not runtime.gemini_api_key:
             return JsonResponse({'error': 'Gemini API key is not configured. Open Models & Keys.'}, status=400)
+        env = subprocess_environment()
+        if parsing_instructions:
+            env['PDF_PARSING_INSTRUCTIONS'] = parsing_instructions
         result = subprocess.run(
             [sys.executable, '-m', 'vision_pipeline.main', '--pdf', str(pdf_path)],
             capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
-            env=subprocess_environment(),
+            env=env,
         )
         output = result.stdout + result.stderr
         if result.returncode != 0:
@@ -193,9 +202,18 @@ def list_pdfs(request):
 def pdf_preview(request):
     import base64, fitz
     filename = request.GET.get('pdf', '').strip()
-    if not filename:
-        return JsonResponse({'error': 'No PDF specified.'}, status=400)
-    pdf_path = PROJECT_ROOT / 'input' / Path(filename).name
+    part_file = request.GET.get('part', '').strip()
+    stem = request.GET.get('stem', '').strip()
+    if part_file:
+        if not stem:
+            return JsonResponse({'error': 'Missing split stem.'}, status=400)
+        filename = Path(part_file).name
+        pdf_path = PROJECT_ROOT / 'input' / 'splits' / Path(stem).name / filename
+    else:
+        if not filename:
+            return JsonResponse({'error': 'No PDF specified.'}, status=400)
+        filename = Path(filename).name
+        pdf_path = PROJECT_ROOT / 'input' / filename
     if not pdf_path.exists():
         return JsonResponse({'error': 'PDF not found.'}, status=404)
     try:
@@ -360,6 +378,7 @@ def run_pipeline_split(request):
         body      = json.loads(request.body)
         stem      = body.get('stem', '').strip()      # original PDF name
         part_file = body.get('part_file', '').strip() # e.g. GGH1_p0001-0010.pdf
+        parsing_instructions = _clean_parsing_instructions(body.get('parsing_instructions'))
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
 
@@ -372,10 +391,13 @@ def run_pipeline_split(request):
         runtime = get_runtime_config()
         if not runtime.gemini_api_key:
             return JsonResponse({'error': 'Gemini API key is not configured. Open Models & Keys.'}, status=400)
+        env = subprocess_environment()
+        if parsing_instructions:
+            env['PDF_PARSING_INSTRUCTIONS'] = parsing_instructions
         result = subprocess.run(
             [sys.executable, '-m', 'vision_pipeline.main', '--pdf', str(pdf_path)],
             capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
-            env=subprocess_environment(),
+            env=env,
         )
         output = result.stdout + result.stderr
         if result.returncode != 0:
@@ -519,6 +541,31 @@ def list_chunks(request):
             'content': f.read_text(encoding='utf-8'),
         })
     return JsonResponse({'chunks': chunks})
+
+
+@login_required
+@require_POST
+def save_chunk(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        pdf_name = Path(str(body.get('pdf', '')).strip()).name
+        chunk_name = Path(str(body.get('filename', '')).strip()).name
+        content = str(body.get('content', ''))
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    if not pdf_name or not chunk_name.endswith('.md'):
+        return JsonResponse({'error': 'Invalid chunk file.'}, status=400)
+
+    chunks_dir = (PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks').resolve()
+    chunk_path = (chunks_dir / chunk_name).resolve()
+    if chunks_dir not in chunk_path.parents or not chunk_path.exists():
+        return JsonResponse({'error': 'Chunk file not found.'}, status=404)
+
+    chunk_path.write_text(content, encoding='utf-8')
+    return JsonResponse({'message': f'{chunk_name} saved.', 'filename': chunk_name})
 
 
 # ── API: Models & encrypted provider keys ─────────────────────────────────────

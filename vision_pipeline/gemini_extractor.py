@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from vision_pipeline.vision_extractor import VISION_PROMPT, _repair_json
+from vision_pipeline.vision_extractor import build_vision_prompt, _repair_json
 
 
 class GeminiExtractor:
@@ -37,6 +37,7 @@ class GeminiExtractor:
             )
 
         self.model = config.get("gemini_model") or self.DEFAULT_MODEL
+        self.prompt = build_vision_prompt(config)
         self._model = ChatGoogleGenerativeAI(
             model=self.model,
             api_key=api_key,
@@ -68,7 +69,7 @@ class GeminiExtractor:
             try:
                 response = self._model.invoke([
                     HumanMessage(content=[
-                        {"type": "text", "text": VISION_PROMPT},
+                        {"type": "text", "text": self.prompt},
                         {
                             "type": "image_url",
                             "image_url": f"data:image/png;base64,{image_b64}",
