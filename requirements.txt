@@ -13,7 +13,7 @@ groq>=0.9.0
 langchain>=1.0.0
 langchain-openai>=1.0.0
 langchain-google-genai>=4.0.0
-langchain-chroma>=1.0.0
+langchain-qdrant>=1.1.0,<2.0.0
 
 # Vision (Gemini provider)
 google-genai>=1.0.0
@@ -23,7 +23,7 @@ tqdm>=4.66.0
 
 # DB pipeline
 psycopg2-binary>=2.9.0
-chromadb>=0.5.0
+qdrant-client[fastembed]>=1.18.0,<2.0.0
 
 # Web UI
 django>=5.2.0

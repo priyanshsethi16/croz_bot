@@ -25,6 +25,8 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 from vision_pipeline.pdf_to_images import rasterize_pdf
 from vision_pipeline.key_rotator import KeyRotator
 from vision_pipeline.chunk_writer import save_chunk
+from vision_pipeline.assembler import assemble_product_families
+from vision_pipeline.schema import validate_page_products
 
 
 def _pdf_slug(pdf_path: str) -> str:
@@ -65,6 +67,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default=None, help="Path to config.yaml")
     parser.add_argument("--no-resume", action="store_true", help="Ignore existing checkpoint")
     parser.add_argument("--skip-raster", action="store_true", help="Reuse existing PNG pages")
+    parser.add_argument("--document-id", default="", help="Trusted CatalogDocument UUID injected by V2 ingestion")
+    parser.add_argument("--source-pdf", default="", help="Original PDF filename used for citations")
+    parser.add_argument("--output-slug", default="", help="Stable artifact folder name, normally the document UUID")
+    parser.add_argument(
+        "--page-offset",
+        type=int,
+        default=0,
+        help="Add this offset to split-PDF page numbers to preserve original pages",
+    )
     parser.add_argument(
         "--pages", nargs=2, type=int, metavar=("START", "END"),
         help="Only process page range e.g. --pages 5 10"
@@ -82,7 +93,7 @@ def main():
         sys.exit(1)
 
     # ── Per-PDF output folders derived from PDF filename ──────────────────
-    slug = _pdf_slug(pdf_path)
+    slug = _pdf_slug(args.output_slug) if args.output_slug else _pdf_slug(pdf_path)
     base = Path("vision_pipeline/data") / slug
     pages_dir     = str(base / "pages")
     chunks_dir    = str(base / "chunks")
@@ -145,9 +156,28 @@ def main():
             if not products:
                 tqdm.write(f"  p{page_num:03d} → [EMPTY] no products found (cover/TOC/divider page)")
 
-            for product in products:
+            validated, validation_issues = validate_page_products(
+                products,
+                page_num=page_num,
+                page_offset=args.page_offset,
+                source_pdf=args.source_pdf or Path(pdf_path).name,
+                document_id=args.document_id,
+            )
+            if validation_issues:
+                tqdm.write(
+                    f"  p{page_num:03d} → [VALIDATION] "
+                    f"{len(validation_issues)} invalid product entr{'y' if len(validation_issues) == 1 else 'ies'}"
+                )
+            if products and not validated:
+                tqdm.write(f"  p{page_num:03d} → [FAILED] no valid product entries — will retry later")
+                failed_pages.append(page_num)
+                pbar.update(1)
+                pbar.set_postfix({"products": product_count, "provider": rotator.active_provider(), "failed": len(failed_pages)})
+                continue
+
+            for validated_product in validated:
+                product = validated_product.model_dump(mode='json')
                 product_count += 1
-                product["source_pdf"] = pdf_path
                 chunk_path = save_chunk(product, product_count, chunks_dir)
                 product["chunk_path"] = str(chunk_path)
                 all_products.append(product)
@@ -174,13 +204,23 @@ def main():
         print(f"\nWARNING: {len(failed_pages)} pages failed and were NOT checkpointed: {failed_pages}")
         print("Re-run the same command to retry them.")
 
+    assembled_products = assemble_product_families(all_products)
+    assembled_json = str(base / 'assembled_products.json')
+    Path(assembled_json).write_text(
+        json.dumps(assembled_products, indent=2, ensure_ascii=False),
+        encoding='utf-8',
+    )
+
     print("=" * 60)
     print("Vision Pipeline Complete!")
     print(f"  Pages processed : {len(completed_pages)}")
     print(f"  Products found  : {product_count}")
     print(f"  Chunks saved    : {chunks_dir}/")
     print(f"  JSON manifest   : {products_json}")
+    print(f"  Assembled JSON  : {assembled_json}")
     print("=" * 60)
+    if failed_pages:
+        sys.exit(2)
 
 
 if __name__ == "__main__":

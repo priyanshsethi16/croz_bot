@@ -41,20 +41,38 @@ def _get_catalog_stats():
                     })
 
     try:
-        import chromadb
-        from rag_pipeline.providers import CHROMA_DIR, COLLECTION
-        client = chromadb.PersistentClient(path=CHROMA_DIR)
-        col = client.get_collection(COLLECTION)
-        indexed = col.count()
+        from rag_pipeline.providers import indexed_document_count
+        indexed = indexed_document_count()
     except Exception:
         indexed = 0
 
-    return {
+    stats = {
         'total_pdfs': len(pdfs),
         'processed': processed,
         'unprocessed': [p.name for p in pdfs if p.stem not in {d['name'] for d in processed}],
         'indexed': indexed,
     }
+    try:
+        from .models import CatalogDocument, DocumentChunk, IngestionJob, ProductFamily
+        stats['v2'] = {
+            'documents': CatalogDocument.objects.count(),
+            'ready_documents': CatalogDocument.objects.filter(
+                status=CatalogDocument.Status.READY,
+                is_active=True,
+            ).count(),
+            'pending_jobs': IngestionJob.objects.filter(
+                status__in=(IngestionJob.Status.PENDING, IngestionJob.Status.RUNNING),
+            ).count(),
+            'needs_review': ProductFamily.objects.filter(
+                review_status=ProductFamily.ReviewStatus.NEEDS_REVIEW,
+            ).count(),
+            'indexed_chunks': DocumentChunk.objects.filter(
+                index_status=DocumentChunk.IndexStatus.INDEXED,
+            ).count(),
+        }
+    except Exception:
+        stats['v2'] = {}
+    return stats
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -90,6 +108,7 @@ def dashboard(request):
     return render(request, 'catalog/dashboard.html', {
         'stats': stats,
         'is_admin': request.user.is_staff,
+        'v2_ingest_enabled': settings.CATALOG_RAG_V2_INGEST,
     })
 
 
@@ -199,40 +218,6 @@ def pdf_preview(request):
         return JsonResponse({'error': str(e)}, status=500)
 
 
-# ── API: Run Ingest (indexing) ────────────────────────────────────────────────
-
-@login_required
-@require_POST
-def run_ingest(request):
-    if not request.user.is_staff:
-        return JsonResponse({'error': 'Permission denied.'}, status=403)
-    try:
-        body  = json.loads(request.body)
-        reset = body.get('reset', False)
-    except Exception:
-        reset = False
-
-    cmd = [sys.executable, '-m', 'rag_pipeline.ingest']
-    if reset:
-        cmd.append('--reset')
-
-    try:
-        from .model_config import get_runtime_config, subprocess_environment
-        runtime = get_runtime_config()
-        if not runtime.openai_api_key:
-            return JsonResponse({'error': 'OpenAI API key is required for embeddings. Open Models & Keys.'}, status=400)
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=300,
-            env=subprocess_environment(),
-        )
-        output = result.stdout + result.stderr
-        if result.returncode != 0:
-            return JsonResponse({'error': output[-2000:]}, status=500)
-        return JsonResponse({'message': 'Indexing completed.', 'output': output[-2000:]})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
-
-
 # ── API: Admin Chat ───────────────────────────────────────────────────────────
 
 @login_required
@@ -249,29 +234,27 @@ def admin_chat(request):
 
     try:
         from .model_config import get_runtime_config
-        from rag_pipeline.retriever import Retriever
-        from rag_pipeline.llm import LLMAnswerer
+        from .services.query_engine import CatalogQueryEngine
 
         runtime = get_runtime_config()
         if not runtime.openai_api_key:
             return JsonResponse({'error': 'OpenAI API key is required for retrieval embeddings.'}, status=400)
         if not runtime.chat_api_key:
             return JsonResponse({'error': f'{runtime.chat_provider.title()} API key is not configured.'}, status=400)
-        retriever = Retriever(top_k=5, api_key=runtime.openai_api_key)
-        llm = LLMAnswerer(
-            provider=runtime.chat_provider,
-            api_key=runtime.chat_api_key,
-            model=runtime.chat_model,
+        catalog_ids = body.get('catalog_ids', [])
+        document_ids = body.get('document_ids', [])
+        if not isinstance(catalog_ids, list) or not isinstance(document_ids, list):
+            return JsonResponse({'error': 'catalog_ids and document_ids must be arrays.'}, status=400)
+        execution = CatalogQueryEngine(runtime).execute(
+            query,
+            catalog_ids=catalog_ids,
+            document_ids=document_ids,
+            page=max(1, int(body.get('page', 1))),
+            page_size=min(100, max(1, int(body.get('page_size', 50)))),
         )
-        chunks    = retriever.retrieve(query)
-        answer    = llm.answer(query, chunks)
-        sources   = [
-            {'name': c['metadata'].get('product_name', ''),
-             'code': c['metadata'].get('product_code', ''),
-             'score': c['score']}
-            for c in chunks
-        ]
-        return JsonResponse({'answer': answer, 'sources': sources})
+        payload = execution.as_dict()
+        payload['query_path'] = 'v2'
+        return JsonResponse(payload)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -492,13 +475,23 @@ def delete_pdf(request):
         shutil.rmtree(data_dir)
 
     try:
-        import chromadb
-        from rag_pipeline.providers import CHROMA_DIR, COLLECTION
-        client  = chromadb.PersistentClient(path=CHROMA_DIR)
-        col     = client.get_collection(COLLECTION)
-        results = col.get(where={'source_pdf': stem})
-        if results['ids']:
-            col.delete(ids=results['ids'])
+        from qdrant_client import models
+        from rag_pipeline.providers import COLLECTION, build_qdrant_client
+        client = build_qdrant_client()
+        if client.collection_exists(COLLECTION):
+            client.delete(
+                collection_name=COLLECTION,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key='metadata.source_pdf',
+                                match=models.MatchValue(value=stem),
+                            )
+                        ]
+                    )
+                ),
+            )
     except Exception:
         pass
 
@@ -558,3 +551,194 @@ def save_model_configuration(request):
         return JsonResponse(payload)
     except ValueError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
+
+
+# -- Catalog-aware RAG V2 APIs (feature-flagged) ------------------------------
+
+def _v2_job_payload(job):
+    document = job.document
+    return {
+        'job_id': str(job.id),
+        'document_id': str(document.id),
+        'catalog_id': str(document.catalog_id),
+        'filename': document.original_filename,
+        'version': document.version,
+        'source_type': document.source_type,
+        'document_status': document.status,
+        'job_stage': job.stage,
+        'job_status': job.status,
+        'completed_units': job.completed_units,
+        'total_units': job.total_units,
+        'retry_count': job.retry_count,
+        'cancel_requested': job.cancel_requested,
+        'error': job.error_summary,
+    }
+
+
+@login_required
+@require_POST
+def upload_pdf_v2(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    if not settings.CATALOG_RAG_V2_INGEST:
+        return JsonResponse({'error': 'Catalog RAG V2 ingestion is not enabled.'}, status=409)
+
+    uploaded = request.FILES.get('pdf')
+    if not uploaded:
+        return JsonResponse({'error': 'A PDF file is required.'}, status=400)
+
+    from .models import Catalog, CatalogDocument
+    from .services.documents import DuplicateDocumentError, create_catalog_document
+
+    catalog = None
+    catalog_id = request.POST.get('catalog_id', '').strip()
+    if catalog_id:
+        try:
+            catalog = Catalog.objects.get(pk=catalog_id)
+        except (Catalog.DoesNotExist, ValueError):
+            return JsonResponse({'error': 'Catalog not found.'}, status=404)
+
+    try:
+        document, job = create_catalog_document(
+            uploaded_file=uploaded,
+            user=request.user,
+            catalog=catalog,
+            catalog_name=request.POST.get('catalog_name', ''),
+            source_type=request.POST.get('source_type', CatalogDocument.SourceType.CATALOG),
+        )
+    except DuplicateDocumentError as exc:
+        return JsonResponse({
+            'error': 'This exact PDF has already been uploaded.',
+            'document_id': str(exc.document.id),
+            'status': exc.document.status,
+        }, status=409)
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse({'error': f'Could not register PDF: {exc}'}, status=500)
+
+    payload = _v2_job_payload(job)
+    payload['message'] = 'PDF registered. The V2 worker can now process the pending job.'
+    return JsonResponse(payload, status=201)
+
+
+@login_required
+def ingestion_job_status_v2(request, job_id):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    from .models import IngestionJob
+
+    try:
+        job = IngestionJob.objects.select_related('document').get(pk=job_id)
+    except (IngestionJob.DoesNotExist, ValueError):
+        return JsonResponse({'error': 'Ingestion job not found.'}, status=404)
+    return JsonResponse(_v2_job_payload(job))
+
+
+@login_required
+@require_POST
+def retry_ingestion_job_v2(request, job_id):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    if not settings.CATALOG_RAG_V2_INGEST:
+        return JsonResponse({'error': 'Catalog RAG V2 ingestion is not enabled.'}, status=409)
+
+    from django.db import transaction
+    from .models import CatalogDocument, IngestionJob
+
+    try:
+        with transaction.atomic():
+            job = IngestionJob.objects.select_for_update().select_related('document').get(pk=job_id)
+            if job.status not in (IngestionJob.Status.FAILED, IngestionJob.Status.CANCELLED):
+                return JsonResponse({'error': f'Job cannot be retried from status {job.status}.'}, status=409)
+            job.status = IngestionJob.Status.PENDING
+            job.stage = IngestionJob.Stage.UPLOAD
+            job.retry_count += 1
+            job.cancel_requested = False
+            job.error_summary = ''
+            job.completed_at = None
+            job.save()
+            job.document.status = CatalogDocument.Status.UPLOADED
+            job.document.failure_summary = ''
+            job.document.save(update_fields=('status', 'failure_summary', 'updated_at'))
+    except (IngestionJob.DoesNotExist, ValueError):
+        return JsonResponse({'error': 'Ingestion job not found.'}, status=404)
+    return JsonResponse(_v2_job_payload(job))
+
+
+@login_required
+@require_POST
+def cancel_ingestion_job_v2(request, job_id):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    from .models import IngestionJob
+
+    try:
+        job = IngestionJob.objects.select_related('document').get(pk=job_id)
+    except (IngestionJob.DoesNotExist, ValueError):
+        return JsonResponse({'error': 'Ingestion job not found.'}, status=404)
+    if job.status in (IngestionJob.Status.SUCCEEDED, IngestionJob.Status.CANCELLED):
+        return JsonResponse({'error': f'Job cannot be cancelled from status {job.status}.'}, status=409)
+    job.cancel_requested = True
+    if job.status == IngestionJob.Status.PENDING:
+        job.status = IngestionJob.Status.CANCELLED
+    job.save(update_fields=('cancel_requested', 'status', 'updated_at'))
+    return JsonResponse(_v2_job_payload(job))
+
+
+@login_required
+@require_POST
+def archive_catalog_document_v2(request, document_id):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    from .models import CatalogDocument
+    from .services.documents import archive_document
+
+    try:
+        document = CatalogDocument.objects.get(pk=document_id)
+    except (CatalogDocument.DoesNotExist, ValueError):
+        return JsonResponse({'error': 'Catalog document not found.'}, status=404)
+    archive_document(document)
+    return JsonResponse({'message': 'Document archived.', 'document_id': str(document.id)})
+
+
+@login_required
+def index_audit_v2(request, document_id):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    from .models import CatalogDocument
+    from .services.indexing import index_dry_run
+
+    try:
+        document = CatalogDocument.objects.get(pk=document_id)
+    except (CatalogDocument.DoesNotExist, ValueError):
+        return JsonResponse({'error': 'Catalog document not found.'}, status=404)
+    return JsonResponse(index_dry_run(document).as_dict())
+
+
+@login_required
+@require_POST
+def execute_index_v2(request, document_id):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    if not settings.CATALOG_RAG_V2_INGEST:
+        return JsonResponse({'error': 'Catalog RAG V2 ingestion is not enabled.'}, status=409)
+    try:
+        body = json.loads(request.body)
+        confirmed = int(body.get('confirmed_embedding_count'))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return JsonResponse({'error': 'confirmed_embedding_count is required.'}, status=400)
+
+    from .models import CatalogDocument
+    from .services.indexing import index_document
+
+    try:
+        document = CatalogDocument.objects.get(pk=document_id)
+        result = index_document(document, confirmed_embedding_count=confirmed)
+        return JsonResponse(result)
+    except CatalogDocument.DoesNotExist:
+        return JsonResponse({'error': 'Catalog document not found.'}, status=404)
+    except ValueError as exc:
+        return JsonResponse({'error': str(exc)}, status=409)
+    except Exception as exc:
+        return JsonResponse({'error': f'V2 indexing failed: {exc}'}, status=500)

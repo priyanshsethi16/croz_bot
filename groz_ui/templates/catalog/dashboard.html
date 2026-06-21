@@ -461,39 +461,16 @@
             <div class="panel-head-icon"><i class="fa fa-database"></i></div>
             <div>
               <h3>Step 3 — Index &amp; Embed</h3>
-              <p>Create vector embeddings from product chunks for instant semantic search</p>
+              <p>Create Qdrant dense and BM25 indexes for instant hybrid search</p>
             </div>
           </div>
           <span class="badge badge-orange">Step 3 of 3</span>
         </div>
         <div class="panel-body">
-          <div class="index-options">
-            <div class="index-option-card selected" data-mode="incremental"
-                 onclick="setIndexMode('incremental')">
-              <h4><i class="fa fa-bolt" style="color:var(--orange);margin-right:6px"></i>Incremental</h4>
-              <p>Only embed new chunks not already indexed. Fast and preserves existing data.</p>
-            </div>
-            <div class="index-option-card" data-mode="reset"
-                 onclick="setIndexMode('reset')">
-              <h4><i class="fa fa-redo" style="color:#dc2626;margin-right:6px"></i>Full Reset</h4>
-              <p>Clear all existing embeddings and re-index everything from scratch.</p>
-            </div>
+          <div class="index-option-card selected">
+            <h4><i class="fa fa-shield-alt" style="color:var(--orange);margin-right:6px"></i>V2-only indexing</h4>
+            <p>The legacy bulk indexer has been removed. New documents are indexed only after product review and an explicit embedding-cost confirmation.</p>
           </div>
-          <div class="action-row">
-            <button class="btn btn-primary" id="btn-run-index" onclick="runIndexing()">
-              <i class="fa fa-bolt"></i> Run Indexing
-            </button>
-          </div>
-          <div class="progress-wrap" id="index-progress">
-            <div class="progress-header">
-              <span id="index-progress-label">Embedding chunks…</span>
-              <span class="pct" id="index-pct">0%</span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-fill" id="index-fill"></div>
-            </div>
-          </div>
-          <div class="log-output" id="index-log"></div>
         </div>
       </div>
     </div>
@@ -543,7 +520,7 @@
               <div class="model-field">
                 <label for="embedding-model">Embedding model</label>
                 <input type="text" id="embedding-model" value="text-embedding-3-small" readonly/>
-                <small>Fixed model · 1536 dimensions · requires a fresh OpenAI index.</small>
+                <small>Fixed OpenAI model · 1536 dimensions · requires a fresh Qdrant index.</small>
               </div>
             </section>
 
@@ -716,6 +693,7 @@
 <script>
   const CSRF = '{{ csrf_token }}';
   const IS_ADMIN = {{ is_admin|yesno:"true,false" }};
+  const V2_INGEST_ENABLED = {{ v2_ingest_enabled|yesno:"true,false" }};
 </script>
 <script src="{% static 'js/dashboard.js' %}"></script>
 {% endblock %}

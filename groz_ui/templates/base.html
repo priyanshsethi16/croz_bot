@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="icon" href="data:,"/>
   <title>{% block title %}GROZ Tools — Product Assistant{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -19,8 +20,7 @@
 <!-- Main navbar -->
 <nav class="navbar">
   <a href="/" class="navbar-brand">
-    <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" class="groz-logo-img"/>
-    <div class="groz-wordmark">GROZ</div>
+    <div class="groz-wordmark" aria-label="GROZ">GROZ</div>
   </a>
 
   <div class="nav-links">
@@ -52,8 +52,7 @@
 <!-- Footer -->
 <footer class="footer">
   <div class="footer-left">
-    <img src="{% static 'img/groz-logo.png' %}" alt="GROZ" style="height:28px;width:auto;filter:brightness(0) invert(1);opacity:0.7"/>
-    <span style="color:#ccc;font-weight:700;letter-spacing:1px">GROZ</span>
+    <span style="color:#ccc;font-weight:700;letter-spacing:1px" aria-label="GROZ">GROZ</span>
     <span>© 2024 Groz Engineering Tools Pvt. Ltd. All rights reserved.</span>
   </div>
   <div class="footer-right">

@@ -49,6 +49,9 @@ flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, t
 **Capture everything:**
 - Section banner → page_metadata.catalog_section (exact, never infer)
 - category = catalog_section text exactly
+- raw_category = the same exact section banner text
+- normalized_category_suggestion = conservative broad English tool category, or "" when uncertain
+- extraction_confidence = overall confidence from 0.0 to 1.0
 - NEW, Bestseller, Popular in EUROPE, Patent Pending → notes
 - ★ on row → "bestseller": true; □ on row → "made_to_order": true
 - Safety warnings, warranty, country of origin → dedicated fields
@@ -62,6 +65,8 @@ Return JSON array only. Each element = one product family.
   "product_name": "",
   "product_code": "",
   "category": "",
+  "raw_category": "",
+  "normalized_category_suggestion": "",
   "sub_category": "",
   "description": "",
   "features": [],
@@ -75,6 +80,7 @@ Return JSON array only. Each element = one product family.
   "country_of_origin": "",
   "packaging": {"unit_quantity": "", "box_quantity": "", "packaging_type": ""},
   "notes": "",
+  "extraction_confidence": 0.0,
   "raw_text_blocks": [],
   "children": [{
     "product_code": "",

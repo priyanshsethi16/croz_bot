@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
-from rag_pipeline.retriever import Retriever
+from rag_pipeline.retriever import HybridRetriever
 from rag_pipeline.llm import LLMAnswerer
 
 
@@ -35,10 +35,10 @@ def run_chatbot(top_k: int = 5):
 
     print("Loading retriever...")
     try:
-        retriever = Retriever(top_k=top_k, api_key=openai_key)
+        retriever = HybridRetriever(top_k=top_k, api_key=openai_key)
     except Exception as e:
-        print(f"ERROR: Could not load ChromaDB collection: {e}")
-        print("Run first:  python -m rag_pipeline.ingest")
+        print(f"ERROR: Could not load Qdrant collection: {e}")
+        print("Index an approved catalog document from the admin V2 workflow first.")
         return
 
     llm = LLMAnswerer(provider=provider, api_key=chat_key, model=model)

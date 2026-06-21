@@ -41,6 +41,9 @@ htmlcov/
 # Project Specific
 checkpoints/
 vision_pipeline/data/
+qdrant_storage/
+qdrant_snapshots/
+.qdrant-initialized
 
 # Config secrets (if they contain API keys)
 config/local*
@@ -55,6 +58,7 @@ vision_pipeline/config.local.yaml
 # Temporary files
 *.tmp
 *.temp
+backups/
 
 # Generated images/documents
 *.png
@@ -65,3 +69,7 @@ vision_pipeline/config.local.yaml
 # Keep logs directory structure if needed
 !logs/.gitkeep
 *.sql
+*.md
+!CATALOG_RAG_IMPLEMENTATION_PLAN.md
+.playwright-cli
+tests/

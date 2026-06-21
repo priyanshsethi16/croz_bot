@@ -65,23 +65,110 @@ async function uploadFile(file) {
   const fd = new FormData();
   fd.append('pdf', file);
   fd.append('csrfmiddlewaretoken', CSRF);
+  if (V2_INGEST_ENABLED) {
+    fd.append('catalog_name', file.name.replace(/\.pdf$/i,'').replace(/[_-]+/g,' '));
+    fd.append('source_type', 'catalog');
+  }
   try {
-    const res  = await fetch('/admin-panel/api/upload/', { method: 'POST', body: fd });
+    const endpoint = V2_INGEST_ENABLED ? '/admin-panel/api/v2/upload/' : '/admin-panel/api/upload/';
+    const res  = await fetch(endpoint, { method: 'POST', body: fd });
     const data = await res.json();
     if (res.status === 409 || data.error) {
       setFileStatus(item, 'error', res.status === 409 ? '✗ Already exists' : '✗ ' + data.error);
       showToast(data.error, 'error');
     } else {
-      setFileStatus(item, 'success', '✓ Uploaded');
+      setFileStatus(item, 'success', V2_INGEST_ENABLED ? '✓ Queued' : '✓ Uploaded');
       showToast(data.message || 'Uploaded successfully!', 'success');
       refreshStats();
-      document.getElementById('next-to-chunk').style.display = 'flex';
-      loadPdfPreview(file.name);
+      if (V2_INGEST_ENABLED && data.job_id) {
+        pollV2IngestionJob(item, data.job_id);
+      } else {
+        document.getElementById('next-to-chunk').style.display = 'flex';
+        loadPdfPreview(file.name);
+      }
     }
   } catch(e) {
     setFileStatus(item, 'error', '✗ Failed');
     showToast('Upload failed.', 'error');
   }
+}
+
+async function pollV2IngestionJob(item, jobId) {
+  for (;;) {
+    await new Promise(resolve=>setTimeout(resolve,2000));
+    try {
+      const res=await fetch(`/admin-panel/api/v2/jobs/${jobId}/`);
+      const data=await res.json();
+      if (!res.ok || data.error) {
+        setFileStatus(item,'error','✗ Status unavailable');
+        return;
+      }
+      const progress=data.total_units?Math.round((data.completed_units/data.total_units)*100):0;
+      setFileStatus(item,'pending',`Processing: ${data.job_stage} ${progress}%`);
+      if (data.job_status==='succeeded') {
+        const review=data.document_status==='review';
+        setFileStatus(item,review?'pending':'success',review?'Review required':'✓ Extraction complete');
+        showToast(review?'Extraction complete; review products in Django Admin.':'V2 extraction complete.',review?'info':'success');
+        if (review) addV2ReviewButton(item,data.document_id);
+        else addV2IndexButton(item,data.document_id);
+        refreshStats();
+        return;
+      }
+      if (data.job_status==='failed'||data.job_status==='cancelled') {
+        setFileStatus(item,'error',`✗ ${data.job_status}`);
+        showToast(data.error||`V2 ingestion ${data.job_status}.`,'error');
+        return;
+      }
+    } catch(error) {
+      setFileStatus(item,'error','✗ Status check failed');
+      return;
+    }
+  }
+}
+
+function addV2ReviewButton(item,documentId){
+  const link=document.createElement('a');
+  link.className='btn btn-sm btn-secondary';
+  link.href=`/django-admin/catalog/productfamily/?document__id__exact=${encodeURIComponent(documentId)}`;
+  link.target='_blank';
+  link.rel='noopener';
+  link.textContent='Review products';
+  item.appendChild(link);
+}
+
+function addV2IndexButton(item,documentId){
+  const button=document.createElement('button');
+  button.type='button';
+  button.className='btn btn-sm btn-secondary';
+  button.textContent='Review indexing cost';
+  button.addEventListener('click',async()=>{
+    const auditResponse=await fetch(`/admin-panel/api/v2/documents/${documentId}/index-audit/`);
+    const audit=await auditResponse.json();
+    if(!auditResponse.ok||audit.error){showToast(audit.error||'Could not load indexing audit.','error');return;}
+    if(audit.review_blocked){showToast(`${audit.review_blocked} chunks still require review.`,'error');return;}
+    const count=audit.pending_embeddings;
+    if(!window.confirm(`This will create ${count} OpenAI embedding(s). Continue?`)) return;
+    button.disabled=true;
+    button.textContent='Indexing…';
+    try{
+      const response=await fetch(`/admin-panel/api/v2/documents/${documentId}/index/`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-CSRFToken':CSRF},
+        body:JSON.stringify({confirmed_embedding_count:count})
+      });
+      const data=await response.json();
+      if(!response.ok||data.error) throw new Error(data.error||'Indexing failed.');
+      setFileStatus(item,'success','✓ Ready');
+      button.remove();
+      showToast(`Indexed ${data.indexed} chunk(s).`,'success');
+      refreshStats();
+    }catch(error){
+      showToast(error.message,'error');
+      button.disabled=false;
+      button.textContent='Retry indexing';
+    }
+  });
+  item.appendChild(button);
 }
 
 function addFileItem(name, size, statusClass, statusText) {
@@ -340,65 +427,6 @@ async function runChunking() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = '<i class="fa fa-layer-group"></i> Create Chunks';
-  }
-}
-
-// ── Index & Embed ─────────────────────────────────────────────────────────────
-let indexMode = 'incremental';
-function setIndexMode(mode) {
-  indexMode = mode;
-  document.querySelectorAll('.index-option-card').forEach(c => c.classList.remove('selected'));
-  document.querySelector(`.index-option-card[data-mode="${mode}"]`).classList.add('selected');
-}
-
-async function runIndexing() {
-  const reset = indexMode === 'reset';
-  const btn   = document.getElementById('btn-run-index');
-  const prog  = document.getElementById('index-progress');
-  const fill  = document.getElementById('index-fill');
-  const pct   = document.getElementById('index-pct');
-  const log   = document.getElementById('index-log');
-  const label = document.getElementById('index-progress-label');
-
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Indexing…';
-  prog.classList.add('visible');
-  log.classList.add('visible');
-  log.textContent = reset ? '▶ Resetting and re-indexing all chunks…\n' : '▶ Running incremental indexing…\n';
-
-  let p = 0;
-  const ticker = setInterval(() => {
-    p = Math.min(p + 4, 88);
-    fill.style.width = p + '%';
-    pct.textContent  = p + '%';
-  }, 400);
-
-  try {
-    const res  = await fetch('/admin-panel/api/ingest/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ reset })
-    });
-    const data = await res.json();
-    clearInterval(ticker);
-    fill.style.width = '100%'; pct.textContent = '100%';
-    label.textContent = 'Complete';
-
-    if (data.error) {
-      log.textContent += '\n✗ ERROR:\n' + data.error;
-      showToast('Indexing failed.', 'error');
-    } else {
-      log.textContent += data.output || '\n✓ Indexing complete.';
-      showToast('Indexing complete!', 'success');
-      refreshStats();
-      markStepDone('index');
-    }
-  } catch(e) {
-    clearInterval(ticker);
-    log.textContent += '\n✗ Network error.';
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa fa-bolt"></i> Run Indexing';
   }
 }
 

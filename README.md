@@ -1,8 +1,6 @@
 # Industrial Product Catalog Parser
 
-Processes large industrial PDF catalogs (100–1000 pages) and generates one **clean markdown chunk per product** with structured JSON metadata.
-
-No vector database. No embeddings. No RAG. Pure OCR → extraction → chunking.
+Processes large industrial PDF catalogs (100–1000 pages), generates one **clean markdown chunk per product**, stores structured data in PostgreSQL, and indexes chunks in self-hosted Qdrant for dense + BM25 hybrid RAG.
 
 ---
 

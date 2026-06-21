@@ -27,6 +27,7 @@ CHAT_MODELS = {
         ("gemini-2.5-pro", "Gemini 2.5 Pro"),
     ),
     "openai": (
+        ("gpt-4o-mini", "GPT-4o mini"),
         ("gpt-5.4-mini", "GPT-5.4 mini"),
         ("gpt-5.4", "GPT-5.4"),
         ("gpt-5-mini", "GPT-5 mini"),

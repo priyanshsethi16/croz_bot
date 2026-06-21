@@ -8,6 +8,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR.parent   # croz_bot/
 load_dotenv(PROJECT_ROOT / '.env')
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'groz-django-secret-key-change-in-production')
 MODEL_CONFIG_ENCRYPTION_KEY = os.getenv('MODEL_CONFIG_ENCRYPTION_KEY', SECRET_KEY)
 DEBUG = True
@@ -85,3 +92,7 @@ MEDIA_URL  = '/media/'
 LOGIN_URL          = '/admin-panel/login/'
 LOGIN_REDIRECT_URL = '/admin-panel/'
 LOGOUT_REDIRECT_URL = '/'
+
+# Catalog ingestion remains gated until the admin review workflow is enabled.
+# Querying has a single source-aware V2 path; no legacy fallback exists.
+CATALOG_RAG_V2_INGEST = _env_bool('CATALOG_RAG_V2_INGEST', False)

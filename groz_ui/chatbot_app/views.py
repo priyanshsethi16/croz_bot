@@ -1,4 +1,6 @@
 import json
+import logging
+import uuid
 from django.conf import settings
 from django.contrib.auth import logout
 from django.http import JsonResponse
@@ -6,6 +8,7 @@ from django.shortcuts import render, redirect
 from django.views.decorators.http import require_POST
 
 PROJECT_ROOT = settings.PROJECT_ROOT
+logger = logging.getLogger(__name__)
 
 
 def home(request):
@@ -34,28 +37,37 @@ def chat_query(request):
 
     try:
         from catalog.model_config import get_runtime_config
-        from rag_pipeline.retriever import Retriever
-        from rag_pipeline.llm import LLMAnswerer
+        from catalog.services.query_engine import CatalogQueryEngine
 
         runtime = get_runtime_config()
         if not runtime.openai_api_key:
             return JsonResponse({'error': 'Search is not configured. Ask an admin to add the OpenAI key.'}, status=503)
         if not runtime.chat_api_key:
             return JsonResponse({'error': 'Chat model is not configured. Ask an admin to add its API key.'}, status=503)
-        retriever = Retriever(top_k=5, api_key=runtime.openai_api_key)
-        llm = LLMAnswerer(
-            provider=runtime.chat_provider,
-            api_key=runtime.chat_api_key,
-            model=runtime.chat_model,
+
+        catalog_ids = body.get('catalog_ids', [])
+        document_ids = body.get('document_ids', [])
+        if not isinstance(catalog_ids, list) or not isinstance(document_ids, list):
+            return JsonResponse({'error': 'catalog_ids and document_ids must be arrays.'}, status=400)
+        try:
+            page = max(1, int(body.get('page', 1)))
+            page_size = min(100, max(1, int(body.get('page_size', 50))))
+        except (TypeError, ValueError):
+            return JsonResponse({'error': 'Invalid pagination values.'}, status=400)
+        execution = CatalogQueryEngine(runtime).execute(
+            query,
+            catalog_ids=catalog_ids,
+            document_ids=document_ids,
+            page=page,
+            page_size=page_size,
         )
-        chunks    = retriever.retrieve(query)
-        answer    = llm.answer(query, chunks)
-        sources   = [
-            {'name': c['metadata'].get('product_name', ''),
-             'code': c['metadata'].get('product_code', ''),
-             'score': c['score']}
-            for c in chunks
-        ]
-        return JsonResponse({'answer': answer, 'sources': sources})
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        payload = execution.as_dict()
+        payload['query_path'] = 'v2'
+        return JsonResponse(payload)
+    except Exception:
+        correlation_id = str(uuid.uuid4())
+        logger.exception('Catalog query failed; correlation_id=%s', correlation_id)
+        return JsonResponse({
+            'error': 'Catalog query failed.',
+            'correlation_id': correlation_id,
+        }, status=500)

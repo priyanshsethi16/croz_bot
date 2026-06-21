@@ -9,6 +9,10 @@ function showToast(msg, type='info', duration=4000) {
 
 function renderMarkdown(text) {
   if (!text) return '';
+  text = String(text)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
   text = text.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g,(_,header,rows)=>{
     const ths=header.split('|').filter(s=>s.trim()).map(s=>`<th>${s.trim()}</th>`).join('');
     const trs=rows.trim().split('\n').map(row=>{
@@ -17,8 +21,10 @@ function renderMarkdown(text) {
     }).join('');
     return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
   });
+  text=text.replace(/^#### (.+)$/gm,'<h4>$1</h4>');
   text=text.replace(/^### (.+)$/gm,'<h3>$1</h3>');
   text=text.replace(/^## (.+)$/gm,'<h3>$1</h3>');
+  text=text.replace(/^# (.+)$/gm,'<h2>$1</h2>');
   text=text.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
   text=text.replace(/`([^`]+)`/g,'<code>$1</code>');
   text=text.replace(/^[-*] (.+)$/gm,'<li>$1</li>');

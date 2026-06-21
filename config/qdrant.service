@@ -1,0 +1,15 @@
+[Unit]
+Description=Self-hosted Qdrant vector database for Croz Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/groz/croz_bot
+ExecStart=%h/.local/bin/qdrant --config-path %h/groz/croz_bot/config/qdrant.yaml --disable-telemetry
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=default.target

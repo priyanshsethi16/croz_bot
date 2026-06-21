@@ -1,12 +1,12 @@
 # DB Pipeline
 
-Ingests catalog `.md` chunks into PostgreSQL (structured) + ChromaDB (semantic embeddings).
+Ingests catalog `.md` chunks into PostgreSQL (structured) + self-hosted Qdrant (dense semantic + sparse BM25 vectors).
 
 ## Setup
 
 **1. Install dependencies:**
 ```bash
-pip install psycopg2-binary chromadb langchain-openai langchain-chroma
+pip install psycopg2-binary "qdrant-client[fastembed]" langchain-qdrant
 ```
 
 **2. Install and start PostgreSQL (WSL):**
@@ -19,10 +19,22 @@ sudo -u postgres psql -c "CREATE DATABASE catalog_db;"
 **3. Add to `.env`:**
 ```
 POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/catalog_db
-OPENAI_API_KEY=your_openai_key
+QDRANT_URL=http://127.0.0.1:6333
+QDRANT_COLLECTION=catalog_chunks_v1
+OPENAI_API_KEY=your_rotated_openai_key
 ```
 
-Semantic embeddings use OpenAI `text-embedding-3-small`; no local embedding model is loaded.
+**4. Start self-hosted Qdrant:**
+```bash
+qdrant --config-path config/qdrant.yaml --disable-telemetry
+```
+
+On the configured development machine it runs as an enabled user service:
+```bash
+systemctl --user status qdrant.service
+```
+
+Dense embeddings use OpenAI `text-embedding-3-small`; sparse vectors use `Qdrant/bm25`.
 
 ## Usage
 
@@ -62,13 +74,13 @@ python -m db_pipeline.search --semantic "drill bits" --pdf Workshop_mini --top 1
     │     product_code, product_name, category, source_pdf,
     │     page_num, chunk_file, markdown_text, metadata (JSONB)
     │
-    └─► ChromaDB (catalog_products collection)
-          embedding vector + metadata (links back to PostgreSQL id)
+    └─► Qdrant (catalog_chunks_v1 collection)
+          dense vector + sparse BM25 vector + filterable metadata
 
 Query flow:
   semantic_search("demolition hammer")
-      → ChromaDB finds top-K similar embeddings
-      → PostgreSQL fetches full structured data for those IDs
+      → Qdrant runs dense and sparse prefetches
+      → Qdrant fuses rankings with weighted RRF
       → Returns combined result
 ```
 

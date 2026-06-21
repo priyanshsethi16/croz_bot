@@ -4,8 +4,7 @@ db_pipeline/search.py
 Query interface for the catalog database.
 
   Exact search  → PostgreSQL (product code, category, PDF)
-  Semantic search → ChromaDB (natural language queries)
-  Hybrid search  → Chroma finds candidates, PostgreSQL fetches full data
+  Hybrid search → Qdrant dense semantic + sparse BM25 retrieval
 
 Usage:
     python -m db_pipeline.search --exact BPID
@@ -94,52 +93,55 @@ def fetch_by_ids(pg_ids: list[int]) -> list[dict]:
     return rows
 
 
-# ── ChromaDB helpers ──────────────────────────────────────────────────────────
+# ── Qdrant hybrid search ─────────────────────────────────────────────────────
 
-def get_chroma_collection(chroma_path: str = "db_pipeline/chroma_db"):
-    from rag_pipeline.providers import build_vector_store
-    return build_vector_store(persist_directory=chroma_path)
-
-
-def semantic_search(
+def hybrid_search(
     query: str,
     top_k: int = 5,
     category_filter: str = None,
     source_pdf_filter: str = None,
-    chroma_path: str = "db_pipeline/chroma_db",
 ) -> list[dict]:
-    """
-    Semantic search via ChromaDB embeddings.
-    Returns full product data fetched from PostgreSQL.
-    """
-    vector_store = get_chroma_collection(chroma_path)
+    """Hybrid dense+BM25 search via Qdrant with optional payload filters."""
+    from qdrant_client import models
+    from rag_pipeline.retriever import HybridRetriever
 
-    where: dict = {}
+    conditions = [
+        models.FieldCondition(
+            key="metadata.document_type",
+            match=models.MatchValue(value="product"),
+        )
+    ]
     if category_filter:
-        where["category"] = {"$contains": category_filter}
+        conditions.append(models.FieldCondition(
+            key="metadata.category",
+            match=models.MatchText(text=category_filter),
+        ))
     if source_pdf_filter:
-        where["source_pdf"] = {"$contains": source_pdf_filter}
+        conditions.append(models.FieldCondition(
+            key="metadata.source_pdf",
+            match=models.MatchValue(value=source_pdf_filter),
+        ))
 
-    results = vector_store.similarity_search_with_relevance_scores(
+    hits = HybridRetriever(top_k=top_k).retrieve(
         query,
-        k=top_k,
-        filter=where if where else None,
+        query_filter=models.Filter(must=conditions),
     )
+    return [
+        {
+            "product_code": hit["metadata"].get("product_code", ""),
+            "product_name": hit["metadata"].get("product_name", ""),
+            "category": hit["metadata"].get("category", ""),
+            "source_pdf": hit["metadata"].get("source_pdf", ""),
+            "page_num": hit["metadata"].get("page_num", 0),
+            "chunk_file": hit["metadata"].get("chunk_file", ""),
+            "markdown_text": hit["text"],
+            "similarity": hit["score"],
+        }
+        for hit in hits
+    ]
 
-    if not results:
-        return []
 
-    pg_ids = [int(document.metadata["postgres_id"]) for document, _ in results]
-
-    products = fetch_by_ids(pg_ids)
-
-    # Attach similarity score (1 - cosine distance)
-    id_to_score = {pg_ids[i]: round(float(results[i][1]), 4) for i in range(len(pg_ids))}
-    for p in products:
-        p["similarity"] = id_to_score.get(p["id"], 0.0)
-
-    products.sort(key=lambda x: -x["similarity"])
-    return products
+semantic_search = hybrid_search
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -167,7 +169,6 @@ def parse_args():
     parser.add_argument("--pdf", help="Filter by source PDF name")
     parser.add_argument("--top", type=int, default=5, help="Number of results (default 5)")
     parser.add_argument("--markdown", action="store_true", help="Show markdown content")
-    parser.add_argument("--chroma-path", default="db_pipeline/chroma_db")
     return parser.parse_args()
 
 
@@ -185,14 +186,13 @@ def main():
         _print_results(results, show_markdown=args.markdown)
 
     elif args.semantic:
-        results = semantic_search(
+        results = hybrid_search(
             query=args.semantic,
             top_k=args.top,
             category_filter=args.category,
             source_pdf_filter=args.pdf,
-            chroma_path=args.chroma_path,
         )
-        print(f"Semantic search: '{args.semantic}' → {len(results)} result(s)")
+        print(f"Hybrid search: '{args.semantic}' → {len(results)} result(s)")
         _print_results(results, show_markdown=args.markdown)
 
     else:
