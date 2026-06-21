@@ -49,10 +49,12 @@ flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, t
 **Capture everything:**
 - Section banner → page_metadata.catalog_section (exact, never infer)
 - category = catalog_section text exactly
-- NEW, Bestseller, Popular in EUROPE, Patent Pending → notes
+- NEW, Bestseller, Popular in EUROPE, Patent Pending → notes; ★ Best Seller row → "bestseller": true on that ordering_table row
 - ★ on row → "bestseller": true; □ on row → "made_to_order": true
 - Safety warnings, warranty, country of origin → dedicated fields
 - Unclassified text → raw_text_blocks
+- Ordering tables — read the actual column headers from the page and use them as keys. Never use generic keys if the real headers are different. Capture ALL columns including Cartridge Capacity, Bulk Capacity, Threads, EAN, Box Qty etc.
+- Specifications tables (e.g. Develops/Delivers rows) → extract into specifications fields (pressure, flow_rate)
 
 ## JSON SCHEMA
 Return JSON array only. Each element = one product family.
@@ -85,7 +87,7 @@ Return JSON array only. Each element = one product family.
     "specifications": {},
     "color": "",
     "sizes": [{"size": "", "dimensions": "", "cat_no": "", "ean": "", "bestseller": false, "new": false, "made_to_order": false}],
-    "ordering_table": [{"Cat_No": "", "Ord_No": "", "Size": "", "Weight": "", "Box_Qty": "", "EAN": "", "Price": ""}],
+    "ordering_table": [{"use actual column headers from the page as keys, e.g. Cat_No, Ord_No, Cartridge_Capacity_OZ, Cartridge_Capacity_GMS, Bulk_Capacity_CM3, Threads, Box_Qty, EAN, Price — read the table header row exactly and use those as keys"}],
     "accessories_included": [],
     "notes": ""
   }]

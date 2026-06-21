@@ -195,25 +195,22 @@ def ingest_chunks_dir(
 
     conn = get_pg_conn()
     ensure_schema(conn)
-    collection = get_chroma_collection(chroma_path)
 
     if force:
         print(f"Force mode: deleting existing data for {source_pdf}")
         delete_by_pdf(conn, source_pdf)
-        delete_chroma_by_pdf(collection, source_pdf)
 
     ingested = 0
     with tqdm(total=len(md_files), desc="Ingesting", unit="chunk") as pbar:
         for md_path in md_files:
             chunk = parse_chunk(md_path)
-            pg_id = insert_postgres(conn, chunk, source_pdf)
-            insert_chroma(collection, chunk, pg_id, source_pdf)
+            insert_postgres(conn, chunk, source_pdf)
             ingested += 1
             pbar.update(1)
             pbar.set_postfix({"code": chunk["product_code"] or "?"})
 
     conn.close()
-    print(f"Ingested {ingested} chunks → PostgreSQL + ChromaDB")
+    print(f"Ingested {ingested} chunks → PostgreSQL")
 
 
 def parse_args():
