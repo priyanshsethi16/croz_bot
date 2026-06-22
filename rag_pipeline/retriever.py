@@ -38,7 +38,7 @@ class HybridRetriever:
         self.semantic_weight = semantic_weight / total_weight
         self.keyword_weight = keyword_weight / total_weight
         self.rrf_k = rrf_k
-        self._vector_store = vector_store or build_vector_store(api_key)
+        self._vector_store = vector_store or build_vector_store()
 
     def retrieve(
         self,

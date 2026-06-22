@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -616,7 +617,7 @@ class CatalogQueryEngine:
         )
 
     def _semantic_retrieve(self, query: str, scope: QueryScope, *, top_k: int = 5) -> list[dict]:
-        retriever = HybridRetriever(top_k=top_k, api_key=self.runtime.openai_api_key)
+        retriever = HybridRetriever(top_k=top_k)  # HuggingFace embeddings need no API key
         return retriever.retrieve(query, query_filter=_scope_filter(scope))
 
     def _normalize_planned_tasks(self, plan: QueryPlan) -> QueryPlan:
@@ -741,8 +742,10 @@ class CatalogQueryEngine:
             plan = enrich_complex_plan(
                 plan,
                 query,
-                api_key=self.runtime.openai_api_key,
-                model='gpt-4o-mini',
+                # api_key=self.runtime.openai_api_key,  # disabled
+                # model='gpt-4o-mini',  # disabled
+                api_key=self.runtime.groq_api_key,
+                model='qwen/qwen3-32b',
             )
             plan = self._normalize_planned_tasks(plan)
         elif structured_probe and plan.intent in (QueryIntent.AMBIGUOUS, QueryIntent.GENERAL_SEMANTIC):

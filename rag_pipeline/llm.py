@@ -11,8 +11,9 @@ import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+# from langchain_openai import ChatOpenAI  # disabled; using Groq
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 
 SYSTEM_PROMPT = """You are an expert industrial product catalog assistant.
 
@@ -113,8 +114,10 @@ class LLMAnswerer:
         self.model = model
         if not api_key:
             raise ValueError(f"API key is required for {self.provider} chat.")
-        if self.provider == "openai":
-            self._model = ChatOpenAI(model=model, api_key=api_key, max_retries=3)
+        # if self.provider == "openai":  # disabled
+        #     self._model = ChatOpenAI(model=model, api_key=api_key, max_retries=3)
+        if self.provider == "groq":
+            self._model = ChatGroq(model=model, api_key=api_key, max_retries=3)
         elif self.provider == "gemini":
             self._model = ChatGoogleGenerativeAI(
                 model=model,
@@ -123,7 +126,7 @@ class LLMAnswerer:
                 max_retries=3,
             )
         else:
-            raise ValueError("Chat provider must be either openai or gemini.")
+            raise ValueError("Chat provider must be either groq or gemini.")
 
     def answer(
         self,

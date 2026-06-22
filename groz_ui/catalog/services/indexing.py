@@ -198,9 +198,7 @@ def index_document(
 
     ensure_collection()
     runtime = get_runtime_config()
-    if pending and not runtime.openai_api_key:
-        raise ValueError('OpenAI API key is required for confirmed V2 embeddings.')
-    vector_store = build_vector_store(runtime.openai_api_key) if pending else None
+    vector_store = build_vector_store() if pending else None
     CatalogDocument.objects.filter(pk=document.pk).update(
         status=CatalogDocument.Status.INDEXING,
         updated_at=timezone.now(),

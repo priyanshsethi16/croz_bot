@@ -11,7 +11,12 @@ pdf2image>=1.17.0   # Requires poppler: sudo apt-get install poppler-utils (Linu
 # LLM
 groq>=0.9.0
 langchain>=1.0.0
-langchain-openai>=1.0.0
+# langchain-openai>=1.0.0  # disabled for chat; re-enable when switching back to OpenAI
+# Note: langchain-openai is still needed if using OpenAIEmbeddings for Qdrant indexing
+# langchain-openai>=1.0.0  # disabled; embeddings now use HuggingFace
+langchain-groq>=0.2.0
+langchain-huggingface>=0.1.0
+sentence-transformers>=3.0.0
 langchain-google-genai>=4.0.0
 langchain-qdrant>=1.1.0,<2.0.0
 

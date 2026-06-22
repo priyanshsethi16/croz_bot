@@ -1,4 +1,4 @@
-"""Qdrant, OpenAI dense, and BM25 sparse providers for hybrid search."""
+"""Qdrant, HuggingFace dense, and BM25 sparse providers for hybrid search."""
 
 from __future__ import annotations
 
@@ -27,17 +27,14 @@ EMBED_DIMENSIONS = 1536
 SPARSE_MODEL = "Qdrant/bm25"
 
 
-def get_openai_api_key(api_key: str | None = None) -> str:
-    key = (api_key or os.getenv("OPENAI_API_KEY", "")).strip()
+@lru_cache(maxsize=1)
+def build_embeddings() -> OpenAIEmbeddings:
+    key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
-        raise ValueError(f"OPENAI_API_KEY is required for {EMBED_MODEL}.")
-    return key
-
-
-def build_embeddings(api_key: str | None = None) -> OpenAIEmbeddings:
+        raise ValueError("OPENAI_API_KEY is required for embeddings. Add it to .env")
     return OpenAIEmbeddings(
         model=EMBED_MODEL,
-        api_key=get_openai_api_key(api_key),
+        api_key=key,
         chunk_size=100,
         max_retries=3,
     )
@@ -110,7 +107,7 @@ def ensure_collection(*, reset: bool = False) -> QdrantClient:
     return client
 
 
-def build_vector_store(api_key: str | None = None) -> QdrantVectorStore:
+def build_vector_store() -> QdrantVectorStore:
     client = build_qdrant_client()
     if not client.collection_exists(COLLECTION):
         raise RuntimeError(
@@ -121,7 +118,7 @@ def build_vector_store(api_key: str | None = None) -> QdrantVectorStore:
     return QdrantVectorStore(
         client=client,
         collection_name=query_collection,
-        embedding=build_embeddings(api_key),
+        embedding=build_embeddings(),
         sparse_embedding=build_sparse_embeddings(),
         retrieval_mode=RetrievalMode.HYBRID,
         vector_name=DENSE_VECTOR,

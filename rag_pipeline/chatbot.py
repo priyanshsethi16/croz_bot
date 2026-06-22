@@ -22,20 +22,26 @@ from rag_pipeline.llm import LLMAnswerer
 
 
 def run_chatbot(top_k: int = 5):
-    openai_key = os.getenv("OPENAI_API_KEY", "")
-    provider = os.getenv("CHAT_PROVIDER", "gemini").lower()
-    model = os.getenv("CHAT_MODEL", "gemini-2.5-flash")
-    chat_key = openai_key if provider == "openai" else os.getenv("GEMINI_API_KEY", "")
-    if not openai_key:
-        print("ERROR: OPENAI_API_KEY is required for retrieval embeddings")
-        return
+    # openai_key = os.getenv("OPENAI_API_KEY", "")  # disabled; HuggingFace embeddings need no key
+    # embed_key = os.getenv("OPENAI_EMBEDDING_KEY", "")  # disabled
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    # provider = os.getenv("CHAT_PROVIDER", "openai").lower()  # disabled
+    provider = os.getenv("CHAT_PROVIDER", "groq").lower()
+    # model = os.getenv("CHAT_MODEL", "gpt-4o-mini")  # disabled
+    model = os.getenv("CHAT_MODEL", "qwen/qwen3-32b")
+    # chat_key = openai_key if provider == "openai" else os.getenv("GEMINI_API_KEY", "")  # disabled
+    chat_key = groq_key if provider == "groq" else os.getenv("GEMINI_API_KEY", "")
+    # if not embed_key:
+    #     print("ERROR: OPENAI_EMBEDDING_KEY is required for retrieval embeddings")
+    #     return
     if not chat_key:
         print(f"ERROR: API key not set for {provider} chat")
         return
 
     print("Loading retriever...")
     try:
-        retriever = HybridRetriever(top_k=top_k, api_key=openai_key)
+                # retriever = HybridRetriever(top_k=top_k, api_key=embed_key)
+        retriever = HybridRetriever(top_k=top_k)  # HuggingFace embeddings, no API key needed
     except Exception as e:
         print(f"ERROR: Could not load Qdrant collection: {e}")
         print("Index an approved catalog document from the admin V2 workflow first.")

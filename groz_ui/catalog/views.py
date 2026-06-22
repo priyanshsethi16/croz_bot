@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -255,8 +256,8 @@ def admin_chat(request):
         from .services.query_engine import CatalogQueryEngine
 
         runtime = get_runtime_config()
-        if not runtime.openai_api_key:
-            return JsonResponse({'error': 'OpenAI API key is required for retrieval embeddings.'}, status=400)
+        if not os.getenv('OPENAI_API_KEY', '').strip():
+            return JsonResponse({'error': 'OPENAI_API_KEY is required for retrieval embeddings.'}, status=400)
         if not runtime.chat_api_key:
             return JsonResponse({'error': f'{runtime.chat_provider.title()} API key is not configured.'}, status=400)
         catalog_ids = body.get('catalog_ids', [])

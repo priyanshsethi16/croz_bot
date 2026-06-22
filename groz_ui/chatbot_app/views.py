@@ -40,8 +40,10 @@ def chat_query(request):
         from catalog.services.query_engine import CatalogQueryEngine
 
         runtime = get_runtime_config()
-        if not runtime.openai_api_key:
-            return JsonResponse({'error': 'Search is not configured. Ask an admin to add the OpenAI key.'}, status=503)
+        # if not runtime.openai_api_key:
+        #     return JsonResponse({'error': 'Search is not configured. Ask an admin to add the OpenAI key.'}, status=503)
+        if not runtime.groq_api_key:
+            return JsonResponse({'error': 'Search is not configured. Ask an admin to add the Groq key.'}, status=503)
         if not runtime.chat_api_key:
             return JsonResponse({'error': 'Chat model is not configured. Ask an admin to add its API key.'}, status=503)
 
@@ -63,6 +65,13 @@ def chat_query(request):
         )
         payload = execution.as_dict()
         payload['query_path'] = 'v2'
+        logger.info(
+            'Chat response generated | provider=%s model=%s query=%r results=%d',
+            runtime.chat_provider,
+            runtime.chat_model,
+            query,
+            len(payload.get('results', [])),
+        )
         return JsonResponse(payload)
     except Exception:
         correlation_id = str(uuid.uuid4())

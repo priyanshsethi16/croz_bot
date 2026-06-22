@@ -7,7 +7,8 @@ from enum import Enum
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+# from langchain_openai import ChatOpenAI  # disabled; using Groq
+from langchain_groq import ChatGroq
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -302,7 +303,8 @@ def enrich_complex_plan(
             )],
         })
 
-    llm = ChatOpenAI(model=model, api_key=api_key, temperature=0.0, max_retries=3)
+    # llm = ChatOpenAI(model=model, api_key=api_key, temperature=0.0, max_retries=3)  # disabled
+    llm = ChatGroq(model=model, api_key=api_key, temperature=0.0, max_retries=3)
     try:
         structured_llm = llm.with_structured_output(
             StructuredQueryPlan,
