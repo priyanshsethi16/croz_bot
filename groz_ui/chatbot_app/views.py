@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 PROJECT_ROOT = settings.PROJECT_ROOT
 load_dotenv(PROJECT_ROOT / '.env')
 
-# ── Module-level shared retriever (loaded once) ───────────────────────────────
-_retriever = None
+# ── Module-level shared retriever (loaded once) ──────────────────────────────────
+_retriever = None  # pre-warmed by AppConfig.ready()
 
 def _get_retriever():
     global _retriever
@@ -61,6 +61,7 @@ def _get_catalog_meta():
         return [], []
 
 
+@ensure_csrf_cookie
 def home(request):
     return render(request, 'chatbot_app/home.html')
 

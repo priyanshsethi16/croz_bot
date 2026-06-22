@@ -76,11 +76,15 @@ async function sendMessage(){
   sendBtn.disabled=true;
   addTyping();
   try{
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
     const res=await fetch('/api/chat/',{
       method:'POST',
       headers:{'Content-Type':'application/json','X-CSRFToken':getCsrf()},
-      body:JSON.stringify({query:q})
+      body:JSON.stringify({query:q}),
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     const data=await res.json();
     document.getElementById('typing')?.remove();
     if(data.error){
@@ -91,7 +95,8 @@ async function sendMessage(){
     }
   }catch(e){
     document.getElementById('typing')?.remove();
-    addMsg('bot','<span style="color:var(--orange)"><i class="fa fa-exclamation-triangle"></i> Network error. Please try again.</span>');
+    const msg = e.name === 'AbortError' ? 'Request timed out. Please try again.' : 'Network error. Please try again.';
+    addMsg('bot',`<span style="color:var(--orange)"><i class="fa fa-exclamation-triangle"></i> ${msg}</span>`);
   }finally{
     sendBtn.disabled=false;
     inputEl.focus();
