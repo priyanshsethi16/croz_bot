@@ -8,6 +8,38 @@ function closeSidebar() { sidebarEl.classList.remove('open'); overlayEl.classLis
 toggleBtn.addEventListener('click', openSidebar);
 overlayEl.addEventListener('click', closeSidebar);
 
+// Utility to parse and return a clean, user-friendly error message from tracebacks/API responses
+function getCleanErrorMessage(errText) {
+  if (!errText) return 'Unknown error occurred.';
+  
+  // Check for common API errors
+  if (errText.includes('high demand') || errText.includes('experiencing high demand')) {
+    return 'Google Gemini is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.';
+  }
+  if (errText.includes('503 UNAVAILABLE') || errText.includes('503 Service Unavailable')) {
+    return 'Google Gemini API is temporarily unavailable (503). Please try again in a few minutes.';
+  }
+  if (errText.includes('Quota exceeded') || errText.includes('429')) {
+    return 'API quota limit exceeded. Please wait a moment before trying again.';
+  }
+  if (errText.includes('GEMINI_API_KEY is required')) {
+    return 'Gemini API Key is missing or invalid. Please configure it in Models & Keys.';
+  }
+
+  // Fallback: extract the last non-empty line of the error text
+  const lines = errText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  if (lines.length > 0) {
+    const lastLine = lines[lines.length - 1];
+    const match = lastLine.match(/^[a-zA-Z0-9.]+Exception:\s*(.+)$/) || 
+                  lastLine.match(/^[a-zA-Z0-9.]+Error:\s*(.+)$/);
+    if (match) {
+      return match[1];
+    }
+    return lastLine;
+  }
+  return errText;
+}
+
 // ── Panel navigation ──────────────────────────────────────────────────────────
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -116,7 +148,7 @@ async function pollV2IngestionJob(item, jobId) {
       }
       if (data.job_status==='failed'||data.job_status==='cancelled') {
         setFileStatus(item,'error',`✗ ${data.job_status}`);
-        showToast(data.error||`V2 ingestion ${data.job_status}.`,'error');
+        showToast(data.error ? getCleanErrorMessage(data.error) : `V2 ingestion ${data.job_status}.`,'error', 10000);
         return;
       }
     } catch(error) {
@@ -498,7 +530,7 @@ async function runChunking() {
 
     if (data.error) {
       log.textContent += '\n✗ ERROR:\n' + data.error;
-      showToast('Chunking failed.', 'error');
+      showToast(`Chunking failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
     } else {
       log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
@@ -1085,7 +1117,7 @@ async function runSingleSplit(idx) {
       itemEl.className = 'split-part-item errored';
       statEl.className = 'split-part-status errored';
       statEl.textContent = '✗ Failed';
-      showToast(`Part ${idx+1} failed.`, 'error');
+      showToast(`Part ${idx+1} failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
     } else {
       itemEl.className = 'split-part-item done';
       statEl.className = 'split-part-status done';
@@ -1097,9 +1129,17 @@ async function runSingleSplit(idx) {
     itemEl.className = 'split-part-item errored';
     statEl.className = 'split-part-status errored';
     statEl.textContent = '✗ Error';
+    showToast(`Network error on part ${idx+1}.`, 'error', 10000);
   } finally {
-    if (!document.getElementById(`split-btn-${idx}`).innerHTML.includes('check'))
-      btnEl.disabled = false;
+    const currentBtn = document.getElementById(`split-btn-${idx}`);
+    if (currentBtn) {
+      if (currentBtn.innerHTML.includes('check')) {
+        currentBtn.disabled = true;
+      } else {
+        currentBtn.innerHTML = '<i class="fa fa-play"></i> Run';
+        currentBtn.disabled = false;
+      }
+    }
   }
 }
 
