@@ -355,6 +355,55 @@ def catalog_stats(request):
     return JsonResponse(stats)
 
 
+@login_required
+def index_status(request):
+    """Return indexing status for a specific PDF."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    
+    pdf_name = request.GET.get('pdf', '').strip()
+    if not pdf_name:
+        return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
+    
+    import re
+    stem = Path(pdf_name).stem
+    sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_') or 'catalog'
+    
+    # Count total chunks
+    chunks_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / sanitized_stem / 'chunks'
+    total_chunks = len(list(chunks_dir.glob('*.md'))) if chunks_dir.exists() else 0
+    
+    # Count indexed chunks from Qdrant
+    indexed = 0
+    try:
+        from qdrant_client import models
+        from rag_pipeline.providers import COLLECTION, build_qdrant_client
+        client = build_qdrant_client()
+        if client.collection_exists(COLLECTION):
+            # Count points with this PDF's stem
+            result = client.count(
+                collection_name=COLLECTION,
+                count_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key='metadata.source_pdf',
+                            match=models.MatchAny(any=[stem, sanitized_stem]),
+                        )
+                    ]
+                ),
+            )
+            indexed = result.count if result else 0
+    except Exception as e:
+        pass
+    
+    return JsonResponse({
+        'pdf': pdf_name,
+        'total_chunks': total_chunks,
+        'indexed': indexed,
+        'status': 'fully_indexed' if indexed == total_chunks and total_chunks > 0 else ('partially_indexed' if indexed > 0 else 'not_indexed')
+    })
+
+
 # ── API: PDF page count ────────────────────────────────────────────────
 
 _page_count_cache = {}
