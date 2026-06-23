@@ -747,6 +747,121 @@ async function deletePdf(filename) {
 }
 
 // -- Stats refresh -------------------------------------------------------------────────────
+function updateCatalogTable(processed, unprocessed) {
+  const container = document.getElementById('catalog-overview-body');
+  if (!container) return;
+
+  // If there are no processed PDFs and no unprocessed PDFs, show the empty state
+  if (!processed.length && (!IS_ADMIN || !unprocessed.length)) {
+    let emptyHtml = `
+      <div style="text-align:center;padding:48px 20px;color:var(--grey)">
+        <i class="fa fa-inbox" style="font-size:40px;margin-bottom:14px;display:block;color:#d0d0d0"></i>
+        <p style="font-size:14px;font-weight:600;margin-bottom:8px">No PDFs processed yet</p>
+    `;
+    if (IS_ADMIN) {
+      emptyHtml += `
+        <p style="font-size:13px;margin-bottom:20px">Follow the 3-step workflow to get started.</p>
+        <button class="btn btn-primary" onclick="showPanel('upload')">
+          <i class="fa fa-upload"></i> Upload Your First PDF
+        </button>
+      `;
+    } else {
+      emptyHtml += `
+        <p style="font-size:13px">No catalog data available yet. Please contact your administrator.</p>
+      `;
+    }
+    emptyHtml += `</div>`;
+    container.innerHTML = emptyHtml;
+    return;
+  }
+
+  // Otherwise, construct the table
+  let tableHtml = `
+    <div class="table-wrap">
+      <table class="catalog-table">
+        <thead>
+          <tr>
+            <th>PDF Name</th>
+            <th>Chunks</th>
+            <th>Products</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+
+  // 1. Processed rows
+  processed.forEach(item => {
+    tableHtml += `
+      <tr>
+        <td>
+          <div class="pdf-name-cell">
+            <i class="fa fa-file-pdf"></i>
+            <span class="pname">${escHtml(item.name)}</span>
+          </div>
+        </td>
+        <td><span class="badge badge-blue">${item.chunks}</span></td>
+        <td><span class="badge badge-green">${item.products}</span></td>
+        <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
+              <i class="fa fa-layer-group"></i> Chunks
+            </button>
+            <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
+              <i class="fa fa-comments"></i> Test
+            </button>
+    `;
+    if (IS_ADMIN) {
+      tableHtml += `
+            <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')">
+              <i class="fa fa-trash"></i> Delete
+            </button>
+      `;
+    }
+    tableHtml += `
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  // 2. Unprocessed rows (admin only)
+  if (IS_ADMIN) {
+    unprocessed.forEach(pdfName => {
+      tableHtml += `
+        <tr>
+          <td>
+            <div class="pdf-name-cell">
+              <i class="fa fa-file-pdf"></i>
+              <span class="pname">${escHtml(pdfName)}</span>
+            </div>
+          </td>
+          <td><span class="badge badge-grey">—</span></td>
+          <td><span class="badge badge-grey">—</span></td>
+          <td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>
+          <td>
+            <div class="table-actions">
+              <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(pdfName)}')">
+                <i class="fa fa-trash"></i> Delete
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+  }
+
+  tableHtml += `
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  container.innerHTML = tableHtml;
+}
+
 async function refreshStats() {
   try {
     const res  = await fetch('/admin-panel/api/stats/');
@@ -756,6 +871,7 @@ async function refreshStats() {
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
     document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
     updateWorkflowProgress(data);
+    updateCatalogTable(data.processed || [], data.unprocessed || []);
   } catch(e) {}
 }
 
