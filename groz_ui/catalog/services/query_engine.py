@@ -742,10 +742,8 @@ class CatalogQueryEngine:
             plan = enrich_complex_plan(
                 plan,
                 query,
-                # api_key=self.runtime.openai_api_key,  # disabled
-                # model='gpt-4o-mini',  # disabled
-                api_key=self.runtime.groq_api_key,
-                model='qwen/qwen3-32b',
+                api_key=self.runtime.openai_api_key,
+                model='gpt-4o-mini',
             )
             plan = self._normalize_planned_tasks(plan)
         elif structured_probe and plan.intent in (QueryIntent.AMBIGUOUS, QueryIntent.GENERAL_SEMANTIC):

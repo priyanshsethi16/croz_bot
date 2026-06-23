@@ -28,10 +28,22 @@ SPARSE_MODEL = "Qdrant/bm25"
 
 
 @lru_cache(maxsize=1)
-def build_embeddings() -> OpenAIEmbeddings:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
+def build_embeddings(api_key: str | None = None) -> OpenAIEmbeddings:
+    # Try retrieving key from Django model config database first
+    key = api_key or ""
     if not key:
-        raise ValueError("OPENAI_API_KEY is required for embeddings. Add it to .env")
+        try:
+            from catalog.model_config import get_secret, SECRET_OPENAI
+            key = get_secret(SECRET_OPENAI).strip()
+        except Exception:
+            pass
+
+    # Fallback to environment variable
+    if not key:
+        key = os.getenv("OPENAI_API_KEY", "").strip()
+
+    if not key:
+        raise ValueError("OPENAI_API_KEY is required for embeddings. Save it in Models & Keys tab.")
     return OpenAIEmbeddings(
         model=EMBED_MODEL,
         api_key=key,

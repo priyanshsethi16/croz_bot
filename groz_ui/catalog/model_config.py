@@ -32,17 +32,11 @@ CHAT_MODELS = {
         ("gpt-4.1", "GPT-4.1"),
         ("gpt-4.1-mini", "GPT-4.1 mini"),
     ),
-    "groq": (
-        ("qwen/qwen3-32b", "Qwen3 32B"),
-        ("llama-3.3-70b-versatile", "Llama 3.3 70B"),
-        ("llama3-70b-8192", "Llama3 70B"),
-    ),
 }
 
 DEFAULT_CHAT_MODEL = {
     "gemini": "gemini-2.5-flash",
     "openai": "gpt-4o-mini",
-    "groq": "qwen/qwen3-32b",
 }
 
 SECRET_OPENAI = "OPENAI_API_KEY"
@@ -141,7 +135,7 @@ class RuntimeModelConfig:
     def chat_api_key(self) -> str:
         if self.chat_provider == "openai":
             return self.openai_api_key
-        return self.groq_api_key if self.chat_provider == "groq" else self.gemini_api_key
+        return self.gemini_api_key
 
 
 def get_runtime_config() -> RuntimeModelConfig:
@@ -194,7 +188,7 @@ def update_configuration(payload: dict, user=None) -> dict:
 
     chat_provider = str(payload.get("chat_provider", config.chat_provider)).strip().lower()
     if chat_provider not in CHAT_MODELS:
-        raise ValueError("Chat provider must be gemini, openai, or groq.")
+        raise ValueError("Chat provider must be gemini or openai.")
 
     chat_model = str(payload.get("chat_model", "")).strip() or DEFAULT_CHAT_MODEL[chat_provider]
     allowed_chat = {value for value, _ in CHAT_MODELS[chat_provider]}

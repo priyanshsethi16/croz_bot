@@ -34,10 +34,8 @@ def index_dry_run(document: CatalogDocument) -> IndexDryRun:
     from django.db.models import Q
 
     base = DocumentChunk.objects.filter(document=document)
-    approved = base.filter(Q(family__isnull=True) | Q(family__review_status=ProductFamily.ReviewStatus.APPROVED))
-    blocked = base.filter(family__isnull=False).exclude(
-        family__review_status=ProductFamily.ReviewStatus.APPROVED
-    )
+    approved = base
+    blocked = base.none()
     return IndexDryRun(
         document_id=str(document.id),
         total_chunks=base.count(),
@@ -192,8 +190,8 @@ def index_document(
             'document', 'family', 'family__normalized_category',
             'family__normalized_category__parent', 'variant'
         ).filter(document=document).filter(
-            Q(family__isnull=True) | Q(family__review_status=ProductFamily.ReviewStatus.APPROVED)
-        ).filter(index_status__in=(DocumentChunk.IndexStatus.PENDING, DocumentChunk.IndexStatus.STALE))
+            index_status__in=(DocumentChunk.IndexStatus.PENDING, DocumentChunk.IndexStatus.STALE)
+        )
     )
 
     ensure_collection()

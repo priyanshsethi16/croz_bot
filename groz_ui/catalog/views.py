@@ -448,7 +448,91 @@ def list_pdfs(request):
                 if has_chunks or has_products:
                     chunked.add(d.name)
 
-    return JsonResponse({'pdfs': all_pdfs, 'chunked': list(chunked)})
+    # Gather rich metadata for each PDF/part
+    pdf_details = []
+    import re
+    try:
+        from .models import CatalogDocument, DocumentChunk, IngestionJob
+        for pdf_name in all_pdfs:
+            pdf_path = _resolve_pdf_path(pdf_name)
+            stem = pdf_path.stem
+            
+            doc = None
+            if pdf_path.exists():
+                try:
+                    import hashlib
+                    checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+                    doc = CatalogDocument.objects.filter(checksum_sha256=checksum).first()
+                except Exception:
+                    pass
+            
+            if not doc:
+                doc = CatalogDocument.objects.filter(original_filename=stem).order_by('-version').first()
+            if not doc:
+                doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+                
+            chunks_count = 0
+            status = 'Pending'
+            doc_id = None
+            has_embeddings = False
+            
+            if doc:
+                doc_id = str(doc.id)
+                chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                
+                # Check for running ingestion job
+                running_job = IngestionJob.objects.filter(
+                    document=doc,
+                    status__in=[IngestionJob.Status.PENDING, IngestionJob.Status.RUNNING]
+                ).first()
+                
+                if running_job:
+                    status = 'Processing'
+                else:
+                    if doc.status == CatalogDocument.Status.UPLOADED:
+                        status = 'Pending'
+                    elif doc.status == CatalogDocument.Status.EXTRACTING:
+                        status = 'Processing'
+                    elif doc.status == CatalogDocument.Status.INDEXING:
+                        status = 'Processing'
+                    elif doc.status == CatalogDocument.Status.READY:
+                        status = 'Ready'
+                    elif doc.status == CatalogDocument.Status.REVIEW:
+                        status = 'Ready'
+                    elif doc.status == CatalogDocument.Status.FAILED:
+                        status = 'Failed'
+                    else:
+                        status = doc.status
+                
+                has_embeddings = (doc.status == CatalogDocument.Status.READY and doc.is_active)
+                if not has_embeddings:
+                    has_embeddings = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.INDEXED).exists()
+            else:
+                # Check filesystem chunks
+                sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_')
+                chunks_dir = data_dir / sanitized_stem / 'chunks'
+                if chunks_dir.exists():
+                    chunks_count = len(list(chunks_dir.glob('*.md')))
+                    if chunks_count > 0:
+                        status = 'Ready'
+            
+            pdf_details.append({
+                'name': pdf_name,
+                'chunks_count': chunks_count,
+                'status': status,
+                'document_id': doc_id,
+                'has_embeddings': has_embeddings
+            })
+    except Exception as exc:
+        import logging
+        logging.error(f"Error gathering pdf_details: {exc}", exc_info=True)
+
+    return JsonResponse({
+        'pdfs': all_pdfs, 
+        'chunked': list(chunked),
+        'pdf_details': pdf_details,
+        'v2_ingest_enabled': settings.CATALOG_RAG_V2_INGEST
+    })
 
 
 # ── API: PDF Preview (page thumbnails) ───────────────────────────────────
@@ -923,17 +1007,26 @@ def list_chunks(request):
             original_filename=pdf_stem
         ).order_by('-version').first()
 
+    document_id = str(doc.id) if doc else None
     if doc:
         db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
         for c in db_chunks:
-            # Format chunk name as chunk_0000.md
             filename = f"chunk_{c.ordinal:04d}.md"
+            prod_name = "General Info"
+            if c.family:
+                prod_name = c.family.product_name
+            elif c.variant and c.variant.family:
+                prod_name = c.variant.family.product_name
+                
             chunks.append({
                 'filename': filename,
                 'content': c.text,
+                'ordinal': c.ordinal,
+                'product_name': prod_name,
+                'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
             })
 
-    return JsonResponse({'chunks': chunks})
+    return JsonResponse({'document_id': document_id, 'chunks': chunks})
 
 
 @login_required
@@ -1179,8 +1272,6 @@ def index_audit_v2(request, document_id):
 def execute_index_v2(request, document_id):
     if not request.user.is_staff:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
-    if not settings.CATALOG_RAG_V2_INGEST:
-        return JsonResponse({'error': 'Catalog RAG V2 ingestion is not enabled.'}, status=409)
     try:
         body = json.loads(request.body)
         confirmed = int(body.get('confirmed_embedding_count'))
@@ -1192,7 +1283,7 @@ def execute_index_v2(request, document_id):
 
     try:
         document = CatalogDocument.objects.get(pk=document_id)
-        result = index_document(document, confirmed_embedding_count=confirmed)
+        result = index_document(document, confirmed_embedding_count=confirmed, allow_disabled=True)
         return JsonResponse(result)
     except CatalogDocument.DoesNotExist:
         return JsonResponse({'error': 'Catalog document not found.'}, status=404)

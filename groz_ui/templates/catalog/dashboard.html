@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=pdf-instructions-20260621"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=index-dashboard-20260624"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -470,24 +470,41 @@
             Select a PDF to process. The AI model will identify product boundaries, extract
             names, codes, specifications, variants, and ordering information.
           </p>
-          <div class="pdf-selector-grid" id="pdf-selector-grid">
-            <p style="color:var(--grey);font-size:13px">Loading PDFs…</p>
+          <style>
+            .badge-yellow { background: #fef9c3; color: #854d0e; }
+            .badge-red { background: #fee2e2; color: #991b1b; }
+            .catalog-table tr.selected td {
+              background-color: rgba(220, 252, 231, 0.4) !important;
+              border-bottom-color: #bbf7d0;
+            }
+            .table-actions {
+              display: flex;
+              gap: 8px;
+            }
+            .table-actions .btn {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+            }
+          </style>
+          <div class="table-wrap" style="margin-bottom: 20px;">
+            <table class="catalog-table">
+              <thead>
+                <tr>
+                  <th>PDF Name</th>
+                  <th>Chunks</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="pdf-selector-table-body">
+                <tr>
+                  <td colspan="4" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">Loading PDFs…</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-          <div class="pdf-instruction-card">
-            <label for="chunk-parsing-instructions">
-              <i class="fa fa-pen"></i> PDF-specific parsing instructions
-            </label>
-            <textarea id="chunk-parsing-instructions" maxlength="4000"
-              oninput="syncParsingInstructions(this)"
-              placeholder="Optional: Give layout/product extraction hints for the selected PDF. Blank = default parser prompt."></textarea>
-            <small>Use this when a catalog has unusual headings, tables, badges, or pages to ignore.</small>
-          </div>
-          <div class="action-row">
-            <button class="btn btn-primary" id="btn-run-chunk" onclick="runChunking()" disabled>
-              <i class="fa fa-layer-group"></i> Create Chunks
-            </button>
-            <span style="font-size:12px;color:var(--grey)">Select a PDF above to enable</span>
-          </div>
+
           <div class="progress-wrap" id="chunk-progress">
             <div class="progress-header">
               <span id="chunk-progress-label">Extracting products…</span>
@@ -512,21 +529,87 @@
     <!-- ══ PANEL: Index (admin only) ══ -->
     {% if is_admin %}
     <div class="panel" id="panel-index">
-      <div class="panel-card">
+      <div class="panel-card" style="margin-bottom: 0;">
         <div class="panel-head">
           <div class="panel-head-left">
             <div class="panel-head-icon"><i class="fa fa-database"></i></div>
             <div>
               <h3>Step 3 — Index &amp; Embed</h3>
-              <p>Create Qdrant dense and BM25 indexes for instant hybrid search</p>
+              <p>Review created dense and BM25 embeddings for instant hybrid search</p>
             </div>
           </div>
           <span class="badge badge-orange">Step 3 of 3</span>
         </div>
         <div class="panel-body">
-          <div class="index-option-card selected">
-            <h4><i class="fa fa-shield-alt" style="color:var(--orange);margin-right:6px"></i>V2-only indexing</h4>
-            <p>The legacy bulk indexer has been removed. New documents are indexed only after product review and an explicit embedding-cost confirmation.</p>
+          <div class="index-dashboard-layout">
+            
+            <!-- Left Workspace: Chunks Table -->
+            <div class="index-left-workspace">
+              <div class="index-workspace-header">
+                <h4 class="index-workspace-title">
+                  Embedded Chunks for PDF: <span id="index-selected-pdf" class="highlight-text">No PDF Selected</span>
+                </h4>
+                <div class="index-search-box">
+                  <i class="fa fa-search"></i>
+                  <input type="text" id="index-chunk-search" placeholder="Search..." oninput="handleIndexSearch()" />
+                </div>
+              </div>
+              
+              <div class="index-table-wrap">
+                <table class="index-chunks-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 100px;">CHUNK ID</th>
+                      <th style="width: 220px;">PRODUCT NAME</th>
+                      <th>CHUNK TEXT EXCERPT</th>
+                      <th style="width: 140px; text-align: center;">STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="index-chunks-table-body">
+                    <tr>
+                      <td colspan="4" class="index-table-empty">
+                        <i class="fa fa-file-pdf" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
+                        Select a PDF in Step 2 to view its chunks and indexing status.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <!-- Right Sidebar: Test Chat Sandbox -->
+            <div class="index-right-workspace">
+              <button class="btn-global-chat" id="btn-toggle-chat-context" onclick="toggleChatContext()">
+                <i class="fa fa-comments"></i> Test Chat (with global context)
+              </button>
+              
+              <div class="index-chat-card">
+                <div class="index-chat-header">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="chat-status-dot"></span>
+                    <span>Test Chat</span>
+                  </div>
+                  <span id="index-chat-context-badge" class="badge-context">PDF Context</span>
+                </div>
+                
+                <div class="index-chat-msgs" id="index-chat-msgs">
+                  <div class="admin-msg bot">
+                    <div class="admin-msg-avatar" style="background: var(--orange);">GZ</div>
+                    <div class="admin-msg-bubble">
+                      Welcome to the index testing sandbox! Ask a question to verify vector retrieval quality.
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="index-chat-input-row">
+                  <input type="text" id="index-chat-input" placeholder="Ask a test question..." onkeydown="handleIndexChatKey(event)" />
+                  <button class="btn-chat-send" onclick="submitIndexChat()">
+                    <i class="fa fa-paper-plane"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            
           </div>
         </div>
       </div>

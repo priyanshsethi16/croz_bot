@@ -55,6 +55,7 @@ function showPanel(name) {
   if (name === 'chunk') loadPdfList();
   if (name === 'upload') loadExistingUploads();
   if (name === 'models') loadModelConfiguration();
+  if (name === 'index') loadIndexPanel();
 }
 
 async function loadExistingUploads() {
@@ -180,8 +181,7 @@ function addV2IndexButton(item,documentId){
     const audit=await auditResponse.json();
     if(!auditResponse.ok||audit.error){showToast(audit.error||'Could not load indexing audit.','error');return;}
     if(audit.review_blocked){showToast(`${audit.review_blocked} chunks still require review.`,'error');return;}
-    const count=audit.pending_embeddings;
-    if(!window.confirm(`This will create ${count} OpenAI embedding(s). Continue?`)) return;
+    const count = audit.pending_embeddings;
     button.disabled=true;
     button.textContent='Indexing…';
     try{
@@ -438,36 +438,123 @@ function adjustZoom(delta) {
 }
 
 // ── Load PDF list for chunk panel ─────────────────────────────────────────────
+let _activeChunkingBtn = null;
+
 async function loadPdfList() {
+  const tbody = document.getElementById('pdf-selector-table-body');
+  if (!tbody) return;
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
-    const grid    = document.getElementById('pdf-selector-grid');
-    const chunked = new Set(data.chunked || []);
-    grid.innerHTML = '';
-    (data.pdfs || []).forEach(name => {
-      const stem    = name.replace(/\.pdf$/i, '');
-      const isDone  = chunked.has(stem);
-      const card    = document.createElement('div');
-      card.className = 'pdf-select-card' + (isDone ? ' chunked-done' : '');
-      card.dataset.pdf = name;
-      card.innerHTML = `
-        <i class="fa fa-file-pdf"></i>
-        <div>
-          <div class="pdf-name">${escHtml(name)}</div>
-          <div class="pdf-sub">${isDone
-            ? '<i class="fa fa-check-circle" style="color:#22c55e"></i> Already chunked'
-            : 'Click to select'}</div>
-        </div>
-        ${isDone ? '<span class="pdf-done-badge"><i class="fa fa-check"></i></span>' : ''}`;
-      if (!isDone) card.addEventListener('click', () => selectPdf(card, name));
-      else card.title = 'Chunks already exist for this PDF';
-      grid.appendChild(card);
-    });
-    if (!data.pdfs?.length) {
-      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0">No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel(\'upload\')">Upload one →</button></p>';
+    tbody.innerHTML = '';
+
+    const pdfDetails = data.pdf_details || [];
+    if (!pdfDetails.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">
+            No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">Upload one →</button>
+          </td>
+        </tr>
+      `;
+      return;
     }
-  } catch(e) {}
+
+    pdfDetails.forEach(item => {
+      const tr = document.createElement('tr');
+      tr.dataset.pdf = item.name;
+      tr.style.cursor = 'pointer';
+      if (selectedPdf === item.name) {
+        tr.classList.add('selected');
+      }
+
+      // Add click handler to select the row
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest('button') || e.target.closest('a') || e.target.closest('i')) return;
+        selectPdfRow(tr, item.name);
+      });
+
+      // Status Badge
+      let statusBadge = '';
+      if (item.status === 'Ready') {
+        statusBadge = `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`;
+      } else if (item.status === 'Processing') {
+        statusBadge = `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
+      } else if (item.status === 'Failed') {
+        statusBadge = `<span class="badge badge-red"><i class="fa fa-exclamation-circle"></i> Failed</span>`;
+      } else {
+        statusBadge = `<span class="badge badge-grey"><i class="fa fa-clock"></i> Not chunked</span>`;
+      }
+
+      // Actions Buttons
+      let actionButtons = `<div class="table-actions">`;
+
+      // 1. Chunks Drawer Button (always visible, disabled if chunks count is 0)
+      const chunksDisabled = item.chunks_count === 0 ? 'disabled' : '';
+      actionButtons += `
+        <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')" ${chunksDisabled} title="View chunks">
+          <i class="fa fa-layer-group"></i> Chunks
+        </button>
+      `;
+
+      // 2. Create Embedding OR Create Chunks (VLM Run)
+      if (item.status === 'Ready') {
+        if (item.document_id) {
+          actionButtons += `
+            <button class="btn btn-sm btn-primary embed-btn" onclick="triggerEmbeddingInline('${item.document_id}', '${escHtml(item.name)}')" title="Generate embeddings and index to Qdrant">
+              <i class="fa fa-brain"></i> Create Embedding
+            </button>
+          `;
+        } else {
+          actionButtons += `
+            <button class="btn btn-sm btn-primary embed-btn" disabled title="No document record found">
+              <i class="fa fa-brain"></i> Create Embedding
+            </button>
+          `;
+        }
+      } else if (item.status === 'Processing') {
+        actionButtons += `
+          <button class="btn btn-sm btn-primary embed-btn" disabled>
+            <i class="fa fa-spinner fa-spin"></i> Processing
+          </button>
+        `;
+      } else {
+        // Pending / Not chunked / Failed -> show Create Chunks button
+        actionButtons += `
+          <button class="btn btn-sm btn-primary" onclick="runChunkingForPdf('${escHtml(item.name)}', this)" title="Run VLM parser to extract product chunks">
+            <i class="fa fa-layer-group"></i> Create Chunks
+          </button>
+        `;
+      }
+
+      // 3. Delete Button
+      actionButtons += `
+        <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" title="Delete PDF and associated data">
+          <i class="fa fa-trash"></i> Delete
+        </button>
+      `;
+
+      actionButtons += `</div>`;
+
+      tr.innerHTML = `
+        <td>
+          <div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px">
+            <i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i>
+            <span class="pname" style="font-weight:500;font-size:13px">${escHtml(item.name)}</span>
+          </div>
+        </td>
+        <td>
+          <span class="badge badge-blue">${item.chunks_count}</span>
+        </td>
+        <td>${statusBadge}</td>
+        <td>${actionButtons}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+  } catch(e) {
+    console.error("Error loading PDF list: ", e);
+  }
 }
 
 let selectedPdf = null;
@@ -485,26 +572,82 @@ function syncParsingInstructions(source) {
   });
 }
 
-function selectPdf(card, name) {
-  document.querySelectorAll('.pdf-select-card').forEach(c => c.classList.remove('selected'));
-  card.classList.add('selected');
+function selectPdfRow(rowEl, name) {
+  document.querySelectorAll('#pdf-selector-table-body tr').forEach(r => r.classList.remove('selected'));
+  rowEl.classList.add('selected');
   selectedPdf = name;
-  document.getElementById('btn-run-chunk').disabled = false;
+}
+
+async function runChunkingForPdf(name, btnEl) {
+  selectedPdf = name;
+  const row = document.querySelector(`#pdf-selector-table-body tr[data-pdf="${name}"]`);
+  if (row) {
+    selectPdfRow(row, name);
+  }
+  _activeChunkingBtn = btnEl;
+  await runChunking();
+}
+
+async function triggerEmbeddingInline(documentId, pdfName) {
+  try {
+    const auditResponse = await fetch(`/admin-panel/api/v2/documents/${documentId}/index-audit/`);
+    const audit = await auditResponse.json();
+    if (!auditResponse.ok || audit.error) {
+      showToast(audit.error || 'Could not load indexing audit.', 'error');
+      return;
+    }
+    if (audit.review_blocked) {
+      showToast(`${audit.review_blocked} chunks still require review.`, 'error');
+      return;
+    }
+    const count = audit.pending_embeddings;
+    
+    const row = document.querySelector(`#pdf-selector-table-body tr[data-pdf="${pdfName}"]`);
+    const embedBtn = row ? row.querySelector('.embed-btn') : null;
+    if (embedBtn) {
+      embedBtn.disabled = true;
+      embedBtn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Indexing…';
+    }
+    
+    try {
+      const response = await fetch(`/admin-panel/api/v2/documents/${documentId}/index/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ confirmed_embedding_count: count })
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || 'Indexing failed.');
+      
+      showToast(`Indexed ${data.indexed} chunk(s) for "${pdfName}".`, 'success');
+      refreshStats();
+      loadPdfList();
+    } catch(error) {
+      showToast(error.message, 'error');
+      if (embedBtn) {
+        embedBtn.disabled = false;
+        embedBtn.innerHTML = '<i class="fa fa-brain"></i> Create Embedding';
+      }
+    }
+  } catch(e) {
+    showToast('Failed to perform index audit.', 'error');
+  }
 }
 
 // ── Create Chunks (Pipeline) ──────────────────────────────────────────────────
 async function runChunking() {
   if (!selectedPdf) { showToast('Please select a PDF first.', 'error'); return; }
 
-  const btn   = document.getElementById('btn-run-chunk');
+  const btn   = _activeChunkingBtn || document.getElementById('btn-run-chunk');
   const prog  = document.getElementById('chunk-progress');
   const fill  = document.getElementById('chunk-fill');
   const pct   = document.getElementById('chunk-pct');
   const log   = document.getElementById('chunk-log');
   const label = document.getElementById('chunk-progress-label');
 
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+  }
   prog.classList.add('visible');
   log.classList.add('visible');
   log.textContent = `▶ Starting chunk extraction for: ${selectedPdf}\n`;
@@ -546,8 +689,11 @@ async function runChunking() {
     log.textContent += '\n✗ Network error.';
     showToast('Request failed.', 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa fa-layer-group"></i> Create Chunks';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa fa-layer-group"></i> Create Chunks';
+    }
+    _activeChunkingBtn = null;
   }
 }
 
@@ -619,7 +765,7 @@ function refreshChatRoutingSummary() {
   const options = _modelOptions.chat_models?.[provider] || [];
   const selected = options.find(option => option.value === document.getElementById('chat-model')?.value);
   const summary = document.getElementById('routing-summary');
-  const providerLabel = provider === 'openai' ? 'OpenAI' : provider === 'groq' ? 'Groq' : 'Google Gemini';
+  const providerLabel = provider === 'openai' ? 'OpenAI' : 'Google Gemini';
   if (summary) {
     summary.innerHTML = `<i class="fa fa-route"></i> Product chat will use <strong>${providerLabel}</strong>${selected ? ` · ${escHtml(selected.label)}` : ''}.`;
   }
@@ -1417,4 +1563,284 @@ function mdToHtml(md) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Step 3 Index & Embed Dashboard Logic ──
+let _cachedIndexChunks = [];
+let _indexChatGlobalContext = false;
+let _indexSelectedDocId = null;
+
+async function loadIndexPanel() {
+  const pdfTitleEl = document.getElementById('index-selected-pdf');
+  const tableBody = document.getElementById('index-chunks-table-body');
+  if (!pdfTitleEl || !tableBody) return;
+
+  // 1. If selectedPdf is not set, try to select the first PDF from PDF list
+  if (!selectedPdf) {
+    try {
+      const res = await fetch('/admin-panel/api/pdfs/');
+      const data = await res.json();
+      const pdfs = data.pdf_details || [];
+      if (pdfs.length > 0) {
+        // Auto select the first processed PDF
+        selectedPdf = pdfs[0].name;
+        // Highlight active row in Step 2 table if we are there
+        document.querySelectorAll('#pdf-selector-table-body tr').forEach(r => {
+          if (r.dataset.pdf === selectedPdf) {
+            r.classList.add('selected');
+          } else {
+            r.classList.remove('selected');
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load PDF list in index panel', e);
+    }
+  }
+
+  // 2. If selectedPdf is STILL not set (e.g. no PDFs exist)
+  if (!selectedPdf) {
+    pdfTitleEl.textContent = 'No PDF Selected';
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="4" class="index-table-empty">
+          <i class="fa fa-file-pdf" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
+          No PDFs processed yet. Please upload a PDF in Step 1 and create chunks in Step 2.
+        </td>
+      </tr>
+    `;
+    updateChatContextDisplay();
+    return;
+  }
+
+  // 3. Update title and fetch chunks for selectedPdf
+  pdfTitleEl.textContent = selectedPdf;
+  updateChatContextDisplay();
+  
+  tableBody.innerHTML = `
+    <tr>
+      <td colspan="4" class="index-table-empty">
+        <i class="fa fa-spinner fa-spin" style="font-size: 24px; display: block; margin-bottom: 10px; color: var(--orange);"></i>
+        Loading chunks for "${selectedPdf}"...
+      </td>
+    </tr>
+  `;
+
+  try {
+    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(selectedPdf)}`);
+    const data = await res.json();
+    if (data.error) {
+      tableBody.innerHTML = `
+        <tr>
+          <td colspan="4" class="index-table-empty" style="color:var(--red)">
+            <i class="fa fa-exclamation-circle" style="font-size: 32px; display: block; margin-bottom: 10px;"></i>
+            Error: ${escHtml(data.error)}
+          </td>
+        </tr>
+      `;
+      _cachedIndexChunks = [];
+      _indexSelectedDocId = null;
+    } else {
+      _cachedIndexChunks = data.chunks || [];
+      _indexSelectedDocId = data.document_id;
+      renderIndexChunks(_cachedIndexChunks);
+    }
+  } catch (err) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="4" class="index-table-empty" style="color:var(--red)">
+          <i class="fa fa-exclamation-circle" style="font-size: 32px; display: block; margin-bottom: 10px;"></i>
+          Failed to fetch chunks. Please check connection.
+        </td>
+      </tr>
+    `;
+    _cachedIndexChunks = [];
+    _indexSelectedDocId = null;
+  }
+}
+
+function renderIndexChunks(chunks) {
+  const tableBody = document.getElementById('index-chunks-table-body');
+  if (!tableBody) return;
+  
+  tableBody.innerHTML = '';
+  
+  if (!chunks.length) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="4" class="index-table-empty">
+          <i class="fa fa-search" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
+          No matching chunks found.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  chunks.forEach(c => {
+    const tr = document.createElement('tr');
+    
+    // Chunk ID format
+    const chunkId = `C${String(c.ordinal || 0).padStart(3, '0')}`;
+    
+    // Excerpt snippet
+    let cleanText = String(c.content || '').trim();
+    cleanText = cleanText.replace(/\s+/g, ' '); // collapse spaces & newlines
+    let excerpt = cleanText;
+    if (cleanText.length > 90) {
+      excerpt = `...${cleanText.substring(0, 90)}...`;
+    } else if (cleanText.length > 0) {
+      excerpt = `...${cleanText}...`;
+    }
+
+    // Status Badge HTML
+    let badgeHtml = '';
+    if (c.status === 'Embedded') {
+      badgeHtml = `<span class="badge-status-embedded"><i class="fa fa-database"></i> Embedded</span>`;
+    } else {
+      badgeHtml = `<span class="badge-status-ready"><i class="fa fa-check-circle"></i> Ready</span>`;
+    }
+
+    tr.innerHTML = `
+      <td style="font-weight:700; color:var(--dark); font-family:monospace;">${escHtml(chunkId)}</td>
+      <td style="font-weight:600; color:#475569;">${escHtml(c.product_name || 'General Info')}</td>
+      <td style="color:#64748b; font-style:italic;">${escHtml(excerpt)}</td>
+      <td style="text-align:center;">${badgeHtml}</td>
+    `;
+    tableBody.appendChild(tr);
+  });
+}
+
+function handleIndexSearch() {
+  const searchInput = document.getElementById('index-chunk-search');
+  if (!searchInput) return;
+  const q = searchInput.value.toLowerCase().trim();
+  
+  if (!q) {
+    renderIndexChunks(_cachedIndexChunks);
+    return;
+  }
+
+  const filtered = _cachedIndexChunks.filter(c => {
+    const chunkId = `C${String(c.ordinal || 0).padStart(3, '0')}`.toLowerCase();
+    const prodName = (c.product_name || '').toLowerCase();
+    const content = (c.content || '').toLowerCase();
+    return chunkId.includes(q) || prodName.includes(q) || content.includes(q);
+  });
+  
+  renderIndexChunks(filtered);
+}
+
+function updateChatContextDisplay() {
+  const badge = document.getElementById('index-chat-context-badge');
+  const btn = document.getElementById('btn-toggle-chat-context');
+  if (!badge || !btn) return;
+
+  if (_indexChatGlobalContext) {
+    btn.classList.add('active');
+    btn.innerHTML = `<i class="fa fa-comments"></i> Test Chat (with selected PDF context)`;
+    badge.textContent = 'Global Context';
+    badge.className = 'badge-context global';
+  } else {
+    btn.classList.remove('active');
+    btn.innerHTML = `<i class="fa fa-comments"></i> Test Chat (with global context)`;
+    badge.textContent = selectedPdf ? selectedPdf : 'PDF Context';
+    badge.className = 'badge-context';
+  }
+}
+
+function toggleChatContext() {
+  _indexChatGlobalContext = !_indexChatGlobalContext;
+  updateChatContextDisplay();
+  
+  const systemMsg = _indexChatGlobalContext 
+    ? '<i>System: Changed query context to <strong>Global (All PDFs)</strong>. Queries will search across all indexed catalog data.</i>'
+    : `<i>System: Changed query context to <strong>Selected PDF (${escHtml(selectedPdf)})</strong>. Queries will target only this PDF's chunks.</i>`;
+    
+  appendIndexChatMsg('bot', systemMsg);
+}
+
+function handleIndexChatKey(event) {
+  if (event.key === 'Enter') {
+    submitIndexChat();
+  }
+}
+
+function appendIndexChatMsg(role, html) {
+  const msgs = document.getElementById('index-chat-msgs');
+  if (!msgs) return;
+  const div = document.createElement('div');
+  div.className = `admin-msg ${role}`;
+  
+  const avatarBg = role === 'bot' ? 'background:var(--orange);' : 'background:var(--dark);';
+  const avatarInner = role === 'bot' ? 'GZ' : '<i class="fa fa-user"></i>';
+  
+  div.innerHTML = `
+    <div class="admin-msg-avatar" style="${avatarBg}">${avatarInner}</div>
+    <div class="admin-msg-bubble msg-content">${html}</div>
+  `;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function submitIndexChat() {
+  const input = document.getElementById('index-chat-input');
+  if (!input) return;
+  const query = input.value.trim();
+  if (!query) return;
+
+  appendIndexChatMsg('user', escHtml(query));
+  input.value = '';
+
+  // Append typing indicator
+  const msgs = document.getElementById('index-chat-msgs');
+  const typing = document.createElement('div');
+  typing.id = 'index-chat-typing';
+  typing.className = 'admin-msg bot';
+  typing.innerHTML = `
+    <div class="admin-msg-avatar" style="background:var(--orange)">GZ</div>
+    <div class="admin-msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>
+  `;
+  msgs.appendChild(typing);
+  msgs.scrollTop = msgs.scrollHeight;
+
+  // Determine query scope
+  let docIds = [];
+  if (!_indexChatGlobalContext) {
+    if (_indexSelectedDocId) {
+      docIds = [_indexSelectedDocId];
+    } else {
+      document.getElementById('index-chat-typing')?.remove();
+      appendIndexChatMsg('bot', '<span style="color:var(--orange)">Wait for chunks to be loaded, or switch to Global Context.</span>');
+      return;
+    }
+  }
+
+  try {
+    const res = await fetch('/admin-panel/api/chat/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ query, document_ids: docIds })
+    });
+    const data = await res.json();
+    document.getElementById('index-chat-typing')?.remove();
+    
+    if (data.error) {
+      appendIndexChatMsg('bot', `<span style="color:var(--orange)">${escHtml(data.error)}</span>`);
+    } else {
+      const src = (data.sources || []).map(s => `
+        <span style="background:var(--orange-light);color:var(--orange);padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">
+          ${escHtml(s.name || s.code)}
+        </span>
+      `).join(' ');
+      
+      const answerHtml = renderMarkdown(data.answer);
+      const sourcesBlock = src ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${src}</div>` : '';
+      
+      appendIndexChatMsg('bot', answerHtml + sourcesBlock);
+    }
+  } catch (err) {
+    document.getElementById('index-chat-typing')?.remove();
+    appendIndexChatMsg('bot', '<span style="color:var(--orange)">Network error. Please try again.</span>');
+  }
 }
