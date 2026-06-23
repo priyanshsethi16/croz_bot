@@ -93,8 +93,15 @@ async function uploadFile(file) {
   if (!file.name.toLowerCase().endsWith('.pdf')) {
     showToast('Only PDF files are allowed.', 'error'); return;
   }
+  
+  // Check if file already exists in the UI list
+  const existingFiles = Array.from(document.querySelectorAll('.file-item .fname')).map(el => el.textContent.trim());
+  if (existingFiles.includes(file.name)) {
+    showToast(`"${file.name}" is already uploaded. Delete it first if you want to re-upload.`, 'error');
+    return;
+  }
+  
   const item = addFileItem(file.name, formatBytes(file.size), 'pending', 'Uploading…');
-  // Check duplicate before uploading
   const fd = new FormData();
   fd.append('pdf', file);
   fd.append('csrfmiddlewaretoken', CSRF);

@@ -192,9 +192,29 @@ def upload_pdf(request):
     if not pdf or not pdf.name.endswith('.pdf'):
         return JsonResponse({'error': 'Please upload a valid PDF file.'}, status=400)
 
+    # Check if file exists in main input directory
     dest = PROJECT_ROOT / 'input' / pdf.name
     if dest.exists():
         return JsonResponse({'error': f'"{pdf.name}" already exists. Delete it first or rename the file.'}, status=409)
+    
+    # Check if it exists as a split PDF
+    stem = Path(pdf.name).stem
+    splits_dir = PROJECT_ROOT / 'input' / 'splits'
+    if splits_dir.exists():
+        for stem_dir in splits_dir.iterdir():
+            if stem_dir.is_dir():
+                # Check if any split file with this stem exists
+                if any(stem_dir.glob(f'{stem}*.pdf')):
+                    return JsonResponse({'error': f'PDF "{pdf.name}" has already been split. Delete split parts first.'}, status=409)
+    
+    # Check if already processed in database
+    try:
+        from .models import CatalogDocument
+        if CatalogDocument.objects.filter(original_filename=pdf.name).exists():
+            return JsonResponse({'error': f'"{pdf.name}" already exists in the database. Delete it first.'}, status=409)
+    except Exception:
+        pass
+    
     dest.parent.mkdir(parents=True, exist_ok=True)
     with open(dest, 'wb') as f:
         for chunk in pdf.chunks():
@@ -753,6 +773,7 @@ def list_chunks(request):
     chunks = []
     from .models import CatalogDocument, DocumentChunk
     
+    # Try to find document by exact filename
     doc = CatalogDocument.objects.filter(
         original_filename=pdf_name,
         is_active=True
@@ -771,6 +792,35 @@ def list_chunks(request):
                 'filename': filename,
                 'content': c.text,
             })
+    else:
+        # If not found in DB, check filesystem for split PDFs
+        stem = Path(pdf_name).stem
+        data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / stem
+        if data_dir.exists():
+            assembled_file = data_dir / 'assembled_products.json'
+            if assembled_file.exists():
+                try:
+                    with open(assembled_file, 'r', encoding='utf-8') as f:
+                        products = json.load(f)
+                    for idx, product in enumerate(products):
+                        chunk_filename = f"chunk_{idx:04d}.md"
+                        # Build markdown content from product data
+                        content = f"# {product.get('product_name', 'Unknown Product')}\n\n"
+                        if product.get('product_code'):
+                            content += f"**Product Code:** `{product['product_code']}`\n\n"
+                        if product.get('description'):
+                            content += f"## Description\n{product['description']}\n\n"
+                        if product.get('features'):
+                            content += f"## Features\n"
+                            for feat in product['features']:
+                                content += f"- {feat}\n"
+                            content += "\n"
+                        chunks.append({
+                            'filename': chunk_filename,
+                            'content': content,
+                        })
+                except Exception:
+                    pass
 
     return JsonResponse({'chunks': chunks})
 
