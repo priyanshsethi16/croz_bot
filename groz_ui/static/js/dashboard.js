@@ -59,13 +59,13 @@ function showPanel(name) {
 
 async function loadExistingUploads() {
   const list = document.getElementById('upload-file-list');
-  if (list.children.length > 0) return; // already populated this session
+  if (!list) return;
+  list.innerHTML = '';
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
     (data.pdfs || []).forEach(name => {
-      const item = addFileItem(name, '', 'success', '✓ Uploaded');
-      // hide the preview btn until status is known — it's already there
+      addFileItem(name, '', 'success', '✓ Uploaded');
     });
   } catch(e) {}
 }
