@@ -11,6 +11,7 @@ urlpatterns = [
     path('api/pipeline/', views.run_pipeline,  name='run_pipeline'),
     path('api/chat/',     views.admin_chat,    name='admin_chat'),
     path('api/stats/',    views.catalog_stats, name='catalog_stats'),
+    path('api/ping/',     views.admin_ping,    name='admin_ping'),
     path('api/chunks/',       views.list_chunks,        name='list_chunks'),
     path('api/chunks/save/',  views.save_chunk,         name='save_chunk'),
     path('api/pdf-pages/',     views.pdf_page_count,     name='pdf_page_count'),

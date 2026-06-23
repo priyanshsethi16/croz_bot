@@ -1,47 +1,55 @@
 .login-page {
   display: flex; align-items: center; justify-content: center;
-  min-height: calc(100vh - 160px);
+  min-height: calc(100vh - 56px - 57px);
   background: var(--white);
   background-image: radial-gradient(var(--dot-color) 1.5px, transparent 1.5px);
   background-size: 28px 28px;
-  padding: 40px 16px;
+  padding: 24px 16px;
 }
 .login-right {
-  width: 100%; max-width: 460px;
+  width: 100%; max-width: 440px;
   background: var(--white);
   border: 1px solid var(--border);
-  padding: clamp(28px, 6vw, 52px) clamp(24px, 7vw, 52px);
+  padding: 40px 36px;
   box-shadow: 0 4px 32px rgba(0,0,0,.06);
 }
 .login-form-wrap { width: 100%; }
-.form-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
-.form-brand .fw { font-size: clamp(20px, 5vw, 26px); font-weight: 900; letter-spacing: 2px; color: var(--dark); }
-.form-brand .fs { font-size: clamp(9px, 2vw, 10px); color: var(--orange); letter-spacing: 3px; text-transform: uppercase; display: block; }
-.form-h { font-size: clamp(18px, 5vw, 22px); font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-.form-sub { font-size: clamp(12px, 3vw, 14px); color: var(--grey); margin-bottom: 28px; }
+.form-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+.form-brand .fw { font-size: 24px; font-weight: 900; letter-spacing: 2px; color: var(--dark); }
+.form-brand .fs { font-size: 10px; color: var(--orange); letter-spacing: 3px; text-transform: uppercase; display: block; }
+.form-h { font-size: 20px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.form-sub { font-size: 13px; color: var(--grey); margin-bottom: 28px; }
 .fg { margin-bottom: 18px; }
-.fg label { display: block; font-size: clamp(10px, 2.5vw, 11px); font-weight: 700; color: var(--grey); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.fg label { display: block; font-size: 11px; font-weight: 700; color: var(--grey); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
 .fg input {
-  width: 100%; padding: clamp(10px, 2.5vw, 13px) clamp(12px, 3vw, 14px);
-  border: 2px solid var(--border); font-size: clamp(14px, 3.5vw, 15px);
+  width: 100%; padding: 12px 14px;
+  border: 2px solid var(--border); font-size: 15px;
   font-family: inherit; outline: none; transition: border-color .15s;
   background: #fafafa; box-sizing: border-box;
 }
 .fg input:focus { border-color: var(--orange); background: #fff; }
 .login-btn {
-  width: 100%; padding: clamp(12px, 3vw, 15px);
+  width: 100%; padding: 14px;
   background: var(--orange); color: #fff;
-  border: none; font-size: clamp(13px, 3vw, 14px); font-weight: 800;
+  border: none; font-size: 13px; font-weight: 800;
   text-transform: uppercase; letter-spacing: 1.5px;
   cursor: pointer; transition: background .15s;
   display: flex; align-items: center; justify-content: center; gap: 8px;
+  margin-top: 4px;
 }
 .login-btn:hover { background: var(--orange-dark); }
 .err-box {
   background: var(--orange-light); border: 1.5px solid #ffc9aa;
   color: var(--orange-dark); padding: 11px 14px;
-  font-size: clamp(12px, 3vw, 13px); font-weight: 500; margin-bottom: 18px;
+  font-size: 13px; font-weight: 500; margin-bottom: 18px;
   display: flex; align-items: center; gap: 8px;
 }
-.back { text-align: center; margin-top: 20px; font-size: clamp(12px, 3vw, 13px); color: var(--grey); }
+.back { text-align: center; margin-top: 20px; font-size: 13px; color: var(--grey); }
 .back a { color: var(--orange); text-decoration: none; font-weight: 600; }
+
+@media (max-width: 480px) {
+  .login-right { padding: 28px 20px; border: none; box-shadow: none; }
+  .form-h { font-size: 18px; }
+  .fg input { font-size: 16px; } /* prevent iOS zoom */
+  .login-btn { font-size: 13px; padding: 13px; }
+}

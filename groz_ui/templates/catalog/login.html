@@ -7,6 +7,14 @@
 
 {% block extra_head %}
 <link rel="stylesheet" href="{% static 'css/login.css' %}"/>
+<script>
+  window.addEventListener('unload', function() {});
+  // Push a duplicate entry so forward button has nowhere to go
+  history.pushState(null, '', window.location.href);
+  window.addEventListener('popstate', function() {
+    history.pushState(null, '', window.location.href);
+  });
+</script>
 {% endblock %}
 
 {% block content %}

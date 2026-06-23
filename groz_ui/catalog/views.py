@@ -1,5 +1,6 @@
 import json
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,21 @@ def _get_catalog_stats():
     except Exception:
         indexed = 0
 
+    # If no local folders but DB has data, build processed list from DB
+    if not processed:
+        try:
+            from .models import CatalogDocument, DocumentChunk
+            for doc in CatalogDocument.objects.filter(is_active=True).order_by('original_filename'):
+                chunk_count = DocumentChunk.objects.filter(document=doc).count()
+                if chunk_count > 0:
+                    processed.append({
+                        'name': doc.original_filename,
+                        'chunks': chunk_count,
+                        'products': doc.product_families.count(),
+                    })
+        except Exception:
+            pass
+
     stats = {
         'total_pdfs': len(pdfs),
         'processed': processed,
@@ -91,6 +107,12 @@ def admin_login(request):
                             password=request.POST.get('password'))
         if user and user.is_active and user.is_staff:
             login(request, user)
+            request.session['admin_access_token'] = secrets.token_hex(32)
+            # Reset per-session workflow progress on every fresh login
+            request.session['session_uploaded_pdfs'] = []
+            request.session['session_chunks_created'] = 0
+            request.session['session_indexed'] = 0
+            request.session.modified = True
             panel = request.GET.get('next_panel', '')
             url = '/admin-panel/' + (f'?panel={panel}' if panel else '')
             return redirect(url)
@@ -98,12 +120,19 @@ def admin_login(request):
             error = 'Access denied. This login is for administrators only.'
         else:
             error = 'Invalid credentials.'
+    else:
+        # Clear any existing session when login page is visited via GET
+        if request.user.is_authenticated:
+            logout(request)
     return render(request, 'catalog/login.html', {'error': error})
 
 
 def admin_logout(request):
+    # Invalidate the token before logout so back-button cached pages fail validation
+    request.session.pop('admin_access_token', None)
+    request.session.modified = True
     logout(request)
-    return redirect('/admin-panel/login/')
+    return redirect('/')
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -115,6 +144,7 @@ def dashboard(request):
         'stats': stats,
         'is_admin': request.user.is_staff,
         'v2_ingest_enabled': settings.CATALOG_RAG_V2_INGEST,
+        'admin_access_token': request.session.get('admin_access_token', ''),
     })
 
 
@@ -136,6 +166,13 @@ def upload_pdf(request):
     with open(dest, 'wb') as f:
         for chunk in pdf.chunks():
             f.write(chunk)
+
+    # Track per-session uploads
+    uploaded = request.session.get('session_uploaded_pdfs', [])
+    if pdf.name not in uploaded:
+        uploaded.append(pdf.name)
+    request.session['session_uploaded_pdfs'] = uploaded
+    request.session.modified = True
 
     return JsonResponse({'message': f'"{pdf.name}" uploaded successfully.', 'filename': pdf.name})
 
@@ -174,6 +211,17 @@ def run_pipeline(request):
         output = result.stdout + result.stderr
         if result.returncode != 0:
             return JsonResponse({'error': output[-2000:]}, status=500)
+
+        # Track per-session chunks created
+        try:
+            import re as _re
+            match = _re.search(r'Products found\s*:\s*(\d+)', output)
+            if match:
+                request.session['session_chunks_created'] = int(match.group(1))
+                request.session.modified = True
+        except Exception:
+            pass
+
         return JsonResponse({'message': 'Pipeline completed.', 'output': output[-3000:]})
     except subprocess.TimeoutExpired:
         return JsonResponse({'error': 'Pipeline timed out (10 min limit).'}, status=500)
@@ -280,9 +328,22 @@ def admin_chat(request):
 
 # ── API: Catalog Stats (for dashboard refresh) ────────────────────────────────
 
+def admin_ping(request):
+    if not request.user.is_authenticated or not request.user.is_staff or not request.session.get('admin_access_token'):
+        return JsonResponse({'ok': False}, status=401)
+    return JsonResponse({'ok': True})
+
+
 @login_required
 def catalog_stats(request):
-    return JsonResponse(_get_catalog_stats())
+    if not request.user.is_staff or not request.session.get('admin_access_token'):
+        return JsonResponse({'error': 'Session expired.'}, status=403)
+    stats = _get_catalog_stats()
+    # Override progress with per-session counters
+    stats['session_uploaded_pdfs'] = request.session.get('session_uploaded_pdfs', [])
+    stats['session_chunks'] = request.session.get('session_chunks_created', 0)
+    stats['session_indexed'] = request.session.get('session_indexed', 0)
+    return JsonResponse(stats)
 
 
 # ── API: PDF page count ────────────────────────────────────────────────

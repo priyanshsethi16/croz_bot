@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 
 def home(request):
+    if request.user.is_authenticated:
+        logout(request)
     return render(request, 'chatbot_app/home.html')
 
 

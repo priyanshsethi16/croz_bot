@@ -40,7 +40,13 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'catalog.middleware.AdminNoCacheMiddleware',
 ]
+
+# Session expires when browser closes — no persistent cookie
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_COOKIE_AGE = 8 * 60 * 60
+SESSION_SAVE_EVERY_REQUEST = True
 
 ROOT_URLCONF = 'groz_ui.urls'
 

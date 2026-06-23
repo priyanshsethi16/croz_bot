@@ -183,6 +183,9 @@ function addFileItem(name, size, statusClass, statusText) {
     <span class="fstatus ${statusClass}">${statusText}</span>
     <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(name)}')" title="Preview pages">
       <i class="fa fa-eye"></i> Preview
+    </button>
+    <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(name)}', this)" title="Delete PDF">
+      <i class="fa fa-trash"></i> Delete
     </button>`;
   document.getElementById('upload-file-list').prepend(div);
   return div;
@@ -192,6 +195,33 @@ function setFileStatus(item, cls, text) {
   const s = item.querySelector('.fstatus');
   s.className = `fstatus ${cls}`;
   s.textContent = text;
+}
+
+async function deleteUploadedPdf(filename, btn) {
+  if (!confirm(`Delete "${filename}" and all its associated data?`)) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+  try {
+    const res = await fetch('/admin-panel/api/delete-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      btn.closest('.file-item').remove();
+      showToast(data.message || `"${filename}" deleted.`, 'success');
+      refreshStats();
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa fa-trash"></i> Delete';
+      showToast(data.error || 'Delete failed.', 'error');
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-trash"></i> Delete';
+    showToast('Delete failed.', 'error');
+  }
 }
 
 function formatBytes(b) {
@@ -704,10 +734,17 @@ function updateWorkflowProgress(data = {}) {
   const root = document.getElementById('workflow-progress');
   if (!root) return;
 
-  const totalPdfs = _num(data.total_pdfs ?? document.getElementById('stat-pdfs')?.textContent);
-  const processed = Array.isArray(data.processed) ? data.processed.length : _num(document.getElementById('stat-processed')?.textContent);
-  const chunks    = _num(data.total_chunks ?? data.chunks ?? document.getElementById('stat-chunks')?.textContent);
-  const indexed   = _num(data.indexed ?? document.getElementById('stat-indexed')?.textContent);
+  const totalPdfs = 'session_uploaded_pdfs' in data ? data.session_uploaded_pdfs.length : -1;
+  const chunks     = 'session_chunks' in data ? _num(data.session_chunks) : -1;
+  const indexed    = 'session_indexed' in data ? _num(data.session_indexed) : -1;
+
+  // If session keys missing (initial DOM call fallback) force 0
+  const sessionPdfs    = totalPdfs < 0 ? 0 : totalPdfs;
+  const sessionChunks  = chunks < 0 ? 0 : chunks;
+  const sessionIndexed = indexed < 0 ? 0 : indexed;
+  const allPdfs    = _num(data.total_pdfs ?? document.getElementById('stat-pdfs')?.textContent);
+  const allChunks  = _num(data.indexed ?? document.getElementById('stat-chunks')?.textContent);
+  const allIndexed = _num(data.indexed ?? document.getElementById('stat-indexed')?.textContent);
 
   let percent = 0;
   let stepNo = 0;
@@ -715,17 +752,17 @@ function updateWorkflowProgress(data = {}) {
   let title = 'Catalog setup progress';
   let sub = 'Upload a PDF to start the catalog pipeline.';
 
-  if (totalPdfs > 0) {
+  if (sessionPdfs > 0) {
     percent = 25; stepNo = 1; active = 'chunk';
     title = 'PDF uploaded';
     sub = 'Next step: create product chunks from the uploaded catalog.';
   }
-  if (processed > 0 || chunks > 0) {
+  if (sessionChunks > 0) {
     percent = 75; stepNo = 3; active = 'index';
     title = 'Chunks created';
     sub = 'Product chunks are ready. Index them for semantic search.';
   }
-  if (indexed > 0) {
+  if (sessionIndexed > 0) {
     percent = 100; stepNo = 4; active = 'chat';
     title = 'Catalog search ready';
     sub = 'Chunks are indexed. You can validate answers in Test Chat.';
@@ -737,15 +774,15 @@ function updateWorkflowProgress(data = {}) {
   document.getElementById('workflow-progress-percent').textContent = `${percent}%`;
   document.getElementById('workflow-progress-fill').style.width = `${percent}%`;
 
-  document.getElementById('progress-upload-count').textContent = `${totalPdfs} uploaded`;
-  document.getElementById('progress-chunk-count').textContent = `${chunks} chunk${chunks === 1 ? '' : 's'}`;
-  document.getElementById('progress-index-count').textContent = `${indexed} indexed`;
+  document.getElementById('progress-upload-count').textContent = `${allPdfs} uploaded`;
+  document.getElementById('progress-chunk-count').textContent = `${allChunks} chunk${allChunks === 1 ? '' : 's'}`;
+  document.getElementById('progress-index-count').textContent = `${allIndexed} indexed`;
 
   const done = {
-    upload: totalPdfs > 0,
-    chunk: chunks > 0 || processed > 0,
-    index: indexed > 0,
-    chat: indexed > 0,
+    upload: sessionPdfs > 0,
+    chunk: sessionChunks > 0,
+    index: sessionIndexed > 0,
+    chat: sessionIndexed > 0,
   };
   document.querySelectorAll('[data-progress-step]').forEach(item => {
     const key = item.dataset.progressStep;
@@ -937,7 +974,8 @@ function setPreset(btn, val) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  updateWorkflowProgress();
+  // On fresh page load always start progress from session (0 until user does something)
+  updateWorkflowProgress({ session_uploaded_pdfs: [], session_chunks: 0, session_indexed: 0 });
   refreshStats();
   const customInput = document.getElementById('pages-per-input');
   if (customInput) {
