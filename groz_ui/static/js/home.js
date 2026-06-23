@@ -72,9 +72,10 @@ async function cwSend() {
   msgs.scrollTop = msgs.scrollHeight;
 
   try {
+    const csrf = document.cookie.split(';').map(c=>c.trim()).find(c=>c.startsWith('csrftoken='))?.split('=')[1] || '';
     const res  = await fetch('/api/chat/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
       body: JSON.stringify({ query: q })
     });
     const data = await res.json();

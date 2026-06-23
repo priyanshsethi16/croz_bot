@@ -304,7 +304,7 @@ def admin_chat(request):
         from .services.query_engine import CatalogQueryEngine
 
         runtime = get_runtime_config()
-        if not os.getenv('OPENAI_API_KEY', '').strip():
+        if not runtime.openai_api_key:
             return JsonResponse({'error': 'OPENAI_API_KEY is required for retrieval embeddings.'}, status=400)
         if not runtime.chat_api_key:
             return JsonResponse({'error': f'{runtime.chat_provider.title()} API key is not configured.'}, status=400)

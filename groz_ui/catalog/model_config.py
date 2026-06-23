@@ -26,12 +26,12 @@ CHAT_MODELS = {
         ("gemini-2.5-flash", "Gemini 2.5 Flash"),
         ("gemini-2.5-pro", "Gemini 2.5 Pro"),
     ),
-    # "openai": (  # disabled; re-enable when switching back to OpenAI
-    #     ("gpt-4o-mini", "GPT-4o mini"),
-    #     ("gpt-5.4-mini", "GPT-5.4 mini"),
-    #     ("gpt-5.4", "GPT-5.4"),
-    #     ("gpt-5-mini", "GPT-5 mini"),
-    # ),
+    "openai": (
+        ("gpt-4o", "GPT-4o"),
+        ("gpt-4o-mini", "GPT-4o mini"),
+        ("gpt-4.1", "GPT-4.1"),
+        ("gpt-4.1-mini", "GPT-4.1 mini"),
+    ),
     "groq": (
         ("qwen/qwen3-32b", "Qwen3 32B"),
         ("llama-3.3-70b-versatile", "Llama 3.3 70B"),
@@ -41,12 +41,11 @@ CHAT_MODELS = {
 
 DEFAULT_CHAT_MODEL = {
     "gemini": "gemini-2.5-flash",
-    # "openai": "gpt-5.4-mini",  # disabled
+    "openai": "gpt-4o-mini",
     "groq": "qwen/qwen3-32b",
 }
 
-# SECRET_OPENAI = "OPENAI_API_KEY"  # disabled for chat; re-enable when switching back to OpenAI
-# SECRET_OPENAI_EMBED = "OPENAI_EMBEDDING_KEY"  # disabled; embeddings now use HuggingFace (no key needed)
+SECRET_OPENAI = "OPENAI_API_KEY"
 SECRET_GROQ = "GROQ_API_KEY"
 SECRET_GEMINI = "GEMINI_API_KEY"
 _ENCRYPTED_PREFIX = "enc:v1:"
@@ -130,8 +129,7 @@ def get_model_configuration():
 
 @dataclass(frozen=True)
 class RuntimeModelConfig:
-    # openai_api_key: str  # disabled; re-enable when switching back to OpenAI
-    # openai_embedding_key: str  # disabled; embeddings now use HuggingFace (no key needed)
+    openai_api_key: str
     groq_api_key: str
     gemini_api_key: str
     embedding_model: str
@@ -141,15 +139,15 @@ class RuntimeModelConfig:
 
     @property
     def chat_api_key(self) -> str:
-        # return self.openai_api_key if self.chat_provider == "openai" else self.gemini_api_key  # disabled
+        if self.chat_provider == "openai":
+            return self.openai_api_key
         return self.groq_api_key if self.chat_provider == "groq" else self.gemini_api_key
 
 
 def get_runtime_config() -> RuntimeModelConfig:
     config = get_model_configuration()
     return RuntimeModelConfig(
-        # openai_api_key=get_secret(SECRET_OPENAI),  # disabled
-        # openai_embedding_key=get_secret(SECRET_OPENAI_EMBED),  # disabled; HuggingFace needs no key
+        openai_api_key=get_secret(SECRET_OPENAI),
         groq_api_key=get_secret(SECRET_GROQ),
         gemini_api_key=get_secret(SECRET_GEMINI),
         embedding_model=EMBEDDING_MODEL,
@@ -161,7 +159,7 @@ def get_runtime_config() -> RuntimeModelConfig:
 
 def configuration_payload() -> dict:
     config = get_model_configuration()
-    # openai_key = get_secret(SECRET_OPENAI)  # disabled
+    openai_key = get_secret(SECRET_OPENAI)
     groq_key = get_secret(SECRET_GROQ)
     gemini_key = get_secret(SECRET_GEMINI)
     return {
@@ -172,7 +170,7 @@ def configuration_payload() -> dict:
             "chat_model": config.chat_model,
         },
         "keys": {
-            # "openai": {"configured": bool(openai_key), "masked": mask_secret(openai_key)},  # disabled
+            "openai": {"configured": bool(openai_key), "masked": mask_secret(openai_key)},
             "groq": {"configured": bool(groq_key), "masked": mask_secret(groq_key)},
             "gemini": {"configured": bool(gemini_key), "masked": mask_secret(gemini_key)},
         },
@@ -196,17 +194,17 @@ def update_configuration(payload: dict, user=None) -> dict:
 
     chat_provider = str(payload.get("chat_provider", config.chat_provider)).strip().lower()
     if chat_provider not in CHAT_MODELS:
-        raise ValueError("Chat provider must be either gemini or groq.")
+        raise ValueError("Chat provider must be gemini, openai, or groq.")
 
     chat_model = str(payload.get("chat_model", "")).strip() or DEFAULT_CHAT_MODEL[chat_provider]
     allowed_chat = {value for value, _ in CHAT_MODELS[chat_provider]}
     if chat_model not in allowed_chat:
         raise ValueError(f"Unsupported {chat_provider} chat model.")
 
-    # if payload.get("clear_openai_key"):  # disabled
-    #     clear_secret(SECRET_OPENAI)
-    # elif str(payload.get("openai_api_key", "")).strip():
-    #     save_secret(SECRET_OPENAI, str(payload["openai_api_key"]))
+    if payload.get("clear_openai_key"):
+        clear_secret(SECRET_OPENAI)
+    elif str(payload.get("openai_api_key", "")).strip():
+        save_secret(SECRET_OPENAI, str(payload["openai_api_key"]))
     if payload.get("clear_groq_key"):
         clear_secret(SECRET_GROQ)
     elif str(payload.get("groq_api_key", "")).strip():
@@ -229,8 +227,8 @@ def update_configuration(payload: dict, user=None) -> dict:
 def subprocess_environment() -> dict[str, str]:
     runtime = get_runtime_config()
     env = os.environ.copy()
-    # if runtime.openai_api_key:  # disabled
-    #     env[SECRET_OPENAI] = runtime.openai_api_key
+    if runtime.openai_api_key:
+        env[SECRET_OPENAI] = runtime.openai_api_key
     if runtime.groq_api_key:
         env[SECRET_GROQ] = runtime.groq_api_key
     if runtime.gemini_api_key:

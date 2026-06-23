@@ -584,8 +584,9 @@ function refreshChatRoutingSummary() {
   const options = _modelOptions.chat_models?.[provider] || [];
   const selected = options.find(option => option.value === document.getElementById('chat-model')?.value);
   const summary = document.getElementById('routing-summary');
+  const providerLabel = provider === 'openai' ? 'OpenAI' : provider === 'groq' ? 'Groq' : 'Google Gemini';
   if (summary) {
-    summary.innerHTML = `<i class="fa fa-route"></i> Product chat will use <strong>${provider === 'openai' ? 'OpenAI' : 'Google Gemini'}</strong>${selected ? ` · ${escHtml(selected.label)}` : ''}.`;
+    summary.innerHTML = `<i class="fa fa-route"></i> Product chat will use <strong>${providerLabel}</strong>${selected ? ` · ${escHtml(selected.label)}` : ''}.`;
   }
 }
 
