@@ -276,28 +276,6 @@
                   </td>
                 </tr>
               {% endfor %}
-              {% if is_admin %}
-              {% for pdf_name in stats.unprocessed %}
-                <tr>
-                  <td>
-                    <div class="pdf-name-cell">
-                      <i class="fa fa-file-pdf"></i>
-                      <span class="pname">{{ pdf_name }}</span>
-                    </div>
-                  </td>
-                  <td><span class="badge badge-grey">—</span></td>
-                  <td><span class="badge badge-grey">—</span></td>
-                  <td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>
-                  <td>
-                    <div class="table-actions">
-                      <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ pdf_name }}')">
-                        <i class="fa fa-trash"></i> Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              {% endfor %}
-              {% endif %}
               </tbody>
             </table>
           </div>

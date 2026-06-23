@@ -749,12 +749,12 @@ async function deletePdf(filename) {
 }
 
 // -- Stats refresh -------------------------------------------------------------────────────
-function updateCatalogTable(processed, unprocessed) {
+function updateCatalogTable(processed) {
   const container = document.getElementById('catalog-overview-body');
   if (!container) return;
 
-  // If there are no processed PDFs and no unprocessed PDFs, show the empty state
-  if (!processed.length && (!IS_ADMIN || !unprocessed.length)) {
+  // If there are no processed PDFs, show the empty state
+  if (!processed.length) {
     let emptyHtml = `
       <div style="text-align:center;padding:48px 20px;color:var(--grey)">
         <i class="fa fa-inbox" style="font-size:40px;margin-bottom:14px;display:block;color:#d0d0d0"></i>
@@ -829,32 +829,6 @@ function updateCatalogTable(processed, unprocessed) {
     `;
   });
 
-  // 2. Unprocessed rows (admin only)
-  if (IS_ADMIN) {
-    unprocessed.forEach(pdfName => {
-      tableHtml += `
-        <tr>
-          <td>
-            <div class="pdf-name-cell">
-              <i class="fa fa-file-pdf"></i>
-              <span class="pname">${escHtml(pdfName)}</span>
-            </div>
-          </td>
-          <td><span class="badge badge-grey">—</span></td>
-          <td><span class="badge badge-grey">—</span></td>
-          <td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>
-          <td>
-            <div class="table-actions">
-              <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(pdfName)}')">
-                <i class="fa fa-trash"></i> Delete
-              </button>
-            </div>
-          </td>
-        </tr>
-      `;
-    });
-  }
-
   tableHtml += `
         </tbody>
       </table>
@@ -873,7 +847,7 @@ async function refreshStats() {
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
     document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
     updateWorkflowProgress(data);
-    updateCatalogTable(data.processed || [], data.unprocessed || []);
+    updateCatalogTable(data.processed || []);
   } catch(e) {}
 }
 
