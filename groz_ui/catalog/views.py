@@ -24,49 +24,28 @@ def _clean_parsing_instructions(value) -> str:
 
 def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
-    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
     input_dir = PROJECT_ROOT / 'input'
-
     pdfs      = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
     processed = []
-    if data_dir.exists():
-        for d in sorted(data_dir.iterdir()):
-            if d.is_dir():
-                chunks = list((d / 'chunks').glob('*.md')) if (d / 'chunks').exists() else []
-                prod_json = d / 'products.json'
-                products = []
-                if prod_json.exists():
-                    try:
-                        products = json.loads(prod_json.read_text())
-                    except Exception:
-                        pass
-                if chunks:
-                    processed.append({
-                        'name': d.name,
-                        'chunks': len(chunks),
-                        'products': len(products),
-                    })
+
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
+            chunk_count = DocumentChunk.objects.filter(document=doc).count()
+            if chunk_count > 0:
+                processed.append({
+                    'name': doc.original_filename,
+                    'chunks': chunk_count,
+                    'products': doc.product_families.count(),
+                })
+    except Exception:
+        pass
 
     try:
         from rag_pipeline.providers import indexed_document_count
         indexed = indexed_document_count()
     except Exception:
         indexed = 0
-
-    # If no local folders but DB has data, build processed list from DB
-    if not processed:
-        try:
-            from .models import CatalogDocument, DocumentChunk
-            for doc in CatalogDocument.objects.filter(is_active=True).order_by('original_filename'):
-                chunk_count = DocumentChunk.objects.filter(document=doc).count()
-                if chunk_count > 0:
-                    processed.append({
-                        'name': doc.original_filename,
-                        'chunks': chunk_count,
-                        'products': doc.product_families.count(),
-                    })
-        except Exception:
-            pass
 
     stats = {
         'total_pdfs': len(pdfs),
@@ -234,14 +213,16 @@ def run_pipeline(request):
 @login_required
 def list_pdfs(request):
     input_dir = PROJECT_ROOT / 'input'
-    data_dir  = PROJECT_ROOT / 'vision_pipeline' / 'data'
     pdfs = sorted(p.name for p in input_dir.glob('*.pdf')) if input_dir.exists() else []
     # Build set of stems that already have chunks
     chunked = set()
-    if data_dir.exists():
-        for d in data_dir.iterdir():
-            if d.is_dir() and (d / 'chunks').exists() and list((d / 'chunks').glob('*.md')):
-                chunked.add(d.name)
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        for doc in CatalogDocument.objects.all():
+            if DocumentChunk.objects.filter(document=doc).exists():
+                chunked.add(doc.original_filename)
+    except Exception:
+        pass
     return JsonResponse({'pdfs': pdfs, 'chunked': list(chunked)})
 
 
@@ -607,37 +588,26 @@ def list_chunks(request):
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
 
     chunks = []
-
-    # 1. Try to read from local file system first
-    chunks_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks'
-    if chunks_dir.exists():
-        for f in sorted(chunks_dir.glob('*.md')):
-            chunks.append({
-                'filename': f.name,
-                'content': f.read_text(encoding='utf-8'),
-            })
-
-    # 2. If no files found on disk, query database
-    if not chunks:
-        from .models import CatalogDocument, DocumentChunk
+    from .models import CatalogDocument, DocumentChunk
+    
+    doc = CatalogDocument.objects.filter(
+        original_filename=pdf_name,
+        is_active=True
+    ).order_by('-version').first()
+    if not doc:
         doc = CatalogDocument.objects.filter(
-            original_filename=pdf_name,
-            is_active=True
+            original_filename=pdf_name
         ).order_by('-version').first()
-        if not doc:
-            doc = CatalogDocument.objects.filter(
-                original_filename=pdf_name
-            ).order_by('-version').first()
 
-        if doc:
-            db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
-            for c in db_chunks:
-                # Format chunk name as chunk_0000.md
-                filename = f"chunk_{c.ordinal:04d}.md"
-                chunks.append({
-                    'filename': filename,
-                    'content': c.text,
-                })
+    if doc:
+        db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
+        for c in db_chunks:
+            # Format chunk name as chunk_0000.md
+            filename = f"chunk_{c.ordinal:04d}.md"
+            chunks.append({
+                'filename': filename,
+                'content': c.text,
+            })
 
     return JsonResponse({'chunks': chunks})
 
@@ -658,16 +628,7 @@ def save_chunk(request):
     if not pdf_name or not chunk_name.endswith('.md'):
         return JsonResponse({'error': 'Invalid chunk file.'}, status=400)
 
-    # 1. Try saving to file system first if folder/file exists
-    chunks_dir = (PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks').resolve()
-    chunk_path = (chunks_dir / chunk_name).resolve()
-    
-    file_saved = False
-    if chunks_dir.exists() and chunks_dir in chunk_path.parents and chunk_path.exists():
-        chunk_path.write_text(content, encoding='utf-8')
-        file_saved = True
-
-    # 2. Always sync / save to the database if the chunk exists there
+    # Save to the database directly
     from .models import CatalogDocument, DocumentChunk
     import hashlib
     
@@ -684,8 +645,8 @@ def save_chunk(request):
             chunk.save(update_fields=['text', 'content_hash', 'index_status', 'updated_at'])
             db_updated = True
 
-    if not file_saved and not db_updated:
-        return JsonResponse({'error': 'Chunk file or database record not found.'}, status=404)
+    if not db_updated:
+        return JsonResponse({'error': 'Chunk database record not found.'}, status=404)
 
     return JsonResponse({'message': f'{chunk_name} saved.', 'filename': chunk_name})
 
