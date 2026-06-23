@@ -51,6 +51,7 @@ function showPanel(name) {
   document.querySelector(`.step-item[data-step="${name}"]`)?.classList.add('active');
 
   closeSidebar();
+  if (name === 'overview') refreshStats();
   if (name === 'chunk') loadPdfList();
   if (name === 'upload') loadExistingUploads();
   if (name === 'models') loadModelConfiguration();
@@ -536,6 +537,7 @@ async function runChunking() {
       log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
       refreshStats();
+      loadPdfList();
       document.getElementById('next-to-index').style.display = 'flex';
       markStepDone('chunk');
     }
@@ -1241,6 +1243,7 @@ async function runSingleSplit(idx) {
       statEl.textContent = '✓ Done';
       btnEl.innerHTML = '<i class="fa fa-check"></i>';
       refreshStats();
+      loadPdfList();
     }
   } catch(e) {
     itemEl.className = 'split-part-item errored';
