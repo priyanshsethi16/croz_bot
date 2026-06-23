@@ -228,6 +228,22 @@ def upload_pdf(request):
     return JsonResponse({'message': f'"{pdf.name}" uploaded successfully.', 'filename': pdf.name})
 
 
+def _resolve_pdf_path(filename: str) -> Path:
+    """Find a PDF file in input/ or recursively inside input/splits/ subfolders."""
+    filename = Path(filename).name
+    pdf_path = PROJECT_ROOT / 'input' / filename
+    if not pdf_path.exists():
+        splits_dir = PROJECT_ROOT / 'input' / 'splits'
+        if splits_dir.exists():
+            for stem_dir in splits_dir.iterdir():
+                if stem_dir.is_dir():
+                    candidate = stem_dir / filename
+                    if candidate.exists():
+                        pdf_path = candidate
+                        break
+    return pdf_path
+
+
 def _ensure_catalog_document(pdf_path):
     from .models import Catalog, CatalogDocument
     from django.db.models import Max
@@ -322,20 +338,7 @@ def run_pipeline(request):
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
 
-    # First try main input directory
-    pdf_path = PROJECT_ROOT / 'input' / filename
-    
-    # If not found, search in splits subdirectories
-    if not pdf_path.exists():
-        splits_dir = PROJECT_ROOT / 'input' / 'splits'
-        if splits_dir.exists():
-            for stem_dir in splits_dir.iterdir():
-                if stem_dir.is_dir():
-                    candidate = stem_dir / filename
-                    if candidate.exists():
-                        pdf_path = candidate
-                        break
-    
+    pdf_path = _resolve_pdf_path(filename)
     if not pdf_path.exists():
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
@@ -464,19 +467,7 @@ def pdf_preview(request):
     else:
         if not filename:
             return JsonResponse({'error': 'No PDF specified.'}, status=400)
-        filename = Path(filename).name
-        pdf_path = PROJECT_ROOT / 'input' / filename
-        
-        # Smart fallback for split PDFs requested from the upload file list
-        if not pdf_path.exists():
-            splits_dir = PROJECT_ROOT / 'input' / 'splits'
-            if splits_dir.exists():
-                for stem_dir in splits_dir.iterdir():
-                    if stem_dir.is_dir():
-                        candidate = stem_dir / filename
-                        if candidate.exists():
-                            pdf_path = candidate
-                            break
+        pdf_path = _resolve_pdf_path(filename)
                             
     if not pdf_path.exists():
         return JsonResponse({'error': 'PDF not found.'}, status=404)
@@ -572,7 +563,7 @@ def pdf_page_count(request):
     filename = request.GET.get('pdf', '').strip()
     if not filename:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
-    pdf_path = PROJECT_ROOT / 'input' / filename
+    pdf_path = _resolve_pdf_path(filename)
     if not pdf_path.exists():
         return JsonResponse({'error': 'File not found.'}, status=404)
 
@@ -606,7 +597,7 @@ def split_pdf(request):
     if not filename or pages_per < 1:
         return JsonResponse({'error': 'Invalid parameters.'}, status=400)
 
-    pdf_path = PROJECT_ROOT / 'input' / filename
+    pdf_path = _resolve_pdf_path(filename)
     if not pdf_path.exists():
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
@@ -720,7 +711,7 @@ def split_pdf_custom(request):
     if not filename or not ranges:
         return JsonResponse({'error': 'Invalid parameters.'}, status=400)
 
-    pdf_path = PROJECT_ROOT / 'input' / filename
+    pdf_path = _resolve_pdf_path(filename)
     if not pdf_path.exists():
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
