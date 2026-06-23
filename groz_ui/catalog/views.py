@@ -616,6 +616,20 @@ def delete_pdf(request):
 
 # -- API: List chunks for a PDF ────────────────────────────────────────────────
 
+def _parse_ordinal_from_filename(filename: str) -> int:
+    import re
+    match = re.match(r'^(\d+)_', filename)
+    if match:
+        return int(match.group(1))
+    match = re.match(r'^chunk_(\d+)', filename)
+    if match:
+        return int(match.group(1))
+    match = re.search(r'(\d+)', filename)
+    if match:
+        return int(match.group(1))
+    return 0
+
+
 @login_required
 def list_chunks(request):
     if not request.user.is_staff:
@@ -624,16 +638,39 @@ def list_chunks(request):
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
 
-    chunks_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks'
-    if not chunks_dir.exists():
-        return JsonResponse({'chunks': []})
-
     chunks = []
-    for f in sorted(chunks_dir.glob('*.md')):
-        chunks.append({
-            'filename': f.name,
-            'content': f.read_text(encoding='utf-8'),
-        })
+
+    # 1. Try to read from local file system first
+    chunks_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks'
+    if chunks_dir.exists():
+        for f in sorted(chunks_dir.glob('*.md')):
+            chunks.append({
+                'filename': f.name,
+                'content': f.read_text(encoding='utf-8'),
+            })
+
+    # 2. If no files found on disk, query database
+    if not chunks:
+        from .models import CatalogDocument, DocumentChunk
+        doc = CatalogDocument.objects.filter(
+            original_filename=pdf_name,
+            is_active=True
+        ).order_by('-version').first()
+        if not doc:
+            doc = CatalogDocument.objects.filter(
+                original_filename=pdf_name
+            ).order_by('-version').first()
+
+        if doc:
+            db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
+            for c in db_chunks:
+                # Format chunk name as chunk_0000.md
+                filename = f"chunk_{c.ordinal:04d}.md"
+                chunks.append({
+                    'filename': filename,
+                    'content': c.text,
+                })
+
     return JsonResponse({'chunks': chunks})
 
 
@@ -653,12 +690,35 @@ def save_chunk(request):
     if not pdf_name or not chunk_name.endswith('.md'):
         return JsonResponse({'error': 'Invalid chunk file.'}, status=400)
 
+    # 1. Try saving to file system first if folder/file exists
     chunks_dir = (PROJECT_ROOT / 'vision_pipeline' / 'data' / pdf_name / 'chunks').resolve()
     chunk_path = (chunks_dir / chunk_name).resolve()
-    if chunks_dir not in chunk_path.parents or not chunk_path.exists():
-        return JsonResponse({'error': 'Chunk file not found.'}, status=404)
+    
+    file_saved = False
+    if chunks_dir.exists() and chunks_dir in chunk_path.parents and chunk_path.exists():
+        chunk_path.write_text(content, encoding='utf-8')
+        file_saved = True
 
-    chunk_path.write_text(content, encoding='utf-8')
+    # 2. Always sync / save to the database if the chunk exists there
+    from .models import CatalogDocument, DocumentChunk
+    import hashlib
+    
+    ordinal = _parse_ordinal_from_filename(chunk_name)
+    db_updated = False
+    
+    doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+    if doc:
+        chunk = DocumentChunk.objects.filter(document=doc, ordinal=ordinal).first()
+        if chunk:
+            chunk.text = content
+            chunk.content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+            chunk.index_status = DocumentChunk.IndexStatus.STALE
+            chunk.save(update_fields=['text', 'content_hash', 'index_status', 'updated_at'])
+            db_updated = True
+
+    if not file_saved and not db_updated:
+        return JsonResponse({'error': 'Chunk file or database record not found.'}, status=404)
+
     return JsonResponse({'message': f'{chunk_name} saved.', 'filename': chunk_name})
 
 
