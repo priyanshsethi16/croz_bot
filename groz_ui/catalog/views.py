@@ -25,9 +25,30 @@ def _clean_parsing_instructions(value) -> str:
 def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
     input_dir = PROJECT_ROOT / 'input'
-    pdfs      = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
+    splits_dir = input_dir / 'splits'
+    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+    pdfs = []
+    pdfs_with_splits = set()  # Track which PDFs have been split
+    
+    # First, check which PDFs have splits
+    if splits_dir.exists():
+        for stem_dir in splits_dir.iterdir():
+            if stem_dir.is_dir():
+                split_files = list(stem_dir.glob('*.pdf'))
+                if split_files:  # If this stem has split files
+                    pdfs_with_splits.add(stem_dir.name)
+                    pdfs.extend(split_files)
+    
+    # Get main PDFs (but exclude those that have been split)
+    if input_dir.exists():
+        for pdf in input_dir.glob('*.pdf'):
+            if pdf.stem not in pdfs_with_splits:
+                pdfs.append(pdf)
+    
     processed = []
+    processed_names = set()
 
+    # Check database for processed PDFs
     try:
         from .models import CatalogDocument, DocumentChunk
         for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
@@ -38,8 +59,39 @@ def _get_catalog_stats():
                     'chunks': chunk_count,
                     'products': doc.product_families.count(),
                 })
+                processed_names.add(doc.original_filename)
     except Exception:
         pass
+
+    # Also check filesystem for processed PDFs (vision_pipeline/data)
+    if data_dir.exists():
+        for stem_dir in data_dir.iterdir():
+            if not stem_dir.is_dir():
+                continue
+            assembled_file = stem_dir / 'assembled_products.json'
+            if not assembled_file.exists():
+                continue
+            
+            # Find matching PDF filename
+            pdf_filename = stem_dir.name + '.pdf'
+            if pdf_filename in processed_names:
+                continue  # Already counted from database
+            
+            # Count products from filesystem
+            try:
+                import json as _json
+                with open(assembled_file, 'r', encoding='utf-8') as f:
+                    products = _json.load(f)
+                    product_count = len(products) if isinstance(products, list) else 0
+                    if product_count > 0:
+                        processed.append({
+                            'name': pdf_filename,
+                            'chunks': product_count,
+                            'products': product_count,
+                        })
+                        processed_names.add(pdf_filename)
+            except Exception:
+                pass
 
     try:
         from rag_pipeline.providers import indexed_document_count
@@ -47,10 +99,12 @@ def _get_catalog_stats():
     except Exception:
         indexed = 0
 
+    unprocessed = [p.name for p in pdfs if p.name not in processed_names]
+
     stats = {
         'total_pdfs': len(pdfs),
         'processed': processed,
-        'unprocessed': [p.name for p in pdfs if p.stem not in {d['name'] for d in processed}],
+        'unprocessed': unprocessed,
         'indexed': indexed,
     }
     try:
@@ -170,7 +224,19 @@ def run_pipeline(request):
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
 
+    # Check if it's a main PDF or a split PDF
     pdf_path = PROJECT_ROOT / 'input' / filename
+    if not pdf_path.exists():
+        # Check in splits directory
+        splits_dir = PROJECT_ROOT / 'input' / 'splits'
+        if splits_dir.exists():
+            for stem_dir in splits_dir.iterdir():
+                if stem_dir.is_dir():
+                    possible_path = stem_dir / filename
+                    if possible_path.exists():
+                        pdf_path = possible_path
+                        break
+    
     if not pdf_path.exists():
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
@@ -190,6 +256,34 @@ def run_pipeline(request):
         output = result.stdout + result.stderr
         if result.returncode != 0:
             return JsonResponse({'error': output[-2000:]}, status=500)
+
+        # Auto-ingest products into database
+        stem = pdf_path.stem
+        products_file = PROJECT_ROOT / 'vision_pipeline' / 'data' / stem / 'assembled_products.json'
+        if products_file.exists():
+            try:
+                from .models import CatalogDocument, Catalog
+                from .services.structured_ingestion import persist_assembled_products
+                
+                # Get or create document
+                doc, created = CatalogDocument.objects.get_or_create(
+                    original_filename=filename,
+                    defaults={
+                        'uploaded_by': request.user,
+                        'catalog': Catalog.objects.first(),  # Use first catalog or None
+                        'source_type': CatalogDocument.SourceType.CATALOG,
+                        'status': CatalogDocument.Status.UPLOADED,
+                    }
+                )
+                
+                # Load and persist products
+                with open(products_file, 'r', encoding='utf-8') as f:
+                    products = json.load(f)
+                
+                stats = persist_assembled_products(doc, products, replace=True)
+                output += f"\n\n✓ Ingested {stats['families']} products with {stats['variants']} variants into database."
+            except Exception as e:
+                output += f"\n⚠ Warning: Could not ingest products into database: {e}"
 
         # Track per-session chunks created
         try:
@@ -213,8 +307,24 @@ def run_pipeline(request):
 @login_required
 def list_pdfs(request):
     input_dir = PROJECT_ROOT / 'input'
-    pdfs = sorted(p.name for p in input_dir.glob('*.pdf')) if input_dir.exists() else []
-    # Build set of stems that already have chunks
+    splits_dir = input_dir / 'splits'
+    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+    pdfs = []
+    pdfs_with_splits = set()
+    
+    if splits_dir.exists():
+        for stem_dir in splits_dir.iterdir():
+            if stem_dir.is_dir():
+                split_files = sorted(p.name for p in stem_dir.glob('*.pdf'))
+                if split_files:
+                    pdfs_with_splits.add(stem_dir.name)
+                    pdfs.extend(split_files)
+    
+    if input_dir.exists():
+        for pdf in sorted(input_dir.glob('*.pdf')):
+            if pdf.stem not in pdfs_with_splits:
+                pdfs.append(pdf.name)
+    
     chunked = set()
     try:
         from .models import CatalogDocument, DocumentChunk
@@ -223,6 +333,16 @@ def list_pdfs(request):
                 chunked.add(doc.original_filename)
     except Exception:
         pass
+    
+    if data_dir.exists():
+        for stem_dir in data_dir.iterdir():
+            if not stem_dir.is_dir():
+                continue
+            assembled_file = stem_dir / 'assembled_products.json'
+            if assembled_file.exists():
+                pdf_filename = stem_dir.name + '.pdf'
+                chunked.add(pdf_filename)
+    
     return JsonResponse({'pdfs': pdfs, 'chunked': list(chunked)})
 
 
@@ -445,6 +565,35 @@ def run_pipeline_split(request):
         output = result.stdout + result.stderr
         if result.returncode != 0:
             return JsonResponse({'error': output[-2000:]}, status=500)
+        
+        # Auto-ingest products into database
+        part_stem = pdf_path.stem
+        products_file = PROJECT_ROOT / 'vision_pipeline' / 'data' / part_stem / 'assembled_products.json'
+        if products_file.exists():
+            try:
+                from .models import CatalogDocument, Catalog
+                from .services.structured_ingestion import persist_assembled_products
+                
+                # Get or create document for this split part
+                doc, created = CatalogDocument.objects.get_or_create(
+                    original_filename=part_file,
+                    defaults={
+                        'uploaded_by': request.user,
+                        'catalog': Catalog.objects.first(),
+                        'source_type': CatalogDocument.SourceType.CATALOG,
+                        'status': CatalogDocument.Status.UPLOADED,
+                    }
+                )
+                
+                # Load and persist products
+                with open(products_file, 'r', encoding='utf-8') as f:
+                    products = json.load(f)
+                
+                stats = persist_assembled_products(doc, products, replace=True)
+                output += f"\n\n✓ Ingested {stats['families']} products with {stats['variants']} variants into database."
+            except Exception as e:
+                output += f"\n⚠ Warning: Could not ingest products into database: {e}"
+        
         return JsonResponse({'message': f'{part_file} processed.', 'output': output[-2000:]})
     except subprocess.TimeoutExpired:
         return JsonResponse({'error': 'Pipeline timed out.'}, status=500)
@@ -528,17 +677,31 @@ def delete_pdf(request):
     stem     = Path(filename).stem
     pdf_path = PROJECT_ROOT / 'input' / filename
 
+    # Delete main PDF if exists
     if pdf_path.exists():
         pdf_path.unlink()
+    else:
+        # Check if it's a split PDF
+        splits_dir = PROJECT_ROOT / 'input' / 'splits'
+        if splits_dir.exists():
+            for stem_dir in splits_dir.iterdir():
+                if stem_dir.is_dir():
+                    split_path = stem_dir / filename
+                    if split_path.exists():
+                        split_path.unlink()
+                        break
 
+    # Delete splits directory for this stem (only if deleting main PDF)
     splits_dir = PROJECT_ROOT / 'input' / 'splits' / stem
     if splits_dir.exists():
         shutil.rmtree(splits_dir)
 
+    # Delete data directory
     data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / stem
     if data_dir.exists():
         shutil.rmtree(data_dir)
 
+    # Delete from Qdrant
     try:
         from qdrant_client import models
         from rag_pipeline.providers import COLLECTION, build_qdrant_client

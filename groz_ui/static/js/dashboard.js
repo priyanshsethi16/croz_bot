@@ -54,6 +54,7 @@ function showPanel(name) {
   if (name === 'chunk') loadPdfList();
   if (name === 'upload') loadExistingUploads();
   if (name === 'models') loadModelConfiguration();
+  if (name === 'index') loadProcessedPdfList();
 }
 
 async function loadExistingUploads() {
@@ -444,8 +445,7 @@ async function loadPdfList() {
     const chunked = new Set(data.chunked || []);
     grid.innerHTML = '';
     (data.pdfs || []).forEach(name => {
-      const stem    = name.replace(/\.pdf$/i, '');
-      const isDone  = chunked.has(stem);
+      const isDone  = chunked.has(name);
       const card    = document.createElement('div');
       card.className = 'pdf-select-card' + (isDone ? ' chunked-done' : '');
       card.dataset.pdf = name;
@@ -535,6 +535,7 @@ async function runChunking() {
       log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
       refreshStats();
+      loadPdfList();  // Refresh PDF list to show updated status
       document.getElementById('next-to-index').style.display = 'flex';
       markStepDone('chunk');
     }
@@ -551,6 +552,65 @@ async function runChunking() {
 function markStepDone(name) {
   const s = document.querySelector(`.step-item[data-step="${name}"]`);
   if (s) { s.classList.add('done'); s.querySelector('.step-circle').innerHTML = '<i class="fa fa-check"></i>'; }
+}
+
+// ── Load processed PDFs for indexing panel ────────────────────────────────────────────────────────────────────────
+async function loadProcessedPdfList() {
+  try {
+    const res = await fetch('/admin-panel/api/stats/');
+    const data = await res.json();
+    const grid = document.getElementById('index-pdf-selector-grid');
+    const processed = data.processed || [];
+    
+    grid.innerHTML = '';
+    
+    if (!processed.length) {
+      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0">No processed PDFs yet. <button class="btn btn-sm btn-primary" onclick="showPanel(\'chunk\')">Create chunks first →</button></p>';
+      return;
+    }
+    
+    processed.forEach(item => {
+      const isIndexed = item.products > 0; // Assuming indexed if has products in DB
+      const card = document.createElement('div');
+      card.className = 'pdf-select-card' + (isIndexed ? ' chunked-done' : '');
+      card.dataset.pdf = item.name;
+      card.innerHTML = `
+        <i class="fa fa-file-pdf"></i>
+        <div>
+          <div class="pdf-name">${escHtml(item.name)}</div>
+          <div class="pdf-sub">
+            ${item.chunks} chunk${item.chunks !== 1 ? 's' : ''}
+            ${isIndexed ? '<br><i class="fa fa-check-circle" style="color:#22c55e"></i> Already indexed' : ''}
+          </div>
+        </div>
+        ${isIndexed ? '<span class="pdf-done-badge"><i class="fa fa-check"></i></span>' : ''}`;
+      if (!isIndexed) card.addEventListener('click', () => selectPdfForIndex(card, item.name));
+      else card.title = 'Already indexed in vector database';
+      grid.appendChild(card);
+    });
+  } catch(e) {
+    console.error('Failed to load processed PDFs:', e);
+  }
+}
+
+let selectedIndexPdf = null;
+function selectPdfForIndex(card, name) {
+  document.querySelectorAll('#index-pdf-selector-grid .pdf-select-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  selectedIndexPdf = name;
+  document.getElementById('btn-run-index').disabled = false;
+}
+
+// Placeholder indexing function (to be implemented with actual indexing logic)
+async function runIndexing() {
+  if (!selectedIndexPdf) {
+    showToast('Please select a PDF first.', 'error');
+    return;
+  }
+  showToast('V2 indexing requires manual review in Django Admin. See the V2-only indexing note above.', 'info', 5000);
+  // In v2 workflow, users need to:
+  // 1. Review products in Django Admin
+  // 2. Use the document-level index audit/execute APIs
 }
 
 // ── Models & encrypted API keys ──────────────────────────────────────────────
@@ -755,7 +815,69 @@ async function refreshStats() {
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
     document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
     updateWorkflowProgress(data);
+    updateOverviewTable(data);
   } catch(e) {}
+}
+
+function updateOverviewTable(data) {
+  const tbody = document.querySelector('.catalog-table tbody');
+  if (!tbody) return;
+  
+  tbody.innerHTML = '';
+  
+  // Add processed PDFs
+  (data.processed || []).forEach(item => {
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td>
+        <div class="pdf-name-cell">
+          <i class="fa fa-file-pdf"></i>
+          <span class="pname">${escHtml(item.name)}</span>
+        </div>
+      </td>
+      <td><span class="badge badge-blue">${item.chunks}</span></td>
+      <td><span class="badge badge-green">${item.products}</span></td>
+      <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
+      <td>
+        <div class="table-actions">
+          <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
+            <i class="fa fa-layer-group"></i> Chunks
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
+            <i class="fa fa-comments"></i> Test
+          </button>
+          ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')">
+            <i class="fa fa-trash"></i> Delete
+          </button>` : ''}
+        </div>
+      </td>`;
+    tbody.appendChild(row);
+  });
+  
+  // Add unprocessed PDFs (admin only)
+  if (IS_ADMIN) {
+    (data.unprocessed || []).forEach(pdfName => {
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td>
+          <div class="pdf-name-cell">
+            <i class="fa fa-file-pdf"></i>
+            <span class="pname">${escHtml(pdfName)}</span>
+          </div>
+        </td>
+        <td><span class="badge badge-grey">—</span></td>
+        <td><span class="badge badge-grey">—</span></td>
+        <td><span class="badge badge-grey"><i class="fa fa-clock"></i> Not processed</span></td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(pdfName)}')">
+              <i class="fa fa-trash"></i> Delete
+            </button>
+          </div>
+        </td>`;
+      tbody.appendChild(row);
+    });
+  }
 }
 
 function _num(value) {
@@ -1124,6 +1246,7 @@ async function runSingleSplit(idx) {
       statEl.textContent = '✓ Done';
       btnEl.innerHTML = '<i class="fa fa-check"></i>';
       refreshStats();
+      loadPdfList();  // Refresh PDF list to show updated status
     }
   } catch(e) {
     itemEl.className = 'split-part-item errored';
@@ -1223,25 +1346,26 @@ function renderChunks(pdfName, chunks) {
         </div>
       </div>
       <div class="chunk-rendered" id="chunk-rendered-${i}">${mdToHtml(c.content)}</div>
-      <textarea class="chunk-editor" id="chunk-editor-${i}" style="display:none">${escHtml(c.content)}</textarea>
     </div>`).join('');
 }
 
 function editChunk(idx) {
-  document.getElementById(`chunk-rendered-${idx}`).style.display = 'none';
-  document.getElementById(`chunk-editor-${idx}`).style.display = 'block';
+  const rendered = document.getElementById(`chunk-rendered-${idx}`);
+  rendered.contentEditable = 'true';
+  rendered.classList.add('editing');
+  rendered.focus();
   document.getElementById(`chunk-edit-${idx}`).style.display = 'none';
   document.getElementById(`chunk-save-${idx}`).style.display = 'inline-flex';
   document.getElementById(`chunk-cancel-${idx}`).style.display = 'inline-flex';
 }
 
 function cancelEditChunk(idx) {
-  const pane = document.getElementById(`chunk-pane-${idx}`);
   const pdfName = document.getElementById('chunks-drawer-title').textContent;
   const chunk = _chunksCache[pdfName]?.[idx];
-  pane.querySelector(`#chunk-editor-${idx}`).value = chunk?.content || '';
-  document.getElementById(`chunk-rendered-${idx}`).style.display = 'block';
-  document.getElementById(`chunk-editor-${idx}`).style.display = 'none';
+  const rendered = document.getElementById(`chunk-rendered-${idx}`);
+  rendered.contentEditable = 'false';
+  rendered.classList.remove('editing');
+  rendered.innerHTML = mdToHtml(chunk?.content || '');
   document.getElementById(`chunk-edit-${idx}`).style.display = 'inline-flex';
   document.getElementById(`chunk-save-${idx}`).style.display = 'none';
   document.getElementById(`chunk-cancel-${idx}`).style.display = 'none';
@@ -1251,7 +1375,9 @@ async function saveChunk(idx) {
   const pdfName = document.getElementById('chunks-drawer-title').textContent;
   const chunk = _chunksCache[pdfName]?.[idx];
   if (!chunk) return;
-  const content = document.getElementById(`chunk-editor-${idx}`).value;
+  const rendered = document.getElementById(`chunk-rendered-${idx}`);
+  const editedHtml = rendered.innerHTML;
+  const content = htmlToMd(editedHtml);
   const btn = document.getElementById(`chunk-save-${idx}`);
   btn.disabled = true;
   try {
@@ -1263,8 +1389,12 @@ async function saveChunk(idx) {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Save failed.');
     chunk.content = content;
-    document.getElementById(`chunk-rendered-${idx}`).innerHTML = mdToHtml(content);
-    cancelEditChunk(idx);
+    rendered.contentEditable = 'false';
+    rendered.classList.remove('editing');
+    rendered.innerHTML = mdToHtml(content);
+    document.getElementById(`chunk-edit-${idx}`).style.display = 'inline-flex';
+    document.getElementById(`chunk-save-${idx}`).style.display = 'none';
+    document.getElementById(`chunk-cancel-${idx}`).style.display = 'none';
     showToast('Chunk saved. Re-index after review.', 'success');
   } catch (error) {
     showToast(error.message, 'error');
@@ -1318,6 +1448,58 @@ function mdToHtml(md) {
   h = h.replace(/^(?!<[hultHULT]).+$/gm, line => line.trim() ? `<p>${line}</p>` : '');
 
   return h;
+}
+
+// Convert HTML back to markdown for saving
+function htmlToMd(html) {
+  let md = html;
+  
+  // Tables
+  md = md.replace(/<table>.*?<\/table>/gs, match => {
+    const headerMatch = match.match(/<thead>.*?<\/thead>/s);
+    const bodyMatch = match.match(/<tbody>.*?<\/tbody>/s);
+    if (!headerMatch || !bodyMatch) return match;
+    
+    const headers = headerMatch[0].match(/<th>(.*?)<\/th>/g)?.map(h => h.replace(/<\/?th>/g, '').trim()) || [];
+    const rows = bodyMatch[0].match(/<tr>.*?<\/tr>/gs)?.map(row => {
+      const cells = row.match(/<td>(.*?)<\/td>/g)?.map(c => c.replace(/<\/?td>/g, '').trim()) || [];
+      return cells;
+    }) || [];
+    
+    let table = '| ' + headers.join(' | ') + ' |\n';
+    table += '| ' + headers.map(() => '------').join(' | ') + ' |\n';
+    rows.forEach(row => {
+      table += '| ' + row.join(' | ') + ' |\n';
+    });
+    return table;
+  });
+  
+  // Headings
+  md = md.replace(/<h1>(.*?)<\/h1>/g, '# $1\n');
+  md = md.replace(/<h2>(.*?)<\/h2>/g, '## $1\n');
+  md = md.replace(/<h3>(.*?)<\/h3>/g, '### $1\n');
+  
+  // Inline
+  md = md.replace(/<strong>(.*?)<\/strong>/g, '**$1**');
+  md = md.replace(/<code>(.*?)<\/code>/g, '`$1`');
+  md = md.replace(/<hr\s*\/?>/g, '---\n');
+  
+  // Lists
+  md = md.replace(/<ul>(.*?)<\/ul>/gs, match => {
+    return match.replace(/<li>(.*?)<\/li>/g, '- $1\n').replace(/<\/?ul>/g, '');
+  });
+  
+  // Paragraphs
+  md = md.replace(/<p>(.*?)<\/p>/g, '$1\n\n');
+  
+  // Remove remaining HTML tags
+  md = md.replace(/<br\s*\/?>/g, '\n');
+  md = md.replace(/<div[^>]*>/g, '').replace(/<\/div>/g, '\n');
+  
+  // Clean up
+  md = md.replace(/\n{3,}/g, '\n\n').trim();
+  
+  return md;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
