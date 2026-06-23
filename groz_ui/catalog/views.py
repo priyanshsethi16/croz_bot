@@ -17,22 +17,9 @@ from django.views.decorators.http import require_POST
 PROJECT_ROOT = settings.PROJECT_ROOT
 
 
-<<<<<<< HEAD
 def _clean_parsing_instructions(value) -> str:
     """Limit optional admin PDF-specific VLM instructions before subprocess use."""
     return str(value or '').strip()[:4000]
-=======
-def _get_pdf_stem(folder_name: str, pdf_stems: set) -> str:
-    """Map a data folder name back to its source PDF stem."""
-    if folder_name in pdf_stems:
-        return folder_name
-    for stem in sorted(pdf_stems, key=len, reverse=True):
-        # Match: stem_custom_p..., stem_p..., or stem_ (any suffix)
-        if (folder_name.startswith(stem + '_') or
-            folder_name.startswith(stem + 'p')):
-            return stem
-    return folder_name
->>>>>>> origin/priyansh
 
 
 def _get_catalog_stats():
@@ -68,7 +55,6 @@ def _get_catalog_stats():
     processed = list(aggregated.values())
 
     try:
-<<<<<<< HEAD
         from rag_pipeline.providers import indexed_document_count
         indexed = indexed_document_count()
     except Exception:
@@ -94,21 +80,6 @@ def _get_catalog_stats():
         'processed': processed,
         'unprocessed': [p.name for p in pdfs if p.stem not in {d['name'] for d in processed}],
         'indexed': indexed,
-=======
-        import chromadb
-        client = chromadb.PersistentClient(path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db'))
-        col    = client.get_collection('catalog_products')
-        indexed = col.count()
-    except Exception:
-        indexed = 0
-
-    processed_stems = {d['name'] for d in processed}
-    return {
-        'total_pdfs':   len(pdfs),
-        'processed':    processed,
-        'unprocessed':  [p.name for p in pdfs if p.stem not in processed_stems],
-        'indexed':      indexed,
->>>>>>> origin/priyansh
     }
     try:
         from .models import CatalogDocument, DocumentChunk, IngestionJob, ProductFamily
@@ -338,7 +309,6 @@ def admin_chat(request):
         return JsonResponse({'error': 'Empty query.'}, status=400)
 
     try:
-<<<<<<< HEAD
         from .model_config import get_runtime_config
         from .services.query_engine import CatalogQueryEngine
 
@@ -361,24 +331,6 @@ def admin_chat(request):
         payload = execution.as_dict()
         payload['query_path'] = 'v2'
         return JsonResponse(payload)
-=======
-        from dotenv import load_dotenv
-        load_dotenv(PROJECT_ROOT / '.env')
-        from rag_pipeline.retriever import HybridRetriever
-        from rag_pipeline.llm import LLMAnswerer
-
-        retriever = HybridRetriever(top_k=5)
-        llm       = LLMAnswerer(os.getenv('GROQ_API_KEY'))
-        chunks    = retriever.retrieve(query)
-        answer    = llm.answer(query, chunks)
-        sources   = [
-            {'name': c['metadata'].get('product_name', ''),
-             'code': c['metadata'].get('product_code', ''),
-             'score': c['score']}
-            for c in chunks
-        ]
-        return JsonResponse({'answer': answer, 'sources': sources})
->>>>>>> origin/priyansh
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -393,7 +345,6 @@ def admin_ping(request):
 
 @login_required
 def catalog_stats(request):
-<<<<<<< HEAD
     if not request.user.is_staff or not request.session.get('admin_access_token'):
         return JsonResponse({'error': 'Session expired.'}, status=403)
     stats = _get_catalog_stats()
@@ -401,17 +352,6 @@ def catalog_stats(request):
     stats['session_uploaded_pdfs'] = request.session.get('session_uploaded_pdfs', [])
     stats['session_chunks'] = request.session.get('session_chunks_created', 0)
     stats['session_indexed'] = request.session.get('session_indexed', 0)
-=======
-    stats = _get_catalog_stats()
-    # Compute total chunks from data folders (not chroma) for accurate display
-    data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
-    total_chunks = 0
-    if data_dir.exists():
-        for d in data_dir.iterdir():
-            if d.is_dir() and (d / 'chunks').exists():
-                total_chunks += len(list((d / 'chunks').glob('*.md')))
-    stats['total_chunks'] = total_chunks
->>>>>>> origin/priyansh
     return JsonResponse(stats)
 
 
@@ -685,7 +625,6 @@ def delete_pdf(request):
 
     # 4. Remove from Chroma — source_pdf is stored as path variants, match all
     try:
-<<<<<<< HEAD
         from qdrant_client import models
         from rag_pipeline.providers import COLLECTION, build_qdrant_client
         client = build_qdrant_client()
@@ -703,18 +642,6 @@ def delete_pdf(request):
                     )
                 ),
             )
-=======
-        import chromadb
-        client  = chromadb.PersistentClient(path=str(PROJECT_ROOT / 'rag_pipeline' / 'chroma_db'))
-        col     = client.get_collection('catalog_products')
-        all_data = col.get(include=['metadatas'])
-        ids_to_del = [
-            doc_id for doc_id, meta in zip(all_data['ids'], all_data['metadatas'])
-            if stem in str(meta.get('source_pdf', ''))
-        ]
-        if ids_to_del:
-            col.delete(ids=ids_to_del)
->>>>>>> origin/priyansh
     except Exception:
         pass
 

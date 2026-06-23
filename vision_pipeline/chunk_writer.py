@@ -264,7 +264,9 @@ def save_chunk(
     index: int,
     chunks_dir: str,
 ) -> Path:
-    """Mock saving to disk: generate markdown path but do NOT save to file."""
+    """Generate markdown for one product family and save to its own .md file."""
+    Path(chunks_dir).mkdir(parents=True, exist_ok=True)
+
     # Prefer code for filename, fall back to name
     code = str(product.get("product_code") or "").strip()
     name = str(product.get("product_name") or "unknown").strip()
@@ -272,4 +274,6 @@ def save_chunk(
     filename = f"{index:04d}_{_slug(slug_text)}.md"
 
     path = Path(chunks_dir) / filename
+    md = generate_markdown(product)
+    path.write_text(md, encoding="utf-8")
     return path
