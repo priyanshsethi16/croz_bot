@@ -22,6 +22,7 @@ function showPanel(name) {
   if (name === 'chunk') loadPdfList();
   if (name === 'upload') loadExistingUploads();
   if (name === 'models') loadModelConfiguration();
+  if (name === 'index') loadIndexPdfList();
 }
 
 async function loadExistingUploads() {
@@ -40,7 +41,9 @@ async function loadExistingUploads() {
 // Open from ?panel= query param
 (function() {
   const p = new URLSearchParams(location.search).get('panel');
-  if (p && document.getElementById('panel-' + p)) showPanel(p);
+  if (p && document.getElementById('panel-' + p)) {
+    showPanel(p);
+  }
 })();
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -437,7 +440,74 @@ async function loadPdfList() {
   } catch(e) {}
 }
 
+// ── Load PDF list for index panel ────────────────────────────────────────────
+async function loadIndexPdfList() {
+  try {
+    const res  = await fetch('/admin-panel/api/pdfs/');
+    const data = await res.json();
+    const grid = document.getElementById('index-pdf-selector-grid');
+    const chunked = new Set(data.chunked || []);
+    grid.innerHTML = '';
+    
+    // Only show PDFs that have chunks
+    const pdfsWithChunks = (data.pdfs || []).filter(name => {
+      const stem = name.replace(/\.pdf$/i, '');
+      return chunked.has(stem);
+    });
+    
+    if (!pdfsWithChunks.length) {
+      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0">No chunked PDFs available. <button class="btn btn-sm btn-primary" onclick="showPanel(\'chunk\')">Create chunks first →</button></p>';
+      return;
+    }
+    
+    // Check indexing status for each PDF
+    for (const name of pdfsWithChunks) {
+      const card = document.createElement('div');
+      card.className = 'pdf-select-card';
+      card.dataset.pdf = name;
+      card.innerHTML = `
+        <i class="fa fa-file-pdf"></i>
+        <div>
+          <div class="pdf-name">${escHtml(name)}</div>
+          <div class="pdf-sub"><i class="fa fa-spinner fa-spin"></i> Checking status…</div>
+        </div>
+        <span class="pdf-status-badge" id="index-badge-${escHtml(name.replace(/[^a-zA-Z0-9]/g, '_'))}"><i class="fa fa-spinner fa-spin"></i></span>`;
+      card.addEventListener('click', () => selectIndexPdf(card, name));
+      grid.appendChild(card);
+      
+      // Fetch index status
+      fetch(`/admin-panel/api/index-status/?pdf=${encodeURIComponent(name)}`)
+        .then(res => res.json())
+        .then(statusData => {
+          const subEl = card.querySelector('.pdf-sub');
+          const badgeEl = card.querySelector('.pdf-status-badge');
+          
+          if (statusData.indexed > 0 && statusData.indexed === statusData.total_chunks) {
+            subEl.innerHTML = '<i class="fa fa-check-circle" style="color:#22c55e"></i> Fully indexed';
+            badgeEl.innerHTML = '<i class="fa fa-check"></i>';
+            badgeEl.className = 'pdf-status-badge indexed';
+          } else if (statusData.indexed > 0) {
+            subEl.innerHTML = '<i class="fa fa-sync" style="color:#f97316"></i> Partially indexed';
+            badgeEl.textContent = `${statusData.indexed}/${statusData.total_chunks}`;
+            badgeEl.className = 'pdf-status-badge partial';
+          } else {
+            subEl.innerHTML = 'Click to select';
+            badgeEl.innerHTML = '<i class="fa fa-clock"></i>';
+            badgeEl.className = 'pdf-status-badge pending';
+          }
+        })
+        .catch(() => {
+          card.querySelector('.pdf-sub').textContent = 'Click to select';
+        });
+    }
+  } catch(e) {
+    console.error('Failed to load index PDF list:', e);
+  }
+}
+
 let selectedPdf = null;
+let selectedIndexPdf = null;
+
 function getParsingInstructions() {
   return (document.getElementById('chunk-parsing-instructions')?.value
     || document.getElementById('split-parsing-instructions')?.value
@@ -457,6 +527,13 @@ function selectPdf(card, name) {
   card.classList.add('selected');
   selectedPdf = name;
   document.getElementById('btn-run-chunk').disabled = false;
+}
+
+function selectIndexPdf(card, name) {
+  document.querySelectorAll('#index-pdf-selector-grid .pdf-select-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  selectedIndexPdf = name;
+  document.getElementById('btn-run-index').disabled = false;
 }
 
 // ── Create Chunks (Pipeline) ──────────────────────────────────────────────────
@@ -1284,4 +1361,109 @@ function mdToHtml(md) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+
+// ── Indexing Status ───────────────────────────────────────────────────────────
+async function loadIndexingStatus() {
+  const tbody = document.getElementById('index-status-tbody');
+  if (!tbody) return;
+  
+  const rows = tbody.querySelectorAll('tr');
+  
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const pdfName = row.querySelector('.pdf-name-cell span').textContent.trim();
+    const indexedBadge = document.getElementById(`indexed-${i + 1}`);
+    const statusBadge = document.getElementById(`index-status-${i + 1}`);
+    
+    try {
+      // Query Qdrant or database to check indexing status
+      const res = await fetch(`/admin-panel/api/index-status/?pdf=${encodeURIComponent(pdfName)}`);
+      const data = await res.json();
+      
+      if (res.ok && data.indexed !== undefined) {
+        indexedBadge.textContent = data.indexed;
+        indexedBadge.className = `badge ${data.indexed > 0 ? 'badge-green' : 'badge-grey'}`;
+        
+        if (data.indexed > 0 && data.indexed === data.total_chunks) {
+          statusBadge.innerHTML = '<i class="fa fa-check-circle"></i> Fully Indexed';
+          statusBadge.className = 'badge badge-green';
+        } else if (data.indexed > 0) {
+          statusBadge.innerHTML = '<i class="fa fa-sync"></i> Partially Indexed';
+          statusBadge.className = 'badge badge-orange';
+        } else {
+          statusBadge.innerHTML = '<i class="fa fa-times-circle"></i> Not Indexed';
+          statusBadge.className = 'badge badge-grey';
+        }
+      } else {
+        indexedBadge.textContent = '—';
+        indexedBadge.className = 'badge badge-grey';
+        statusBadge.innerHTML = '<i class="fa fa-question-circle"></i> Unknown';
+        statusBadge.className = 'badge badge-grey';
+      }
+    } catch (e) {
+      indexedBadge.textContent = '—';
+      indexedBadge.className = 'badge badge-grey';
+      statusBadge.innerHTML = '<i class="fa fa-exclamation-triangle"></i> Error';
+      statusBadge.className = 'badge badge-grey';
+    }
+  }
+}
+
+
+// ── Run Indexing ──────────────────────────────────────────────────────────────
+async function runIndexing() {
+  if (!selectedIndexPdf) { showToast('Please select a PDF first.', 'error'); return; }
+
+  const btn   = document.getElementById('btn-run-index');
+  const prog  = document.getElementById('index-progress');
+  const fill  = document.getElementById('index-fill');
+  const pct   = document.getElementById('index-pct');
+  const log   = document.getElementById('index-log');
+  const label = document.getElementById('index-progress-label');
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Indexing…';
+  prog.classList.add('visible');
+  log.classList.add('visible');
+  log.textContent = `▶ Starting indexing for: ${selectedIndexPdf}\n`;
+
+  let p = 0;
+  const ticker = setInterval(() => {
+    p = Math.min(p + 2, 88);
+    fill.style.width = p + '%';
+    pct.textContent  = p + '%';
+  }, 600);
+
+  try {
+    const res  = await fetch('/admin-panel/api/index/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: selectedIndexPdf })
+    });
+    const data = await res.json();
+    clearInterval(ticker);
+    fill.style.width = '100%'; pct.textContent = '100%';
+    label.textContent = 'Complete';
+
+    if (data.error) {
+      log.textContent += '\n✗ ERROR:\n' + data.error;
+      showToast('Indexing failed.', 'error');
+    } else {
+      log.textContent += data.output || '\n✓ Indexing completed successfully.';
+      showToast('PDF indexed successfully!', 'success');
+      refreshStats();
+      document.getElementById('next-to-chat').style.display = 'flex';
+      markStepDone('index');
+      loadIndexPdfList();
+    }
+  } catch(e) {
+    clearInterval(ticker);
+    log.textContent += '\n✗ Network error.';
+    showToast('Request failed.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-database"></i> Index &amp; Embed';
+  }
 }

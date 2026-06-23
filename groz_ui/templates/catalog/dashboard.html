@@ -546,9 +546,33 @@
           <span class="badge badge-orange">Step 3 of 3</span>
         </div>
         <div class="panel-body">
-          <div class="index-option-card selected">
-            <h4><i class="fa fa-shield-alt" style="color:var(--orange);margin-right:6px"></i>V2-only indexing</h4>
-            <p>The legacy bulk indexer has been removed. New documents are indexed only after product review and an explicit embedding-cost confirmation.</p>
+          <p style="font-size:13px;color:var(--grey);margin-bottom:16px">
+            Select a PDF with chunks to index it for semantic search. Indexing creates vector embeddings for fast retrieval.
+          </p>
+          <div class="pdf-selector-grid" id="index-pdf-selector-grid">
+            <p style="color:var(--grey);font-size:13px">Loading PDFs…</p>
+          </div>
+          <div class="action-row">
+            <button class="btn btn-primary" id="btn-run-index" onclick="runIndexing()" disabled>
+              <i class="fa fa-database"></i> Index &amp; Embed
+            </button>
+            <span style="font-size:12px;color:var(--grey)">Select a PDF above to enable</span>
+          </div>
+          <div class="progress-wrap" id="index-progress">
+            <div class="progress-header">
+              <span id="index-progress-label">Indexing chunks…</span>
+              <span class="pct" id="index-pct">0%</span>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill" id="index-fill"></div>
+            </div>
+          </div>
+          <div class="log-output" id="index-log"></div>
+          <div class="next-step-bar" id="next-to-chat" style="display:none">
+            <p><i class="fa fa-check-circle"></i> Indexing complete! Now test queries in chat.</p>
+            <button class="btn btn-primary btn-sm" onclick="showPanel('chat')">
+              Next: Test Chat <i class="fa fa-arrow-right"></i>
+            </button>
           </div>
         </div>
       </div>
