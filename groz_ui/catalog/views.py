@@ -466,6 +466,18 @@ def pdf_preview(request):
             return JsonResponse({'error': 'No PDF specified.'}, status=400)
         filename = Path(filename).name
         pdf_path = PROJECT_ROOT / 'input' / filename
+        
+        # Smart fallback for split PDFs requested from the upload file list
+        if not pdf_path.exists():
+            splits_dir = PROJECT_ROOT / 'input' / 'splits'
+            if splits_dir.exists():
+                for stem_dir in splits_dir.iterdir():
+                    if stem_dir.is_dir():
+                        candidate = stem_dir / filename
+                        if candidate.exists():
+                            pdf_path = candidate
+                            break
+                            
     if not pdf_path.exists():
         return JsonResponse({'error': 'PDF not found.'}, status=404)
     try:
