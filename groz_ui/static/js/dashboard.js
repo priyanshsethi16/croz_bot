@@ -106,8 +106,9 @@ async function uploadFile(file) {
     const res  = await fetch(endpoint, { method: 'POST', body: fd });
     const data = await res.json();
     if (res.status === 409 || data.error) {
-      setFileStatus(item, 'error', res.status === 409 ? '✗ Already exists' : '✗ ' + data.error);
+      item.remove();
       showToast(data.error, 'error');
+      return;
     } else {
       setFileStatus(item, 'success', V2_INGEST_ENABLED ? '✓ Queued' : '✓ Uploaded');
       showToast(data.message || 'Uploaded successfully!', 'success');
