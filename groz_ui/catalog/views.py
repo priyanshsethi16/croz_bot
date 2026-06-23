@@ -26,12 +26,41 @@ def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
     data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
     input_dir = PROJECT_ROOT / 'input'
+    splits_dir = PROJECT_ROOT / 'input' / 'splits'
 
     pdfs      = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
     processed = []
+    
+    # Add all split parts from input/splits (even if no chunks yet)
+    if splits_dir.exists():
+        for stem_dir in splits_dir.iterdir():
+            if stem_dir.is_dir():
+                for split_pdf in stem_dir.glob('*.pdf'):
+                    split_name = split_pdf.stem
+                    data_folder = data_dir / split_name if data_dir.exists() else None
+                    chunks = []
+                    products = []
+                    if data_folder and data_folder.exists():
+                        chunks = list((data_folder / 'chunks').glob('*.md')) if (data_folder / 'chunks').exists() else []
+                        prod_json = data_folder / 'products.json'
+                        if prod_json.exists():
+                            try:
+                                products = json.loads(prod_json.read_text())
+                            except Exception:
+                                pass
+                    processed.append({
+                        'name': split_name,
+                        'chunks': len(chunks),
+                        'products': len(products),
+                    })
+    
+    # Add processed parent PDFs and other data folders
     if data_dir.exists():
         for d in sorted(data_dir.iterdir()):
             if d.is_dir():
+                # Skip if already added as split part
+                if any(p['name'] == d.name for p in processed):
+                    continue
                 chunks = list((d / 'chunks').glob('*.md')) if (d / 'chunks').exists() else []
                 prod_json = d / 'products.json'
                 products = []
@@ -71,7 +100,10 @@ def _get_catalog_stats():
     stats = {
         'total_pdfs': len(pdfs),
         'processed': processed,
-        'unprocessed': [p.name for p in pdfs if p.stem not in {d['name'] for d in processed}],
+        'unprocessed': [p.name for p in pdfs if not any(
+            proc['name'] == p.stem or proc['name'].startswith(p.stem + '_') or proc['name'].startswith(p.stem + 'p')
+            for proc in processed
+        )],
         'indexed': indexed,
     }
     try:
