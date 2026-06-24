@@ -295,7 +295,8 @@ async function loadPdfPreview(filename) {
     await new Promise(resolve => setTimeout(resolve, 100));
     
     // Immediately refresh stats to show updated progress
-    await refreshStats();
+    refreshStats();
+    loadPdfList();
     console.log('Stats refreshed after approval');
   } catch(e) {
     console.error('Failed to approve PDF:', e);
@@ -745,23 +746,8 @@ async function runChunking() {
     } else {
       log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
-      
-      // Update the PDF stage to 'chunked' (50%)
-      try {
-        await fetch('/admin-panel/api/update-pdf-stage/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-          body: JSON.stringify({ filename: selectedPdf, stage: 'chunked' })
-        });
-        console.log('Updated PDF stage to chunked');
-      } catch(e) {
-        console.error('Failed to update stage:', e);
-      }
-      
-      // Refresh stats and PDF list to show updated buttons
-      await refreshStats();
-      await loadPdfList();
-      
+      refreshStats();
+      loadPdfList();
       document.getElementById('next-to-index').style.display = 'flex';
       markStepDone('chunk');
     }
