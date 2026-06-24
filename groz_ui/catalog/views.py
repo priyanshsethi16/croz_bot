@@ -54,10 +54,15 @@ def _get_catalog_stats():
         for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
             chunk_count = DocumentChunk.objects.filter(document=doc).count()
             if chunk_count > 0:
+                # Check how many chunks are actually indexed to Qdrant
+                indexed_chunks = DocumentChunk.objects.filter(
+                    document=doc,
+                    index_status=DocumentChunk.IndexStatus.INDEXED
+                ).count()
                 processed.append({
                     'name': doc.original_filename,
                     'chunks': chunk_count,
-                    'products': doc.product_families.count(),
+                    'indexed_chunks': indexed_chunks,
                 })
                 processed_names.add(doc.original_filename)
     except Exception:
@@ -87,7 +92,7 @@ def _get_catalog_stats():
                         processed.append({
                             'name': pdf_filename,
                             'chunks': product_count,
-                            'products': product_count,
+                            'indexed_chunks': 0,  # Filesystem PDFs not indexed yet
                         })
                         processed_names.add(pdf_filename)
             except Exception:
@@ -862,6 +867,46 @@ def save_chunk(request):
         return JsonResponse({'error': 'Chunk database record not found.'}, status=404)
 
     return JsonResponse({'message': f'{chunk_name} saved.', 'filename': chunk_name})
+
+
+@login_required
+@require_POST
+def index_pdf(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+    
+    if not filename:
+        return JsonResponse({'error': 'Missing filename.'}, status=400)
+    
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        from rag_pipeline.providers import index_chunks_to_qdrant
+        
+        # Find the document
+        doc = CatalogDocument.objects.filter(original_filename=filename).order_by('-version').first()
+        if not doc:
+            return JsonResponse({'error': f'Document "{filename}" not found in database.'}, status=404)
+        
+        # Get all chunks for this document
+        chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
+        if not chunks.exists():
+            return JsonResponse({'error': f'No chunks found for "{filename}".'}, status=404)
+        
+        # Index chunks to Qdrant
+        indexed_count = index_chunks_to_qdrant(doc, list(chunks))
+        
+        return JsonResponse({
+            'message': f'Successfully indexed {indexed_count} chunks.',
+            'indexed': indexed_count,
+            'filename': filename
+        })
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
 
 # ── API: Models & encrypted provider keys ─────────────────────────────────────

@@ -28,6 +28,19 @@ def user_logout(request):
     return redirect('/admin-panel/login/')
 
 
+def get_categories(request):
+    """Get unique categories from indexed products."""
+    try:
+        from catalog.models import ProductFamily
+        categories = ProductFamily.objects.filter(
+            document__is_active=True
+        ).values_list('normalized_category', flat=True).distinct().order_by('normalized_category')
+        return JsonResponse({'categories': [c for c in categories if c]})
+    except Exception as e:
+        logger.exception('Failed to load categories')
+        return JsonResponse({'categories': []}, status=500)
+
+
 @require_POST
 def chat_query(request):
     try:

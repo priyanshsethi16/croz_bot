@@ -3,6 +3,47 @@ const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 let welcomed = false;
 
+const categoryIcons = {
+  'Lubrication Equipment': 'oil-can',
+  'Grease Pumps': 'pump-soap',
+  'Grease Guns': 'tools',
+  'Hammers': 'hammer',
+  'Measuring Tools': 'ruler',
+  'LED Lighting': 'lightbulb',
+  'Fluid Handling': 'tint',
+  'Precision Tools': 'drafting-compass',
+  'Hand Tools': 'wrench'
+};
+
+async function loadCategories() {
+  try {
+    const res = await fetch('/api/categories/');
+    const data = await res.json();
+    const container = document.getElementById('dynamic-categories');
+    if (!container) return;
+    
+    (data.categories || []).forEach(cat => {
+      if (!cat) return;
+      const icon = categoryIcons[cat] || 'folder';
+      const link = document.createElement('a');
+      link.className = 'cat-item';
+      link.href = '#';
+      link.innerHTML = `
+        <span><i class="fa fa-${icon} cat-icon"></i>${escapeHtml(cat)}</span>
+        <i class="fa fa-chevron-right"></i>`;
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        askCat(cat, link);
+      });
+      container.appendChild(link);
+    });
+  } catch (e) {
+    console.error('Failed to load categories:', e);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', loadCategories);
+
 inputEl.addEventListener('keydown', e=>{
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}
 });

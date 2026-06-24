@@ -564,35 +564,61 @@ function markStepDone(name) {
 // ── Load processed PDFs for indexing panel ────────────────────────────────────────────────────────────────────────
 async function loadProcessedPdfList() {
   try {
-    const res = await fetch('/admin-panel/api/stats/');
-    const data = await res.json();
-    const grid = document.getElementById('index-pdf-selector-grid');
-    const processed = data.processed || [];
+    const pdfsRes = await fetch('/admin-panel/api/pdfs/');
+    const pdfsData = await pdfsRes.json();
+    const chunked = new Set(pdfsData.chunked || []);
     
+    console.log('[Index] Chunked PDFs:', Array.from(chunked));
+    
+    const grid = document.getElementById('index-pdf-selector-grid');
     grid.innerHTML = '';
     
-    if (!processed.length) {
-      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0">No processed PDFs yet. <button class="btn btn-sm btn-primary" onclick="showPanel(\'chunk\')">Create chunks first →</button></p>';
+    if (!chunked.size) {
+      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0">No chunks found yet. <button class="btn btn-sm btn-primary" onclick="showPanel(\'chunk\')">Create chunks first →</button></p>';
       return;
     }
     
+    const statsRes = await fetch('/admin-panel/api/stats/');
+    const statsData = await statsRes.json();
+    const processed = statsData.processed || [];
+    
+    console.log('[Index] Processed:', processed);
+    
+    const pdfInfo = new Map();
     processed.forEach(item => {
-      const isIndexed = item.products > 0; // Assuming indexed if has products in DB
+      pdfInfo.set(item.name, {
+        chunks: item.chunks || 0,
+        indexed_chunks: item.indexed_chunks || 0
+      });
+    });
+    
+    const readyToIndex = Array.from(chunked).filter(pdfName => {
+      const info = pdfInfo.get(pdfName);
+      console.log(`[Index] ${pdfName}:`, info);
+      return info && info.indexed_chunks === 0;
+    }).sort();
+    
+    console.log('[Index] Ready to index:', readyToIndex);
+    
+    if (!readyToIndex.length) {
+      grid.innerHTML = '<p style="color:var(--grey);font-size:13px;padding:10px 0"><i class="fa fa-check-circle" style="color:#22c55e"></i> All chunked PDFs are already indexed.</p>';
+      return;
+    }
+    
+    readyToIndex.forEach(pdfName => {
+      const info = pdfInfo.get(pdfName) || { chunks: 0 };
       const card = document.createElement('div');
-      card.className = 'pdf-select-card' + (isIndexed ? ' chunked-done' : '');
-      card.dataset.pdf = item.name;
+      card.className = 'pdf-select-card';
+      card.dataset.pdf = pdfName;
       card.innerHTML = `
         <i class="fa fa-file-pdf"></i>
         <div>
-          <div class="pdf-name">${escHtml(item.name)}</div>
+          <div class="pdf-name">${escHtml(pdfName)}</div>
           <div class="pdf-sub">
-            ${item.chunks} chunk${item.chunks !== 1 ? 's' : ''}
-            ${isIndexed ? '<br><i class="fa fa-check-circle" style="color:#22c55e"></i> Already indexed' : ''}
+            ${info.chunks} chunk${info.chunks !== 1 ? 's' : ''} · Ready to index
           </div>
-        </div>
-        ${isIndexed ? '<span class="pdf-done-badge"><i class="fa fa-check"></i></span>' : ''}`;
-      if (!isIndexed) card.addEventListener('click', () => selectPdfForIndex(card, item.name));
-      else card.title = 'Already indexed in vector database';
+        </div>`;
+      card.addEventListener('click', () => selectPdfForIndex(card, pdfName, info.chunks));
       grid.appendChild(card);
     });
   } catch(e) {
@@ -601,23 +627,53 @@ async function loadProcessedPdfList() {
 }
 
 let selectedIndexPdf = null;
-function selectPdfForIndex(card, name) {
+let selectedIndexPdfChunks = 0;
+function selectPdfForIndex(card, name, chunks) {
   document.querySelectorAll('#index-pdf-selector-grid .pdf-select-card').forEach(c => c.classList.remove('selected'));
   card.classList.add('selected');
   selectedIndexPdf = name;
+  selectedIndexPdfChunks = chunks;
   document.getElementById('btn-run-index').disabled = false;
 }
 
-// Placeholder indexing function (to be implemented with actual indexing logic)
+// Indexing function with progress and embedding API
 async function runIndexing() {
   if (!selectedIndexPdf) {
     showToast('Please select a PDF first.', 'error');
     return;
   }
-  showToast('V2 indexing requires manual review in Django Admin. See the V2-only indexing note above.', 'info', 5000);
-  // In v2 workflow, users need to:
-  // 1. Review products in Django Admin
-  // 2. Use the document-level index audit/execute APIs
+  
+  if (!confirm(`This will index ${selectedIndexPdfChunks} chunk${selectedIndexPdfChunks !== 1 ? 's' : ''} for "${selectedIndexPdf}". Continue?`)) {
+    return;
+  }
+  
+  const btn = document.getElementById('btn-run-index');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Indexing…';
+  
+  try {
+    const res = await fetch('/admin-panel/api/index-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: selectedIndexPdf })
+    });
+    const data = await res.json();
+    
+    if (!res.ok || data.error) {
+      showToast(data.error || 'Indexing failed.', 'error');
+    } else {
+      showToast(`Successfully indexed ${data.indexed} chunk${data.indexed !== 1 ? 's' : ''} for "${selectedIndexPdf}"`, 'success');
+      refreshStats();
+      loadProcessedPdfList(); // Refresh list to remove indexed PDF
+      document.getElementById('btn-run-index').disabled = true;
+      markStepDone('index');
+    }
+  } catch(error) {
+    showToast('Indexing failed: ' + error.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-database"></i> Index & Embed';
+  }
 }
 
 // ── Models & encrypted API keys ──────────────────────────────────────────────
@@ -834,6 +890,7 @@ function updateOverviewTable(data) {
   
   // Add processed PDFs
   (data.processed || []).forEach(item => {
+    const isIndexed = item.indexed_chunks > 0;
     const row = document.createElement('tr');
     row.innerHTML = `
       <td>
@@ -843,8 +900,10 @@ function updateOverviewTable(data) {
         </div>
       </td>
       <td><span class="badge badge-blue">${item.chunks}</span></td>
-      <td><span class="badge badge-green">${item.products}</span></td>
-      <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
+      <td><span class="badge ${isIndexed ? 'badge-green' : 'badge-grey'}">${item.indexed_chunks}</span></td>
+      <td><span class="badge ${isIndexed ? 'badge-green' : 'badge-orange'}">
+        <i class="fa fa-${isIndexed ? 'check-circle' : 'clock'}"></i> ${isIndexed ? 'Indexed' : 'Not indexed'}
+      </span></td>
       <td>
         <div class="table-actions">
           <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">

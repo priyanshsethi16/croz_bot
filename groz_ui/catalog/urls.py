@@ -19,6 +19,7 @@ urlpatterns = [
     path('api/split-pdf-custom/', views.split_pdf_custom,   name='split_pdf_custom'),
     path('api/pipeline-split/', views.run_pipeline_split, name='run_pipeline_split'),
     path('api/delete-pdf/',      views.delete_pdf,         name='delete_pdf'),
+    path('api/index-pdf/',       views.index_pdf,          name='index_pdf'),
     path('api/model-config/',      views.get_model_configuration,  name='get_model_configuration'),
     path('api/model-config/save/', views.save_model_configuration, name='save_model_configuration'),
     path('api/v2/upload/', views.upload_pdf_v2, name='upload_pdf_v2'),
