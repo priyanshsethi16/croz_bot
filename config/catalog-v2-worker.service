@@ -4,9 +4,9 @@ After=network.target postgresql.service qdrant.service
 
 [Service]
 Type=simple
-WorkingDirectory=/home/jazlaan/groz/croz_bot
-EnvironmentFile=/home/jazlaan/groz/croz_bot/.env
-ExecStart=/home/jazlaan/groz/croz_bot/.venv/bin/python groz_ui/manage.py catalog_v2_worker
+WorkingDirectory=%h/groz/croz_bot
+EnvironmentFile=%h/groz/croz_bot/.env
+ExecStart=%h/groz/croz_bot/.venv/bin/python groz_ui/manage.py catalog_v2_worker
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
