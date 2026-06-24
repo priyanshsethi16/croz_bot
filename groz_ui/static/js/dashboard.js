@@ -114,6 +114,16 @@ async function uploadFile(file) {
     } else {
       setFileStatus(item, 'success', V2_INGEST_ENABLED ? '✓ Queued' : '✓ Uploaded');
       showToast(data.message || 'Uploaded successfully!', 'success');
+      // Track progress immediately on upload (25%)
+      try {
+        const approveRes = await fetch('/admin-panel/api/approve-pdf/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+          body: JSON.stringify({ filename: file.name })
+        });
+        const approveData = await approveRes.json();
+        if (!approveData.error) setTrackedPdf(file.name, approveData.stage || 'uploaded');
+      } catch(e) {}
       refreshStats();
       if (V2_INGEST_ENABLED && data.job_id) {
         pollV2IngestionJob(item, data.job_id);
@@ -289,15 +299,9 @@ async function loadPdfPreview(filename) {
       body: JSON.stringify({ filename })
     });
     const approveData = await approveRes.json();
-    console.log('PDF approved:', approveData);
-    
-    // Small delay to ensure session is saved
-    await new Promise(resolve => setTimeout(resolve, 100));
-    
-    // Immediately refresh stats to show updated progress
-    refreshStats();
-    loadPdfList();
-    console.log('Stats refreshed after approval');
+    if (!approveData.error) {
+      setTrackedPdf(filename, approveData.stage || 'uploaded');
+    }
   } catch(e) {
     console.error('Failed to approve PDF:', e);
   }
@@ -746,6 +750,7 @@ async function runChunking() {
     } else {
       log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
+      advanceTrackedStage('chunked');
       refreshStats();
       loadPdfList();
       document.getElementById('next-to-index').style.display = 'flex';
@@ -1077,123 +1082,108 @@ function _num(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// ── Per-PDF progress tracking ─────────────────────────────────────────────────
+// stages: uploaded=25%  chunked=50%  indexed=75%  tested=100%
+let _trackedPdf   = null;
+let _trackedStage = null;
+
+const STAGE_CONFIG = {
+  uploaded: { percent: 25,  stepNo: 1, active: 'upload', title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
+  chunked:  { percent: 50,  stepNo: 2, active: 'chunk',  title: 'Chunks created',       sub: 'Product chunks ready. Now index & embed for semantic search.' },
+  indexed:  { percent: 75,  stepNo: 3, active: 'index',  title: 'Indexed & embedded',   sub: 'Chunks are indexed. Test the catalog chat to validate results.' },
+  tested:   { percent: 100, stepNo: 4, active: 'chat',   title: 'Catalog ready!',        sub: 'All steps complete. The catalog is live for product queries.' },
+};
+
+function setTrackedPdf(filename, stage) {
+  _trackedPdf   = filename;
+  _trackedStage = stage;
+  _renderProgress(filename, stage);
+}
+
+function advanceTrackedStage(stage, fallbackPdf) {
+  const pdf = _trackedPdf || fallbackPdf || null;
+  if (!pdf) return;
+  const order = ['uploaded', 'chunked', 'indexed', 'tested'];
+  const cur = _trackedStage ? order.indexOf(_trackedStage) : -1;
+  if (order.indexOf(stage) > cur) {
+    _trackedPdf   = pdf;
+    _trackedStage = stage;
+    _renderProgress(pdf, stage);
+    fetch('/admin-panel/api/update-pdf-stage/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: pdf, stage })
+    }).catch(() => {});
+  }
+}
+
+function _renderProgress(filename, stage) {
+  const cfg = STAGE_CONFIG[stage];
+  if (!cfg) return;
+  document.getElementById('workflow-step-label').textContent   = `Step ${cfg.stepNo} of 4`;
+  document.getElementById('workflow-progress-title').textContent = cfg.title;
+  document.getElementById('workflow-progress-sub').textContent   = cfg.sub;
+  document.getElementById('workflow-progress-percent').textContent = `${cfg.percent}%`;
+  document.getElementById('workflow-progress-fill').style.width   = `${cfg.percent}%`;
+
+  const nameBar = document.getElementById('progress-pdf-name-bar');
+  const nameEl  = document.getElementById('progress-pdf-name');
+  if (filename) { nameEl.textContent = filename; nameBar.style.display = 'flex'; }
+  else          { nameBar.style.display = 'none'; }
+
+  const doneMap = { upload: false, chunk: false, index: false, chat: false };
+  if (stage === 'uploaded') { doneMap.upload = true; }
+  if (stage === 'chunked')  { doneMap.upload = doneMap.chunk = true; }
+  if (stage === 'indexed')  { doneMap.upload = doneMap.chunk = doneMap.index = true; }
+  if (stage === 'tested')   { doneMap.upload = doneMap.chunk = doneMap.index = doneMap.chat = true; }
+
+  document.querySelectorAll('[data-progress-step]').forEach(el => {
+    const key = el.dataset.progressStep;
+    el.classList.toggle('done',   Boolean(doneMap[key]));
+    el.classList.toggle('active', key === cfg.active && !doneMap[key]);
+  });
+}
+
+function _resetProgress() {
+  document.getElementById('workflow-step-label').textContent    = 'Step 0 of 4';
+  document.getElementById('workflow-progress-title').textContent = 'Catalog setup progress';
+  document.getElementById('workflow-progress-sub').textContent   = 'Upload a PDF to start the catalog pipeline.';
+  document.getElementById('workflow-progress-percent').textContent = '0%';
+  document.getElementById('workflow-progress-fill').style.width  = '0%';
+  document.getElementById('progress-pdf-name-bar').style.display = 'none';
+  document.querySelectorAll('[data-progress-step]').forEach(el => el.classList.remove('done','active'));
+}
+
 function updateWorkflowProgress(data = {}) {
-  const root = document.getElementById('workflow-progress');
-  if (!root) return;
-
-  const pdfProgress = data.pdf_progress || {};
-  const approvedPdfs = data.approved_pdfs || [];
-  
-  console.log('Updating workflow progress:', {
-    pdfProgress,
-    approvedPdfs,
-    totalApproved: approvedPdfs.length
-  });
-  
-  // Calculate overall progress based on approved PDFs and their stages
-  let totalProgress = 0;
-  let completedSteps = 0;
-  let currentStage = 'upload';
-  let title = 'Catalog setup progress';
-  let sub = 'Upload a PDF to start the catalog pipeline.';
-  
-  if (approvedPdfs.length === 0) {
-    // No approved PDFs yet - show 0%
-    totalProgress = 0;
-    title = 'Catalog setup progress';
-    sub = 'Upload a PDF to start the catalog pipeline.';
-  } else {
-    // Calculate average progress across all approved PDFs
-    let stageSum = 0;
-    approvedPdfs.forEach(pdf => {
-      const stage = pdfProgress[pdf] || 'uploaded';
-      console.log(`PDF: ${pdf}, Stage: ${stage}`);
-      if (stage === 'uploaded') stageSum += 25;
-      else if (stage === 'chunked') stageSum += 50;
-      else if (stage === 'indexed') stageSum += 75;
-      else if (stage === 'tested') stageSum += 100;
-    });
-    totalProgress = Math.round(stageSum / approvedPdfs.length);
-    
-    console.log('Progress calculation:', {
-      stageSum,
-      approvedCount: approvedPdfs.length,
-      totalProgress
-    });
-    
-    // Determine current active stage based on lowest incomplete stage
-    let hasUploaded = false;
-    let hasChunked = false;
-    let hasIndexed = false;
-    let hasTested = false;
-    
-    approvedPdfs.forEach(pdf => {
-      const stage = pdfProgress[pdf] || 'uploaded';
-      if (stage === 'uploaded') hasUploaded = true;
-      if (stage === 'chunked') hasChunked = true;
-      if (stage === 'indexed') hasIndexed = true;
-      if (stage === 'tested') hasTested = true;
-    });
-    
-    if (hasTested) {
-      currentStage = 'chat';
-      title = 'Catalog search ready';
-      sub = 'All PDFs processed. You can validate answers in Test Chat.';
-    } else if (hasIndexed) {
-      currentStage = 'index';
-      title = 'PDFs indexed';
-      sub = 'Vector embeddings created. Test the chat functionality.';
-    } else if (hasChunked) {
-      currentStage = 'index';
-      title = 'Chunks created';
-      sub = 'Product chunks are ready. Index them for semantic search.';
-    } else if (hasUploaded) {
-      currentStage = 'chunk';
-      title = 'PDF approved';
-      sub = 'Next step: create product chunks from the approved catalog.';
-    }
+  if (data.tracked_pdf && data.tracked_stage) {
+    _trackedPdf   = data.tracked_pdf;
+    _trackedStage = data.tracked_stage;
+    _renderProgress(data.tracked_pdf, data.tracked_stage);
+  } else if (!_trackedPdf) {
+    _resetProgress();
   }
+}
 
-  const allPdfs = _num(data.total_pdfs ?? document.getElementById('stat-pdfs')?.textContent);
-  const allChunks = _num(data.indexed ?? document.getElementById('stat-chunks')?.textContent);
-  const allIndexed = _num(data.indexed ?? document.getElementById('stat-indexed')?.textContent);
-
-  let stepNo = Math.floor(totalProgress / 25);
-  if (stepNo === 0 && totalProgress > 0) stepNo = 1;
-
-  // Build PDF list display
-  let pdfListText = '';
-  if (approvedPdfs.length > 0) {
-    if (approvedPdfs.length === 1) {
-      pdfListText = approvedPdfs[0];
-    } else if (approvedPdfs.length === 2) {
-      pdfListText = `${approvedPdfs[0]}, ${approvedPdfs[1]}`;
-    } else {
-      pdfListText = `${approvedPdfs[0]}, ${approvedPdfs[1]}, +${approvedPdfs.length - 2} more`;
-    }
-  }
-
-  document.getElementById('workflow-step-label').textContent = `Step ${stepNo} of 4`;
-  document.getElementById('workflow-progress-title').textContent = title;
-  document.getElementById('workflow-progress-sub').textContent = pdfListText ? `${pdfListText} · ${sub}` : sub;
-  document.getElementById('workflow-progress-percent').textContent = `${totalProgress}%`;
-  document.getElementById('workflow-progress-fill').style.width = `${totalProgress}%`;
-
-  document.getElementById('progress-upload-count').textContent = `${approvedPdfs.length} approved`;
-  document.getElementById('progress-chunk-count').textContent = `${allChunks} chunk${allChunks === 1 ? '' : 's'}`;
-  document.getElementById('progress-index-count').textContent = `${allIndexed} indexed`;
-
-  const done = {
-    upload: approvedPdfs.length > 0,
-    chunk: totalProgress >= 50,
-    index: totalProgress >= 75,
-    chat: totalProgress >= 100,
-  };
-  document.querySelectorAll('[data-progress-step]').forEach(item => {
-    const key = item.dataset.progressStep;
-    item.classList.toggle('done', Boolean(done[key]));
-    item.classList.toggle('active', key === currentStage && !done[key]);
-  });
+function approvePdfForTracking() {
+  const filename = document.getElementById('preview-pdf-name').textContent.trim();
+  if (!filename) return;
+  const btn = document.getElementById('btn-approve-pdf');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Approving…';
+  fetch('/admin-panel/api/approve-pdf/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ filename })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    setTrackedPdf(filename, data.stage || 'uploaded');
+    showToast(`Tracking progress for "${filename}".`, 'success');
+    btn.innerHTML = '<i class="fa fa-check-circle"></i> Approved';
+  })
+  .catch(() => showToast('Approve failed.', 'error'))
+  .finally(() => { btn.disabled = false; });
 }
 
 // ── Text Splitter ────────────────────────────────────
@@ -2092,15 +2082,11 @@ async function markPdfAsTested() {
     console.log('Update response:', data);
     
     if (res.ok) {
-      // Update button to show success with visible styling
       btn.innerHTML = '<i class="fa fa-check-double"></i> Approved! Testing Complete';
-      btn.classList.remove('btn-success');
-      btn.classList.add('btn-success');
       btn.style.cssText = 'width: 100%; background: #22c55e; color: white; font-weight: 600;';
       btn.disabled = true;
-      
-      showToast(`"${pdfName}" approved! Progress updated to 100%`, 'success');
-      
+      advanceTrackedStage('tested', pdfName);
+      showToast(`"${pdfName}" testing approved! Progress updated to 100%`, 'success');
       // Force refresh stats multiple times to ensure update
       await refreshStats();
       
@@ -2110,7 +2096,7 @@ async function markPdfAsTested() {
       }, 500);
       
       setTimeout(async () => {
-        await refreshStats();
+      refreshStats();
         console.log('Third refresh completed');
       }, 1500);
     } else {

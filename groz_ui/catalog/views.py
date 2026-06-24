@@ -242,52 +242,40 @@ def _ensure_catalog_document(pdf_path):
     from django.db.models import Max
     import hashlib
     from pypdf import PdfReader
-    
+
     checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
     stem = pdf_path.stem
-    
+
     # Try finding by checksum first (most reliable)
     doc = CatalogDocument.objects.filter(checksum_sha256=checksum).first()
     if doc:
         return doc
-        
-    # Try finding by original_filename matching the stem or full name
+
+    # Try finding by original_filename
     doc = CatalogDocument.objects.filter(original_filename=stem).order_by('-version').first()
     if not doc:
         doc = CatalogDocument.objects.filter(original_filename=pdf_path.name).order_by('-version').first()
-        
     if doc:
-        # Update checksum if missing
         if not doc.checksum_sha256:
             doc.checksum_sha256 = checksum
             doc.save(update_fields=['checksum_sha256'])
         return doc
-        
-    # Create new document only if none exists
-    catalog_name = 'Catalog'
-    base_slug = 'catalog'
-    catalog = Catalog.objects.filter(slug=base_slug).first()
+
+    # Use a per-stem catalog slug so each PDF gets its own catalog
+    import re as _re
+    catalog_slug = _re.sub(r'[^a-z0-9\-]', '-', stem.lower())[:80].strip('-') or 'catalog'
+    catalog = Catalog.objects.filter(slug=catalog_slug).first()
     if catalog is None:
-        catalog = Catalog.objects.create(name=catalog_name, slug=base_slug)
-        
+        catalog = Catalog.objects.create(name=stem, slug=catalog_slug)
+
     version = (CatalogDocument.objects.filter(catalog=catalog).aggregate(value=Max('version'))['value'] or 0) + 1
-    
+
     page_count = 0
     try:
         page_count = len(PdfReader(str(pdf_path)).pages)
     except Exception:
         pass
-    
-    # Check one more time if an active document exists for this catalog (to avoid constraint violation)
-    existing_active = CatalogDocument.objects.filter(
-        catalog=catalog,
-        is_active=True
-    ).first()
-    
-    if existing_active:
-        # Instead of creating new, return the existing one
-        return existing_active
-        
+
     doc = CatalogDocument.objects.create(
         catalog=catalog,
         source_type=CatalogDocument.SourceType.CATALOG,
@@ -298,13 +286,13 @@ def _ensure_catalog_document(pdf_path):
         status=CatalogDocument.Status.READY,
         is_active=True
     )
-    
+
     try:
         doc.file.name = str(pdf_path.relative_to(PROJECT_ROOT))
         doc.save(update_fields=['file'])
     except Exception:
         pass
-        
+
     return doc
 
 
@@ -377,13 +365,16 @@ def run_pipeline(request):
             import re as _re
             _stem = pdf_path.stem
             _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_') or 'catalog'
-            _assembled_file = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized / 'assembled_products.json'
-            
-            if _assembled_file.exists():
+            _data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized
+            _assembled_file = _data_dir / 'assembled_products.json'
+            _products_file = _data_dir / 'products.json'
+
+            _ingest_file = _assembled_file if _assembled_file.exists() else (_products_file if _products_file.exists() else None)
+            if _ingest_file:
                 _doc = _ensure_catalog_document(pdf_path)
-                _assembled_data = json.loads(_assembled_file.read_text(encoding='utf-8'))
-                if isinstance(_assembled_data, list):
-                    _ingest_assembled_products_for_document(_doc, _assembled_data)
+                _ingest_data = json.loads(_ingest_file.read_text(encoding='utf-8'))
+                if isinstance(_ingest_data, list):
+                    _ingest_assembled_products_for_document(_doc, _ingest_data)
         except Exception as _ingest_err:
             import logging
             logging.warning(f"Auto-ingestion failed in run_pipeline: {_ingest_err}", exc_info=True)
@@ -585,7 +576,15 @@ def approve_pdf(request):
     except Exception:
         pass
     
-    # Replace (not append) - only track one PDF at a time
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+
+    # Never downgrade — keep the highest stage already recorded
+    existing_progress = request.session.get('pdf_progress', {})
+    existing_stage = existing_progress.get(filename)
+    if existing_stage and STAGE_ORDER.index(existing_stage) >= STAGE_ORDER.index(detected_stage):
+        detected_stage = existing_stage
+
+    # Replace — only track one PDF at a time
     request.session['approved_pdfs'] = [filename]
     request.session['pdf_progress'] = {filename: detected_stage}
     request.session.modified = True
@@ -861,13 +860,16 @@ def run_pipeline_split(request):
             import re as _re
             _stem = pdf_path.stem
             _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_') or 'catalog'
-            _assembled_file = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized / 'assembled_products.json'
-            
-            if _assembled_file.exists():
+            _data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized
+            _assembled_file = _data_dir / 'assembled_products.json'
+            _products_file = _data_dir / 'products.json'
+
+            _ingest_file = _assembled_file if _assembled_file.exists() else (_products_file if _products_file.exists() else None)
+            if _ingest_file:
                 _doc = _ensure_catalog_document(pdf_path)
-                _assembled_data = json.loads(_assembled_file.read_text(encoding='utf-8'))
-                if isinstance(_assembled_data, list):
-                    _ingest_assembled_products_for_document(_doc, _assembled_data)
+                _ingest_data = json.loads(_ingest_file.read_text(encoding='utf-8'))
+                if isinstance(_ingest_data, list):
+                    _ingest_assembled_products_for_document(_doc, _ingest_data)
         except Exception as _ingest_err:
             import logging
             logging.warning(f"Auto-ingestion failed in run_pipeline_split: {_ingest_err}", exc_info=True)
@@ -1095,31 +1097,31 @@ def list_chunks(request):
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
 
+    import re
     chunks = []
     from .models import CatalogDocument, DocumentChunk
-    
+
     pdf_stem = Path(pdf_name).stem
-    # Find document by stem, prefer latest version (don't require is_active)
-    doc = CatalogDocument.objects.filter(
-        original_filename=pdf_stem
-    ).order_by('-version').first()
+    doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
     if not doc:
-        # Try with full filename
-        doc = CatalogDocument.objects.filter(
-            original_filename=pdf_name
-        ).order_by('-version').first()
+        doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+
+    # For split PDFs (e.g. Parent_custom_p0001-0004), fall back to parent doc
+    if not doc:
+        parent_stem = re.sub(r'_(custom_)?p\d{4}-\d{4}$', '', pdf_stem)
+        if parent_stem != pdf_stem:
+            doc = CatalogDocument.objects.filter(original_filename=parent_stem).order_by('-version').first()
 
     document_id = str(doc.id) if doc else None
     if doc:
         db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
         for c in db_chunks:
             filename = f"chunk_{c.ordinal:04d}.md"
-            prod_name = "General Info"
+            prod_name = 'General Info'
             if c.family:
                 prod_name = c.family.product_name
             elif c.variant and c.variant.family:
                 prod_name = c.variant.family.product_name
-                
             chunks.append({
                 'filename': filename,
                 'content': c.text,
