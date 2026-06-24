@@ -58,6 +58,76 @@ function showPanel(name) {
   if (name === 'index') loadIndexPanel();
 }
 
+async function loadSplitPartPreviewByName(partFilename, parentStem) {
+  const section = document.getElementById('pdf-preview-section');
+  const strip   = document.getElementById('pdf-thumb-strip');
+  const viewer  = document.getElementById('pdf-page-viewer');
+  const countEl = document.getElementById('preview-page-count');
+  const subEl   = document.getElementById('preview-sub');
+
+  section.style.display = 'block';
+  strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
+  viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Select a page to preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
+
+  // Keep parent name in heading
+  document.getElementById('preview-pdf-name').textContent = parentStem;
+
+  try {
+    const res  = await fetch('/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(partFilename));
+    const data = await res.json();
+    if (data.error) { strip.innerHTML = `<div class="pdf-preview-loading">${data.error}</div>`; return; }
+    countEl.textContent = data.total + ' pages';
+    subEl.textContent   = partFilename;
+    strip.innerHTML = data.pages.map((p, i) => `
+      <div class="pdf-thumb-item${i===0?' active':''}" onclick="selectPreviewPage(${i})" id="thumb-${i}">
+        <img src="${p.thumb}" alt="Page ${p.num}" loading="lazy"/>
+        <span class="thumb-num">${p.num}</span>
+      </div>`).join('');
+    window._previewPages = data.pages;
+    if (data.pages.length) renderContinuousPreview(data.pages);
+  } catch(e) {
+    strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Failed to load preview.</div>';
+  }
+}
+
+async function previewParentGroup(parentStem, parts) {
+  selectedPdf = parts[0];
+  _splitStem  = parentStem;
+
+  // Build splits array by fetching page counts for each part
+  const splits = [];
+  for (const partName of parts) {
+    try {
+      const res  = await fetch(`/admin-panel/api/pdf-pages/?pdf=${encodeURIComponent(partName)}`);
+      const data = await res.json();
+      const m = partName.match(/_(custom_)?p(\d+)-(\d+)\.pdf$/i);
+      const pages = m ? `${parseInt(m[2])}–${parseInt(m[3])}` : '?';
+      splits.push({ filename: partName, pages, page_count: data.pages || 0 });
+    } catch(e) {
+      splits.push({ filename: partName, pages: '?', page_count: 0 });
+    }
+  }
+  _splitParts = splits;
+
+  // Show the preview section with parent name as heading
+  const section = document.getElementById('pdf-preview-section');
+  section.style.display = 'block';
+  document.getElementById('preview-pdf-name').textContent = parentStem;
+  document.getElementById('preview-page-count').textContent = `${parts.length} split parts`;
+  document.getElementById('preview-sub').textContent = 'Click a split part \u25b6 to preview its pages';
+
+  // Show splitter section with parts list (skip showSplitterForPdf which resets _splitParts)
+  const splitterSection = document.getElementById('splitter-section');
+  splitterSection.style.display = 'block';
+  splitterSection.classList.remove('collapsed');
+  document.getElementById('splitter-body').style.display = 'block';
+  document.getElementById('splitter-pdf-name').textContent = parentStem;
+  document.getElementById('splitter-pages-badge').textContent = `${parts.length} parts`;
+  document.getElementById('splitter-info-bar').style.display = 'flex';
+
+  renderSplitParts(splits);
+}
+
 async function loadExistingUploads() {
   const list = document.getElementById('upload-file-list');
   if (!list) return;
@@ -65,8 +135,79 @@ async function loadExistingUploads() {
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
-    (data.pdfs || []).forEach(name => {
-      addFileItem(name, '', 'success', '✓ Uploaded');
+    const pdfs = data.pdfs || [];
+
+    // Separate plain PDFs from split parts
+    const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+    const groups  = {};  // parentStem -> [splitName, ...]
+    const plain   = [];
+
+    pdfs.forEach(name => {
+      if (splitRe.test(name)) {
+        const parentStem = name.replace(splitRe, '');
+        (groups[parentStem] = groups[parentStem] || []).push(name);
+      } else {
+        plain.push(name);
+      }
+    });
+
+    // Render plain PDFs
+    plain.forEach(name => addFileItem(name, '', 'success', '\u2713 Uploaded'));
+
+    // Render grouped splits
+    Object.entries(groups).forEach(([parentStem, parts]) => {
+      const group = document.createElement('div');
+      group.className = 'file-group';
+
+      // Parent row — same structure as .file-item
+      const header = document.createElement('div');
+      header.className = 'file-item';
+      header.innerHTML = `
+        <div class="file-item-icon"><i class="fa fa-file-pdf"></i></div>
+        <div class="file-item-info">
+          <div class="fname">${escHtml(parentStem)}</div>
+          <div class="fsize">${parts.length} split part${parts.length !== 1 ? 's' : ''}</div>
+        </div>
+        <span class="fstatus success">✓ Uploaded</span>
+        <button class="btn btn-sm btn-secondary file-preview-btn" onclick="previewParentGroup('${escHtml(parentStem)}', ${JSON.stringify(parts).replace(/"/g, '&quot;')})" title="Preview pages">
+          <i class="fa fa-eye"></i> Preview
+        </button>
+        <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(parentStem + '.pdf')}', this)" title="Delete PDF">
+          <i class="fa fa-trash"></i> Delete
+        </button>
+        <button class="btn btn-sm btn-secondary file-group-toggle" title="Show split parts">
+          <i class="fa fa-chevron-right"></i>
+        </button>`;
+      header.querySelector('.file-group-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = children.style.display === 'none';
+        children.style.display = isOpen ? 'flex' : 'none';
+        children.style.flexDirection = 'column';
+        e.currentTarget.querySelector('i').className = `fa fa-chevron-${isOpen ? 'down' : 'right'}`;
+      });
+
+      const children = document.createElement('div');
+      children.className = 'file-group-children';
+      children.style.display = 'none';
+      parts.forEach(partName => {
+        const child = document.createElement('div');
+        child.className = 'file-item';
+        child.innerHTML = `
+          <div class="file-item-icon"><i class="fa fa-file-pdf"></i></div>
+          <div class="file-item-info"><div class="fname">${escHtml(partName)}</div></div>
+          <span class="fstatus success">✓ Uploaded</span>
+          <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(partName)}')" title="Preview pages">
+            <i class="fa fa-eye"></i> Preview
+          </button>
+          <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(partName)}', this)" title="Delete PDF">
+            <i class="fa fa-trash"></i> Delete
+          </button>`;
+        children.appendChild(child);
+      });
+
+      group.appendChild(header);
+      group.appendChild(children);
+      list.appendChild(group);
     });
   } catch(e) {}
 }
@@ -343,7 +484,7 @@ async function loadSplitPartPreview(idx) {
   const subEl   = document.getElementById('preview-sub');
 
   section.style.display = 'block';
-  nameEl.textContent    = part.filename;
+  nameEl.textContent    = _splitStem || part.filename;
   countEl.textContent   = `${part.page_count} page${part.page_count !== 1 ? 's' : ''}`;
   subEl.textContent     = `Split part · original pages ${part.pages}`;
   strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering split part…</div>';
@@ -719,8 +860,6 @@ async function runChunking() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
   }
-  prog.classList.add('visible');
-  log.classList.add('visible');
   log.textContent = `▶ Starting chunk extraction for: ${selectedPdf}\n`;
 
   let p = 0;
@@ -745,10 +884,8 @@ async function runChunking() {
     label.textContent = 'Complete';
 
     if (data.error) {
-      log.textContent += '\n✗ ERROR:\n' + data.error;
       showToast(`Chunking failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
     } else {
-      log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
       advanceTrackedStage('chunked');
       refreshStats();
@@ -756,10 +893,16 @@ async function runChunking() {
       document.getElementById('next-to-index').style.display = 'flex';
       markStepDone('chunk');
     }
+    prog.classList.remove('visible');
+    log.classList.remove('visible');
+    fill.style.width = '0%';
+    pct.textContent = '0%';
+    label.textContent = 'Extracting products…';
   } catch(e) {
     clearInterval(ticker);
-    log.textContent += '\n✗ Network error.';
     showToast('Request failed.', 'error');
+    prog.classList.remove('visible');
+    log.classList.remove('visible');
   } finally {
     if (btn) {
       btn.disabled = false;

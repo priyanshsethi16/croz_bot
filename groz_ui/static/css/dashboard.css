@@ -280,6 +280,12 @@
 .fstatus.error   { color: var(--orange); }
 .fstatus.pending { color: var(--grey); }
 
+/* ── Grouped split file items ── */
+.file-group { display: flex; flex-direction: column; width: 100%; gap: 6px; }
+.file-group-children { display: none; flex-direction: column; gap: 6px; padding: 6px 0 0 20px; margin-top: 0; width: 100%; }
+.file-group-children .file-item { width: 100%; box-sizing: border-box; }
+.file-group.open .file-group-children { display: flex; }
+
 /* ── Next step CTA ── */
 .next-step-bar {
   display: flex; align-items: center; justify-content: space-between;
