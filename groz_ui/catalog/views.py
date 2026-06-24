@@ -159,10 +159,9 @@ def admin_login(request):
         if user and user.is_active and user.is_staff:
             login(request, user)
             request.session['admin_access_token'] = secrets.token_hex(32)
-            # Reset per-session workflow progress on every fresh login
-            request.session['session_uploaded_pdfs'] = []
-            request.session['session_chunks_created'] = 0
-            request.session['session_indexed'] = 0
+            # Reset progress tracking on login to start fresh
+            request.session['pdf_progress'] = {}
+            request.session['approved_pdfs'] = []
             request.session.modified = True
             panel = request.GET.get('next_panel', '')
             url = '/admin-panel/' + (f'?panel={panel}' if panel else '')
@@ -218,13 +217,7 @@ def upload_pdf(request):
         for chunk in pdf.chunks():
             f.write(chunk)
 
-    # Track per-session uploads
-    uploaded = request.session.get('session_uploaded_pdfs', [])
-    if pdf.name not in uploaded:
-        uploaded.append(pdf.name)
-    request.session['session_uploaded_pdfs'] = uploaded
-    request.session.modified = True
-
+    # Don't auto-track uploaded PDFs - only track when user approves after preview
     return JsonResponse({'message': f'"{pdf.name}" uploaded successfully.', 'filename': pdf.name})
 
 
@@ -253,7 +246,7 @@ def _ensure_catalog_document(pdf_path):
     checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
     stem = pdf_path.stem
     
-    # Try finding by checksum
+    # Try finding by checksum first (most reliable)
     doc = CatalogDocument.objects.filter(checksum_sha256=checksum).first()
     if doc:
         return doc
@@ -264,11 +257,13 @@ def _ensure_catalog_document(pdf_path):
         doc = CatalogDocument.objects.filter(original_filename=pdf_path.name).order_by('-version').first()
         
     if doc:
-        doc.checksum_sha256 = checksum
-        doc.save(update_fields=['checksum_sha256'])
+        # Update checksum if missing
+        if not doc.checksum_sha256:
+            doc.checksum_sha256 = checksum
+            doc.save(update_fields=['checksum_sha256'])
         return doc
         
-    # Create new document
+    # Create new document only if none exists
     catalog_name = 'Catalog'
     base_slug = 'catalog'
     catalog = Catalog.objects.filter(slug=base_slug).first()
@@ -282,6 +277,16 @@ def _ensure_catalog_document(pdf_path):
         page_count = len(PdfReader(str(pdf_path)).pages)
     except Exception:
         pass
+    
+    # Check one more time if an active document exists for this catalog (to avoid constraint violation)
+    existing_active = CatalogDocument.objects.filter(
+        catalog=catalog,
+        is_active=True
+    ).first()
+    
+    if existing_active:
+        # Instead of creating new, return the existing one
+        return existing_active
         
     doc = CatalogDocument.objects.create(
         catalog=catalog,
@@ -359,15 +364,13 @@ def run_pipeline(request):
         if result.returncode != 0:
             return JsonResponse({'error': output[-2000:]}, status=500)
 
-        # Track per-session chunks created
-        try:
-            import re as _re
-            match = _re.search(r'Products found\s*:\s*(\d+)', output)
-            if match:
-                request.session['session_chunks_created'] = int(match.group(1))
-                request.session.modified = True
-        except Exception:
-            pass
+        # Update progress for this specific PDF to 'chunked' (50%)
+        pdf_progress = request.session.get('pdf_progress', {})
+        approved_pdfs = request.session.get('approved_pdfs', [])
+        if filename in approved_pdfs:
+            pdf_progress[filename] = 'chunked'
+            request.session['pdf_progress'] = pdf_progress
+            request.session.modified = True
 
         # Auto-ingest into the database
         try:
@@ -535,6 +538,88 @@ def list_pdfs(request):
     })
 
 
+# ── API: Approve PDF after preview ───────────────────────────────────────────
+
+@login_required
+@require_POST
+def approve_pdf(request):
+    """Mark a PDF as approved after preview - detect and set its actual progress stage."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request.'}, status=400)
+    
+    if not filename:
+        return JsonResponse({'error': 'Missing filename.'}, status=400)
+    
+    # Auto-detect the actual stage based on what's been completed
+    from .models import CatalogDocument, DocumentChunk
+    from pathlib import Path
+    
+    detected_stage = 'uploaded'
+    pdf_stem = Path(filename).stem
+    
+    try:
+        # Try to find the document in database
+        doc = CatalogDocument.objects.filter(
+            original_filename__in=[pdf_stem, filename]
+        ).order_by('-version').first()
+        
+        if doc:
+            chunks_count = DocumentChunk.objects.filter(document=doc).count()
+            indexed_count = DocumentChunk.objects.filter(
+                document=doc,
+                index_status=DocumentChunk.IndexStatus.INDEXED
+            ).count()
+            
+            # Determine stage based on actual status
+            if indexed_count > 0:
+                detected_stage = 'indexed'  # 75% - has indexed chunks
+            elif chunks_count > 0:
+                detected_stage = 'chunked'  # 50% - has chunks but not indexed
+            else:
+                detected_stage = 'uploaded'  # 25% - uploaded but no chunks yet
+    except Exception:
+        pass
+    
+    # Replace (not append) - only track one PDF at a time
+    request.session['approved_pdfs'] = [filename]
+    request.session['pdf_progress'] = {filename: detected_stage}
+    request.session.modified = True
+    
+    return JsonResponse({
+        'message': f'"{filename}" approved and ready for processing.',
+        'stage': detected_stage
+    })
+
+
+@login_required
+@require_POST
+def update_pdf_stage(request):
+    """Update a PDF's progress stage: uploaded (25%), chunked (50%), indexed (75%), tested (100%)."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+        stage = body.get('stage', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request.'}, status=400)
+    
+    if not filename or stage not in ['uploaded', 'chunked', 'indexed', 'tested']:
+        return JsonResponse({'error': 'Invalid filename or stage.'}, status=400)
+    
+    pdf_progress = request.session.get('pdf_progress', {})
+    pdf_progress[filename] = stage
+    request.session['pdf_progress'] = pdf_progress
+    request.session.modified = True
+    
+    return JsonResponse({'message': f'"{filename}" stage updated to {stage}.', 'stage': stage})
+
+
 # ── API: PDF Preview (page thumbnails) ───────────────────────────────────
 
 @login_required
@@ -629,10 +714,26 @@ def catalog_stats(request):
     if not request.user.is_staff or not request.session.get('admin_access_token'):
         return JsonResponse({'error': 'Session expired.'}, status=403)
     stats = _get_catalog_stats()
-    # Override progress with per-session counters
-    stats['session_uploaded_pdfs'] = request.session.get('session_uploaded_pdfs', [])
-    stats['session_chunks'] = request.session.get('session_chunks_created', 0)
-    stats['session_indexed'] = request.session.get('session_indexed', 0)
+    
+    # Return per-PDF progress tracking
+    pdf_progress = request.session.get('pdf_progress', {})
+    approved_pdfs = request.session.get('approved_pdfs', [])
+    
+    # Auto-detect and restore progress for ALL PDFs with chunks/embeddings
+    from .models import CatalogDocument, DocumentChunk
+    from pathlib import Path as PathLib
+    updated = False
+    
+    # Don't auto-detect - only show progress for the currently approved PDF
+    # This ensures the progress bar only shows the previewed PDF's progress
+    
+    if updated:
+        request.session['pdf_progress'] = pdf_progress
+        request.session['approved_pdfs'] = approved_pdfs
+        request.session.modified = True
+    
+    stats['pdf_progress'] = pdf_progress
+    stats['approved_pdfs'] = approved_pdfs
     return JsonResponse(stats)
 
 
@@ -998,13 +1099,14 @@ def list_chunks(request):
     from .models import CatalogDocument, DocumentChunk
     
     pdf_stem = Path(pdf_name).stem
+    # Find document by stem, prefer latest version (don't require is_active)
     doc = CatalogDocument.objects.filter(
-        original_filename=pdf_stem,
-        is_active=True
+        original_filename=pdf_stem
     ).order_by('-version').first()
     if not doc:
+        # Try with full filename
         doc = CatalogDocument.objects.filter(
-            original_filename=pdf_stem
+            original_filename=pdf_name
         ).order_by('-version').first()
 
     document_id = str(doc.id) if doc else None
@@ -1284,6 +1386,17 @@ def execute_index_v2(request, document_id):
     try:
         document = CatalogDocument.objects.get(pk=document_id)
         result = index_document(document, confirmed_embedding_count=confirmed, allow_disabled=True)
+        
+        # Update progress to 'indexed' (75%) after successful indexing
+        pdf_progress = request.session.get('pdf_progress', {})
+        approved_pdfs = request.session.get('approved_pdfs', [])
+        # Update progress for any matching filename (stem or full name)
+        for pdf_name in approved_pdfs:
+            if Path(pdf_name).stem == document.original_filename or pdf_name == document.original_filename:
+                pdf_progress[pdf_name] = 'indexed'
+        request.session['pdf_progress'] = pdf_progress
+        request.session.modified = True
+        
         return JsonResponse(result)
     except CatalogDocument.DoesNotExist:
         return JsonResponse({'error': 'Catalog document not found.'}, status=404)
