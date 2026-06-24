@@ -159,9 +159,6 @@ def admin_login(request):
         if user and user.is_active and user.is_staff:
             login(request, user)
             request.session['admin_access_token'] = secrets.token_hex(32)
-            # Reset progress tracking on login to start fresh
-            request.session['pdf_progress'] = {}
-            request.session['approved_pdfs'] = []
             request.session.modified = True
             panel = request.GET.get('next_panel', '')
             url = '/admin-panel/' + (f'?panel={panel}' if panel else '')
@@ -578,11 +575,21 @@ def approve_pdf(request):
     
     STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
 
-    # Never downgrade — keep the highest stage already recorded
-    existing_progress = request.session.get('pdf_progress', {})
-    existing_stage = existing_progress.get(filename)
-    if existing_stage and STAGE_ORDER.index(existing_stage) >= STAGE_ORDER.index(detected_stage):
-        detected_stage = existing_stage
+    # Load persisted stage from DB (survives logout/login)
+    from .models import ApiKey
+    import json as _j
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+    except Exception:
+        _stage_map = {}
+    db_stage = _stage_map.get(filename)
+    if db_stage not in STAGE_ORDER:
+        db_stage = None
+
+    # Never downgrade — keep highest stage from DB, session, or detected
+    existing_session_stage = request.session.get('pdf_progress', {}).get(filename)
+    candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
+    detected_stage = max(candidate_stages, key=lambda s: STAGE_ORDER.index(s))
 
     # Replace — only track one PDF at a time
     request.session['approved_pdfs'] = [filename]
@@ -610,12 +617,36 @@ def update_pdf_stage(request):
     
     if not filename or stage not in ['uploaded', 'chunked', 'indexed', 'tested']:
         return JsonResponse({'error': 'Invalid filename or stage.'}, status=400)
-    
+
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+
+    # Persist to DB (ApiKey table) so stage survives logout/login
+    from .models import ApiKey
+    import json as _j
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+    except Exception:
+        _stage_map = {}
+    current_db_stage = _stage_map.get(filename, 'uploaded')
+    if current_db_stage not in STAGE_ORDER:
+        current_db_stage = 'uploaded'
+
+    # Never downgrade
+    if STAGE_ORDER.index(stage) < STAGE_ORDER.index(current_db_stage):
+        stage = current_db_stage
+
+    _stage_map[filename] = stage
+    ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+
     pdf_progress = request.session.get('pdf_progress', {})
     pdf_progress[filename] = stage
     request.session['pdf_progress'] = pdf_progress
+    approved_pdfs = request.session.get('approved_pdfs', [])
+    if filename not in approved_pdfs:
+        approved_pdfs = [filename]
+    request.session['approved_pdfs'] = approved_pdfs
     request.session.modified = True
-    
+
     return JsonResponse({'message': f'"{filename}" stage updated to {stage}.', 'stage': stage})
 
 
@@ -713,24 +744,31 @@ def catalog_stats(request):
     if not request.user.is_staff or not request.session.get('admin_access_token'):
         return JsonResponse({'error': 'Session expired.'}, status=403)
     stats = _get_catalog_stats()
-    
-    # Return per-PDF progress tracking
+
     pdf_progress = request.session.get('pdf_progress', {})
     approved_pdfs = request.session.get('approved_pdfs', [])
-    
-    # Auto-detect and restore progress for ALL PDFs with chunks/embeddings
-    from .models import CatalogDocument, DocumentChunk
-    from pathlib import Path as PathLib
-    updated = False
-    
-    # Don't auto-detect - only show progress for the currently approved PDF
-    # This ensures the progress bar only shows the previewed PDF's progress
-    
-    if updated:
-        request.session['pdf_progress'] = pdf_progress
-        request.session['approved_pdfs'] = approved_pdfs
-        request.session.modified = True
-    
+
+    # Restore from DB for any tracked PDF whose session state is missing/outdated
+    from .models import ApiKey
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    try:
+        import json as _j
+        db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+    except Exception:
+        db_map = {}
+    for fname, db_stage in db_map.items():
+        if db_stage not in STAGE_ORDER:
+            continue
+        session_stage = pdf_progress.get(fname)
+        if not session_stage or STAGE_ORDER.index(db_stage) > STAGE_ORDER.index(session_stage):
+            pdf_progress[fname] = db_stage
+            if fname not in approved_pdfs:
+                approved_pdfs = [fname]
+
+    request.session['pdf_progress'] = pdf_progress
+    request.session['approved_pdfs'] = approved_pdfs
+    request.session.modified = True
+
     stats['pdf_progress'] = pdf_progress
     stats['approved_pdfs'] = approved_pdfs
     return JsonResponse(stats)
