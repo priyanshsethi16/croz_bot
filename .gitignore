@@ -73,4 +73,4 @@ backups/
 !CATALOG_RAG_IMPLEMENTATION_PLAN.md
 .playwright-cli
 tests/
-.png
+.png   
