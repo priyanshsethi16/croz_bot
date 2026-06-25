@@ -159,10 +159,6 @@ def admin_login(request):
         if user and user.is_active and user.is_staff:
             login(request, user)
             request.session['admin_access_token'] = secrets.token_hex(32)
-            # Reset per-session workflow progress on every fresh login
-            request.session['session_uploaded_pdfs'] = []
-            request.session['session_chunks_created'] = 0
-            request.session['session_indexed'] = 0
             request.session.modified = True
             panel = request.GET.get('next_panel', '')
             url = '/admin-panel/' + (f'?panel={panel}' if panel else '')
@@ -218,13 +214,7 @@ def upload_pdf(request):
         for chunk in pdf.chunks():
             f.write(chunk)
 
-    # Track per-session uploads
-    uploaded = request.session.get('session_uploaded_pdfs', [])
-    if pdf.name not in uploaded:
-        uploaded.append(pdf.name)
-    request.session['session_uploaded_pdfs'] = uploaded
-    request.session.modified = True
-
+    # Don't auto-track uploaded PDFs - only track when user approves after preview
     return JsonResponse({'message': f'"{pdf.name}" uploaded successfully.', 'filename': pdf.name})
 
 
@@ -249,40 +239,40 @@ def _ensure_catalog_document(pdf_path):
     from django.db.models import Max
     import hashlib
     from pypdf import PdfReader
-    
+
     checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
     stem = pdf_path.stem
-    
-    # Try finding by checksum
+
+    # Try finding by checksum first (most reliable)
     doc = CatalogDocument.objects.filter(checksum_sha256=checksum).first()
     if doc:
         return doc
-        
-    # Try finding by original_filename matching the stem or full name
+
+    # Try finding by original_filename
     doc = CatalogDocument.objects.filter(original_filename=stem).order_by('-version').first()
     if not doc:
         doc = CatalogDocument.objects.filter(original_filename=pdf_path.name).order_by('-version').first()
-        
     if doc:
-        doc.checksum_sha256 = checksum
-        doc.save(update_fields=['checksum_sha256'])
+        if not doc.checksum_sha256:
+            doc.checksum_sha256 = checksum
+            doc.save(update_fields=['checksum_sha256'])
         return doc
-        
-    # Create new document
-    catalog_name = 'Catalog'
-    base_slug = 'catalog'
-    catalog = Catalog.objects.filter(slug=base_slug).first()
+
+    # Use a per-stem catalog slug so each PDF gets its own catalog
+    import re as _re
+    catalog_slug = _re.sub(r'[^a-z0-9\-]', '-', stem.lower())[:80].strip('-') or 'catalog'
+    catalog = Catalog.objects.filter(slug=catalog_slug).first()
     if catalog is None:
-        catalog = Catalog.objects.create(name=catalog_name, slug=base_slug)
-        
+        catalog = Catalog.objects.create(name=stem, slug=catalog_slug)
+
     version = (CatalogDocument.objects.filter(catalog=catalog).aggregate(value=Max('version'))['value'] or 0) + 1
-    
+
     page_count = 0
     try:
         page_count = len(PdfReader(str(pdf_path)).pages)
     except Exception:
         pass
-        
+
     doc = CatalogDocument.objects.create(
         catalog=catalog,
         source_type=CatalogDocument.SourceType.CATALOG,
@@ -293,19 +283,46 @@ def _ensure_catalog_document(pdf_path):
         status=CatalogDocument.Status.READY,
         is_active=True
     )
-    
+
     try:
         doc.file.name = str(pdf_path.relative_to(PROJECT_ROOT))
         doc.save(update_fields=['file'])
     except Exception:
         pass
-        
+
     return doc
 
 
 def _ingest_assembled_products_for_document(doc, assembled):
     from django.db import transaction
-    
+    import re as _re
+
+    # Delete stale Qdrant vectors for this document before replacing chunks
+    try:
+        from qdrant_client import models as _qmodels
+        from rag_pipeline.providers import COLLECTION, build_qdrant_client
+        _client = build_qdrant_client()
+        if _client.collection_exists(COLLECTION):
+            _stem = doc.original_filename
+            _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_')
+            for _src in [_stem, _sanitized]:
+                try:
+                    _client.delete(
+                        collection_name=COLLECTION,
+                        points_selector=_qmodels.FilterSelector(
+                            filter=_qmodels.Filter(
+                                must=[_qmodels.FieldCondition(
+                                    key='metadata.source_pdf',
+                                    match=_qmodels.MatchValue(value=_src),
+                                )]
+                            )
+                        ),
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     # Temporarily set is_active = False so we can update / replace the products
     was_active = doc.is_active
     if was_active:
@@ -316,7 +333,11 @@ def _ingest_assembled_products_for_document(doc, assembled):
         # Use transaction to ensure consistency
         with transaction.atomic():
             from .services.structured_ingestion import persist_assembled_products
-            persist_assembled_products(doc, assembled, replace=True)
+            from .models import DocumentChunk, ProductFamily
+            # Explicitly delete ALL existing chunks and families for clean re-creation
+            DocumentChunk.objects.filter(document=doc).delete()
+            ProductFamily.objects.filter(document=doc).delete()
+            persist_assembled_products(doc, assembled, replace=False)
     finally:
         # Restore is_active state
         doc.is_active = True
@@ -359,28 +380,29 @@ def run_pipeline(request):
         if result.returncode != 0:
             return JsonResponse({'error': output[-2000:]}, status=500)
 
-        # Track per-session chunks created
-        try:
-            import re as _re
-            match = _re.search(r'Products found\s*:\s*(\d+)', output)
-            if match:
-                request.session['session_chunks_created'] = int(match.group(1))
-                request.session.modified = True
-        except Exception:
-            pass
+        # Update progress for this specific PDF to 'chunked' (50%)
+        pdf_progress = request.session.get('pdf_progress', {})
+        approved_pdfs = request.session.get('approved_pdfs', [])
+        if filename in approved_pdfs:
+            pdf_progress[filename] = 'chunked'
+            request.session['pdf_progress'] = pdf_progress
+            request.session.modified = True
 
         # Auto-ingest into the database
         try:
             import re as _re
             _stem = pdf_path.stem
             _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_') or 'catalog'
-            _assembled_file = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized / 'assembled_products.json'
-            
-            if _assembled_file.exists():
+            _data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized
+            _assembled_file = _data_dir / 'assembled_products.json'
+            _products_file = _data_dir / 'products.json'
+
+            _ingest_file = _assembled_file if _assembled_file.exists() else (_products_file if _products_file.exists() else None)
+            if _ingest_file:
                 _doc = _ensure_catalog_document(pdf_path)
-                _assembled_data = json.loads(_assembled_file.read_text(encoding='utf-8'))
-                if isinstance(_assembled_data, list):
-                    _ingest_assembled_products_for_document(_doc, _assembled_data)
+                _ingest_data = json.loads(_ingest_file.read_text(encoding='utf-8'))
+                if isinstance(_ingest_data, list):
+                    _ingest_assembled_products_for_document(_doc, _ingest_data)
         except Exception as _ingest_err:
             import logging
             logging.warning(f"Auto-ingestion failed in run_pipeline: {_ingest_err}", exc_info=True)
@@ -504,9 +526,9 @@ def list_pdfs(request):
                     else:
                         status = doc.status
                 
-                has_embeddings = (doc.status == CatalogDocument.Status.READY and doc.is_active)
-                if not has_embeddings:
-                    has_embeddings = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.INDEXED).exists()
+                has_indexed = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.INDEXED).exists()
+                has_stale   = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.STALE).exists()
+                has_embeddings = has_indexed and not has_stale
             else:
                 # Check filesystem chunks
                 sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_')
@@ -533,6 +555,184 @@ def list_pdfs(request):
         'pdf_details': pdf_details,
         'v2_ingest_enabled': settings.CATALOG_RAG_V2_INGEST
     })
+
+
+# ── API: Approve PDF after preview ───────────────────────────────────────────
+
+@login_required
+@require_POST
+def approve_pdf(request):
+    """Mark a PDF as approved after preview - detect and set its actual progress stage."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request.'}, status=400)
+    
+    if not filename:
+        return JsonResponse({'error': 'Missing filename.'}, status=400)
+
+    # Auto-detect the actual stage based on what's been completed
+    from .models import CatalogDocument, DocumentChunk, ApiKey
+    from pathlib import Path
+    import json as _j
+
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    detected_stage = 'uploaded'
+    pdf_stem = Path(filename).stem
+    done_count = None
+
+    # If caller passed split_parts list (parent stem preview), aggregate from all parts
+    split_parts = body.get('split_parts', []) if isinstance(body, dict) else []
+
+    if split_parts:
+        try:
+            _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            _stage_map = {}
+
+        part_stages = []
+        for part_name in split_parts:
+            part_stem = Path(part_name).stem
+            # Check DB stage map for this part
+            part_stage = _stage_map.get(part_name) or _stage_map.get(part_stem)
+            if part_stage in STAGE_ORDER:
+                part_stages.append(part_stage)
+            else:
+                # Check DB chunks
+                try:
+                    doc = CatalogDocument.objects.filter(
+                        original_filename__in=[part_stem, part_name]
+                    ).order_by('-version').first()
+                    if doc:
+                        indexed_count = DocumentChunk.objects.filter(
+                            document=doc, index_status=DocumentChunk.IndexStatus.INDEXED
+                        ).count()
+                        chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                        if indexed_count > 0:
+                            part_stages.append('indexed')
+                        elif chunks_count > 0:
+                            part_stages.append('chunked')
+                        else:
+                            part_stages.append('uploaded')
+                    else:
+                        # Fallback: check filesystem vision_pipeline/data
+                        import re as _re
+                        sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', part_stem)[:60].strip('_')
+                        data_dir = Path(__file__).resolve().parent.parent.parent / 'vision_pipeline' / 'data'
+                        chunks_dir = data_dir / sanitized / 'chunks'
+                        if chunks_dir.exists() and list(chunks_dir.glob('*.md')):
+                            part_stages.append('chunked')
+                        elif (data_dir / sanitized / 'products.json').exists():
+                            part_stages.append('chunked')
+                        else:
+                            part_stages.append('uploaded')
+                except Exception:
+                    part_stages.append('uploaded')
+
+        if part_stages:
+            done_count = sum(1 for s in part_stages if s != 'uploaded')
+            # Overall progress = minimum stage (all parts must reach a stage)
+            detected_stage = min(part_stages, key=lambda s: STAGE_ORDER.index(s))
+    else:
+        try:
+            doc = CatalogDocument.objects.filter(
+                original_filename__in=[pdf_stem, filename]
+            ).order_by('-version').first()
+
+            if doc:
+                chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                indexed_count = DocumentChunk.objects.filter(
+                    document=doc,
+                    index_status=DocumentChunk.IndexStatus.INDEXED
+                ).count()
+                if indexed_count > 0:
+                    detected_stage = 'indexed'
+                elif chunks_count > 0:
+                    detected_stage = 'chunked'
+        except Exception:
+            pass
+
+    # Load persisted stage from DB (survives logout/login)
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+    except Exception:
+        _stage_map = {}
+    db_stage = _stage_map.get(filename)
+    if db_stage not in STAGE_ORDER:
+        db_stage = None
+
+    # Never downgrade only if detected_stage confirms data still exists (> uploaded means chunks/index present)
+    # If detected_stage is 'uploaded' (no chunks/index found), trust it — data was deleted
+    if detected_stage == 'uploaded':
+        final_stage = 'uploaded'
+    else:
+        existing_session_stage = request.session.get('pdf_progress', {}).get(filename)
+        candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
+        final_stage = max(candidate_stages, key=lambda s: STAGE_ORDER.index(s))
+
+    # Replace — only track one PDF at a time
+    request.session['approved_pdfs'] = [filename]
+    request.session['pdf_progress'] = {filename: final_stage}
+    request.session.modified = True
+
+    return JsonResponse({
+        'message': f'"{filename}" approved and ready for processing.',
+        'stage': final_stage,
+        'done_count': done_count if split_parts else None,
+        'total_count': len(split_parts) if split_parts else None,
+    })
+
+
+@login_required
+@require_POST
+def update_pdf_stage(request):
+    """Update a PDF's progress stage: uploaded (25%), chunked (50%), indexed (75%), tested (100%)."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+        stage = body.get('stage', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request.'}, status=400)
+    
+    if not filename or stage not in ['uploaded', 'chunked', 'indexed', 'tested']:
+        return JsonResponse({'error': 'Invalid filename or stage.'}, status=400)
+
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+
+    # Persist to DB (ApiKey table) so stage survives logout/login
+    from .models import ApiKey
+    import json as _j
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+    except Exception:
+        _stage_map = {}
+    current_db_stage = _stage_map.get(filename, 'uploaded')
+    if current_db_stage not in STAGE_ORDER:
+        current_db_stage = 'uploaded'
+
+    # Never downgrade — EXCEPT: allow indexed to overwrite tested (re-embedding after delete)
+    if STAGE_ORDER.index(stage) < STAGE_ORDER.index(current_db_stage):
+        if not (stage == 'indexed' and current_db_stage == 'tested'):
+            stage = current_db_stage
+
+    _stage_map[filename] = stage
+    ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+
+    pdf_progress = request.session.get('pdf_progress', {})
+    pdf_progress[filename] = stage
+    request.session['pdf_progress'] = pdf_progress
+    approved_pdfs = request.session.get('approved_pdfs', [])
+    if filename not in approved_pdfs:
+        approved_pdfs = [filename]
+    request.session['approved_pdfs'] = approved_pdfs
+    request.session.modified = True
+
+    return JsonResponse({'message': f'"{filename}" stage updated to {stage}.', 'stage': stage})
 
 
 # ── API: PDF Preview (page thumbnails) ───────────────────────────────────
@@ -629,10 +829,161 @@ def catalog_stats(request):
     if not request.user.is_staff or not request.session.get('admin_access_token'):
         return JsonResponse({'error': 'Session expired.'}, status=403)
     stats = _get_catalog_stats()
-    # Override progress with per-session counters
-    stats['session_uploaded_pdfs'] = request.session.get('session_uploaded_pdfs', [])
-    stats['session_chunks'] = request.session.get('session_chunks_created', 0)
-    stats['session_indexed'] = request.session.get('session_indexed', 0)
+
+    pdf_progress = request.session.get('pdf_progress', {})
+    approved_pdfs = request.session.get('approved_pdfs', [])
+
+    # Restore from DB for any tracked PDF whose session state is missing/outdated
+    from .models import ApiKey
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    try:
+        import json as _j
+        db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+    except Exception:
+        db_map = {}
+    for fname, db_stage in db_map.items():
+        if db_stage not in STAGE_ORDER:
+            continue
+        session_stage = pdf_progress.get(fname)
+        if not session_stage or STAGE_ORDER.index(db_stage) > STAGE_ORDER.index(session_stage):
+            pdf_progress[fname] = db_stage
+            if fname not in approved_pdfs:
+                approved_pdfs = [fname]
+
+    request.session['pdf_progress'] = pdf_progress
+    request.session['approved_pdfs'] = approved_pdfs
+    request.session.modified = True
+
+    stats['pdf_progress'] = pdf_progress
+    stats['approved_pdfs'] = approved_pdfs
+
+    # Compute tracked_pdf, tracked_stage, tracked_percent for the progress bar
+    # Prefer parent stem (without split suffix) as tracked_pdf
+    import re as _re
+    splits_dir = PROJECT_ROOT / 'input' / 'splits'
+    split_re = _re.compile(r'_(custom_)?p\d{4}-\d{4}(\.pdf)?$', _re.I)
+    tracked_pdf = None
+    tracked_stage = None
+    # Find the most recently approved entry, preferring parent stems
+    for fname in reversed(approved_pdfs):
+        if split_re.search(fname):
+            # This is a split part — use parent stem instead
+            parent = split_re.sub('', fname).rstrip('.')
+            if not tracked_pdf:
+                tracked_pdf = parent
+                tracked_stage = 'uploaded'  # will be recomputed below from actual data
+        else:
+            # Check if this is a parent stem that has a splits directory
+            split_parts_dir_check = splits_dir / fname
+            if split_parts_dir_check.exists() and list(split_parts_dir_check.glob('*.pdf')):
+                # Has splits — don't trust session stage, recompute from actual data
+                tracked_pdf = fname
+                tracked_stage = 'uploaded'  # will be recomputed below
+            else:
+                tracked_pdf = fname
+                tracked_stage = pdf_progress.get(fname)
+            break
+    if not tracked_stage or tracked_stage not in STAGE_ORDER:
+        tracked_stage = 'uploaded'
+    tracked_percent = None
+    total_parts = None
+
+    if tracked_pdf and tracked_stage in STAGE_ORDER:
+        # Check if this is a parent stem with split parts — always recompute from actual data
+        split_parts_dir = splits_dir / tracked_pdf
+        if split_parts_dir.exists():
+            split_part_files = sorted([f.name for f in split_parts_dir.glob('*.pdf')])
+            if split_part_files:
+                try:
+                    from .models import CatalogDocument, DocumentChunk
+                    import re as _re2
+                    vision_data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+                    total_parts = len(split_part_files)
+                    chunked_count = 0
+                    indexed_count = 0
+
+                    for p in split_part_files:
+                        part_stem = Path(p).stem
+                        has_chunks = False
+                        has_index  = False
+
+                        # --- Check chunks ---
+                        # 1. session/DB stage map
+                        if (pdf_progress.get(p) or db_map.get(p) or
+                                pdf_progress.get(part_stem) or db_map.get(part_stem)) in STAGE_ORDER[1:]:
+                            has_chunks = True
+                        # 2. DB DocumentChunk records
+                        if not has_chunks:
+                            try:
+                                doc = CatalogDocument.objects.filter(
+                                    original_filename__in=[part_stem, p]
+                                ).first()
+                                if doc and DocumentChunk.objects.filter(document=doc).exists():
+                                    has_chunks = True
+                            except Exception:
+                                pass
+                        # 3. Filesystem vision_pipeline/data
+                        if not has_chunks:
+                            sanitized = _re2.sub(r'[^a-zA-Z0-9_\-]', '_', part_stem)[:60].strip('_')
+                            data_folder = vision_data_dir / sanitized
+                            if data_folder.exists() and (
+                                list(data_folder.glob('chunks/*.md')) or
+                                (data_folder / 'products.json').exists()
+                            ):
+                                has_chunks = True
+
+                        if has_chunks:
+                            chunked_count += 1
+
+                        # --- Check indexed ---
+                        # 1. session/DB stage map
+                        part_stage = (pdf_progress.get(p) or db_map.get(p) or
+                                      pdf_progress.get(part_stem) or db_map.get(part_stem))
+                        if part_stage in ('indexed', 'tested'):
+                            has_index = True
+                        # 2. DB indexed chunks
+                        if not has_index:
+                            try:
+                                doc = CatalogDocument.objects.filter(
+                                    original_filename__in=[part_stem, p]
+                                ).first()
+                                if doc and DocumentChunk.objects.filter(
+                                    document=doc,
+                                    index_status=DocumentChunk.IndexStatus.INDEXED
+                                ).exists():
+                                    has_index = True
+                            except Exception:
+                                pass
+
+                        if has_index:
+                            indexed_count += 1
+
+                    # Compute overall progress
+                    if indexed_count == total_parts:
+                        tracked_stage = 'indexed'   # 75%
+                    elif indexed_count > 0 or chunked_count == total_parts:
+                        # Between 50% and 75%: all chunked + some indexed
+                        tracked_percent = 50 + (indexed_count / total_parts) * 25
+                        tracked_stage = 'chunked'
+                    elif chunked_count > 0:
+                        # Between 25% and 50%: some chunked, none indexed
+                        tracked_percent = 25 + (chunked_count / total_parts) * 25
+                        tracked_stage = 'uploaded'
+                    else:
+                        tracked_stage = 'uploaded'  # 25%
+
+                except Exception:
+                    pass
+
+    if tracked_pdf and tracked_stage:
+        stats['tracked_pdf']   = tracked_pdf
+        stats['tracked_stage'] = tracked_stage
+        if tracked_percent is not None:
+            stats['tracked_percent']   = round(tracked_percent, 2)
+            stats['total_split_parts'] = total_parts
+        import logging
+        logging.warning(f'[STATS] tracked_pdf={tracked_pdf} tracked_stage={tracked_stage} tracked_percent={tracked_percent} total_parts={total_parts}')
+
     return JsonResponse(stats)
 
 
@@ -760,13 +1111,16 @@ def run_pipeline_split(request):
             import re as _re
             _stem = pdf_path.stem
             _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_') or 'catalog'
-            _assembled_file = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized / 'assembled_products.json'
-            
-            if _assembled_file.exists():
+            _data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized
+            _assembled_file = _data_dir / 'assembled_products.json'
+            _products_file = _data_dir / 'products.json'
+
+            _ingest_file = _assembled_file if _assembled_file.exists() else (_products_file if _products_file.exists() else None)
+            if _ingest_file:
                 _doc = _ensure_catalog_document(pdf_path)
-                _assembled_data = json.loads(_assembled_file.read_text(encoding='utf-8'))
-                if isinstance(_assembled_data, list):
-                    _ingest_assembled_products_for_document(_doc, _assembled_data)
+                _ingest_data = json.loads(_ingest_file.read_text(encoding='utf-8'))
+                if isinstance(_ingest_data, list):
+                    _ingest_assembled_products_for_document(_doc, _ingest_data)
         except Exception as _ingest_err:
             import logging
             logging.warning(f"Auto-ingestion failed in run_pipeline_split: {_ingest_err}", exc_info=True)
@@ -967,7 +1321,107 @@ def delete_pdf(request):
         import logging
         logging.warning(f'Error deleting V2 database records for {filename}: {e}')
 
+    # Clear stage map entries for this PDF and its split parts
+    import json as _j
+    from .models import ApiKey
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        keys_to_remove = [k for k in _stage_map if k == filename or k == stem or k.startswith(stem + '_')]
+        for k in keys_to_remove:
+            del _stage_map[k]
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+    except Exception:
+        pass
+
+    # Clear session stage for this PDF
+    pdf_progress = request.session.get('pdf_progress', {})
+    approved_pdfs = request.session.get('approved_pdfs', [])
+    keys_to_remove = [k for k in pdf_progress if k == filename or k == stem or k.startswith(stem + '_')]
+    for k in keys_to_remove:
+        del pdf_progress[k]
+    approved_pdfs = [p for p in approved_pdfs if p != filename and p != stem and not p.startswith(stem + '_')]
+    request.session['pdf_progress'] = pdf_progress
+    request.session['approved_pdfs'] = approved_pdfs
+    request.session.modified = True
+
     return JsonResponse({'message': f'"{filename}" and all associated data deleted.'})
+
+
+# -- API: Delete embeddings only (Create Chunks panel) ────────────────────────
+
+@login_required
+@require_POST
+def delete_embeddings_only(request):
+    """Delete only Qdrant embeddings — keep PDF files, chunks, and DB records intact."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body     = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+    if not filename:
+        return JsonResponse({'error': 'Missing filename.'}, status=400)
+
+    import re
+    stem = Path(filename).stem
+    sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_') or 'catalog'
+
+    try:
+        from qdrant_client import models
+        from rag_pipeline.providers import COLLECTION, build_qdrant_client
+        client = build_qdrant_client()
+        if client.collection_exists(COLLECTION):
+            for source_stem in [stem, sanitized_stem]:
+                try:
+                    client.delete(
+                        collection_name=COLLECTION,
+                        points_selector=models.FilterSelector(
+                            filter=models.Filter(
+                                must=[models.FieldCondition(
+                                    key='metadata.source_pdf',
+                                    match=models.MatchValue(value=source_stem),
+                                )]
+                            )
+                        ),
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        for doc in CatalogDocument.objects.filter(original_filename__in=[filename, stem]):
+            DocumentChunk.objects.filter(document=doc).update(
+                index_status=DocumentChunk.IndexStatus.STALE
+            )
+    except Exception as e:
+        import logging
+        logging.warning(f'Error marking chunks stale for {filename}: {e}')
+
+    # Downgrade stage from indexed/tested → chunked so progress bar reflects reality
+    import json as _j
+    from .models import ApiKey
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        for key in [filename, stem]:
+            if _stage_map.get(key) in ('indexed', 'tested'):
+                _stage_map[key] = 'chunked'
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+    except Exception:
+        pass
+
+    # Also downgrade session stage
+    pdf_progress = request.session.get('pdf_progress', {})
+    for key in [filename, stem]:
+        if pdf_progress.get(key) in ('indexed', 'tested'):
+            pdf_progress[key] = 'chunked'
+    request.session['pdf_progress'] = pdf_progress
+    request.session.modified = True
+
+    return JsonResponse({'message': f'Embeddings deleted for "{filename}". Chunks and data remain intact.'})
 
 
 # -- API: List chunks for a PDF ────────────────────────────────────────────────
@@ -994,37 +1448,70 @@ def list_chunks(request):
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
 
+    import re
     chunks = []
     from .models import CatalogDocument, DocumentChunk
-    
+
     pdf_stem = Path(pdf_name).stem
-    doc = CatalogDocument.objects.filter(
-        original_filename=pdf_stem,
-        is_active=True
-    ).order_by('-version').first()
+    index_only = request.GET.get('index') == '1'  # True = Index & Embed panel, exclude STALE
+    doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
     if not doc:
-        doc = CatalogDocument.objects.filter(
-            original_filename=pdf_stem
-        ).order_by('-version').first()
+        doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
 
     document_id = str(doc.id) if doc else None
+
     if doc:
-        db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
+        qs = DocumentChunk.objects.filter(document=doc)
+        if index_only:
+            qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+        db_chunks = qs.order_by('ordinal')
         for c in db_chunks:
-            filename = f"chunk_{c.ordinal:04d}.md"
-            prod_name = "General Info"
+            prod_name = 'General Info'
             if c.family:
                 prod_name = c.family.product_name
             elif c.variant and c.variant.family:
                 prod_name = c.variant.family.product_name
-                
             chunks.append({
-                'filename': filename,
+                'filename': f"chunk_{c.ordinal:04d}.md",
                 'content': c.text,
                 'ordinal': c.ordinal,
                 'product_name': prod_name,
                 'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
             })
+    else:
+        # No direct doc — check if this is a parent stem with split part documents
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+        if splits_dir.exists():
+            split_stems = sorted(
+                re.sub(r'[^a-zA-Z0-9_\-]', '_', p.stem)[:60].strip('_')
+                for p in splits_dir.glob('*.pdf')
+            )
+            split_docs = CatalogDocument.objects.filter(
+                original_filename__in=split_stems
+            ).order_by('original_filename')
+            if split_docs.exists():
+                # Use first split doc's id for chat context (covers all splits)
+                document_id = str(split_docs.first().id)
+                ordinal_offset = 0
+                for split_doc in split_docs:
+                    qs = DocumentChunk.objects.filter(document=split_doc)
+                    if index_only:
+                        qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+                    db_chunks = qs.order_by('ordinal')
+                    for c in db_chunks:
+                        prod_name = 'General Info'
+                        if c.family:
+                            prod_name = c.family.product_name
+                        elif c.variant and c.variant.family:
+                            prod_name = c.variant.family.product_name
+                        chunks.append({
+                            'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
+                            'content': c.text,
+                            'ordinal': ordinal_offset + c.ordinal,
+                            'product_name': prod_name,
+                            'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
+                        })
+                    ordinal_offset += qs.count()
 
     return JsonResponse({'document_id': document_id, 'chunks': chunks})
 
@@ -1284,6 +1771,17 @@ def execute_index_v2(request, document_id):
     try:
         document = CatalogDocument.objects.get(pk=document_id)
         result = index_document(document, confirmed_embedding_count=confirmed, allow_disabled=True)
+        
+        # Update progress to 'indexed' (75%) after successful indexing
+        pdf_progress = request.session.get('pdf_progress', {})
+        approved_pdfs = request.session.get('approved_pdfs', [])
+        # Update progress for any matching filename (stem or full name)
+        for pdf_name in approved_pdfs:
+            if Path(pdf_name).stem == document.original_filename or pdf_name == document.original_filename:
+                pdf_progress[pdf_name] = 'indexed'
+        request.session['pdf_progress'] = pdf_progress
+        request.session.modified = True
+        
         return JsonResponse(result)
     except CatalogDocument.DoesNotExist:
         return JsonResponse({'error': 'Catalog document not found.'}, status=404)

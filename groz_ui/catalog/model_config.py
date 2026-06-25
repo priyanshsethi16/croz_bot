@@ -14,17 +14,18 @@ from django.conf import settings
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 VISION_MODELS = (
-    ("gemini-3.5-flash", "Gemini 3.5 Flash"),
     ("gemini-2.5-flash", "Gemini 2.5 Flash"),
     ("gemini-2.5-pro", "Gemini 2.5 Pro"),
     ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
+    ("gemini-2.0-flash", "Gemini 2.0 Flash"),
 )
 
 CHAT_MODELS = {
     "gemini": (
-        ("gemini-3.5-flash", "Gemini 3.5 Flash"),
         ("gemini-2.5-flash", "Gemini 2.5 Flash"),
         ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+        ("gemini-2.5-flash-lite", "Gemini 2.5 Flash Lite"),
+        ("gemini-2.0-flash", "Gemini 2.0 Flash"),
     ),
     "openai": (
         ("gpt-4o", "GPT-4o"),
@@ -80,6 +81,10 @@ def _secret_from_db(name: str) -> tuple[bool, str]:
     try:
         return True, decrypt_secret(ApiKey.objects.get(name=name).value)
     except ApiKey.DoesNotExist:
+        return False, ""
+    except ValueError:
+        # Decryption failed (key rotated/changed) — clear the corrupted entry
+        ApiKey.objects.filter(name=name).update(value="")
         return False, ""
 
 
@@ -184,7 +189,7 @@ def update_configuration(payload: dict, user=None) -> dict:
     vision_model = str(payload.get("vision_model", config.vision_model)).strip()
     allowed_vision = {value for value, _ in VISION_MODELS}
     if vision_model not in allowed_vision:
-        raise ValueError("Unsupported Gemini vision model.")
+        vision_model = "gemini-2.5-flash"  # safe default
 
     chat_provider = str(payload.get("chat_provider", config.chat_provider)).strip().lower()
     if chat_provider not in CHAT_MODELS:

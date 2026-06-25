@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=index-dashboard-20260624"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=split-progress-20260625"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -90,9 +90,6 @@
 
     <div class="sidebar-section">
       <div class="sidebar-label">Tools</div>
-      <button class="sidebar-link" data-panel="chat" onclick="showPanel('chat')">
-        <i class="fa fa-comments"></i> Chat
-      </button>
       {% if is_admin %}
       <button class="sidebar-link" data-panel="models" onclick="showPanel('models')">
         <i class="fa fa-key"></i> Models &amp; Keys
@@ -191,6 +188,10 @@
           <strong id="workflow-progress-percent">0%</strong>
         </div>
       </div>
+      <div id="progress-pdf-name-bar" style="display:none;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;color:var(--grey)">
+        <i class="fa fa-file-pdf" style="color:var(--orange)"></i>
+        <span id="progress-pdf-name" style="font-weight:600;color:var(--dark)"></span>
+      </div>
       <div class="progress-rail" aria-label="Catalog workflow progress">
         <div class="progress-fill" id="workflow-progress-fill" style="width:0%"></div>
       </div>
@@ -198,22 +199,22 @@
         <div class="milestone" data-progress-step="upload">
           <span><i class="fa fa-upload"></i></span>
           <b>Upload PDF</b>
-          <small id="progress-upload-count">0 uploaded</small>
+          <small>25%</small>
         </div>
         <div class="milestone" data-progress-step="chunk">
           <span><i class="fa fa-layer-group"></i></span>
-          <b>Create Chunks</b>
-          <small id="progress-chunk-count">0 chunks</small>
+          <b>Split &amp; Parse</b>
+          <small>50%</small>
         </div>
         <div class="milestone" data-progress-step="index">
           <span><i class="fa fa-database"></i></span>
           <b>Index &amp; Embed</b>
-          <small id="progress-index-count">0 indexed</small>
+          <small>75%</small>
         </div>
         <div class="milestone" data-progress-step="chat">
           <span><i class="fa fa-comments"></i></span>
           <b>Test Chat</b>
-          <small>Ready after indexing</small>
+          <small>100%</small>
         </div>
       </div>
     </div>
@@ -330,7 +331,12 @@
                 <span class="ph-title" id="preview-pdf-name"></span>
                 <span class="ph-badge" id="preview-page-count"></span>
               </div>
-              <span class="ph-sub" id="preview-sub">Page preview</span>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span class="ph-sub" id="preview-sub">Page preview</span>
+                <button id="btn-approve-pdf" class="btn btn-sm btn-primary" style="display:none" onclick="approvePdfForTracking()">
+                  <i class="fa fa-check-circle"></i> Approve &amp; Track
+                </button>
+              </div>
             </div>
             <div class="pdf-preview-body">
               <div class="pdf-preview-main">
@@ -423,6 +429,7 @@
                     <button class="btn btn-secondary" id="btn-process-whole-pdf" onclick="showPanel('chunk')">
                       <i class="fa fa-layer-group"></i> Process Whole PDF
                     </button>
+                    <span id="whole-pdf-status" style="display:none;align-items:center;gap:6px;font-size:13px;font-weight:600"></span>
                   </div>
 
                   <div class="split-parts-wrap" id="split-parts-wrap" style="display:none">
@@ -838,5 +845,5 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=pdf-instructions-20260621"></script>
+<script src="{% static 'js/dashboard.js' %}?v=split-progress-20260625c"></script>
 {% endblock %}

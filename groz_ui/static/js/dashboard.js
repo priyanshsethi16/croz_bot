@@ -58,6 +58,111 @@ function showPanel(name) {
   if (name === 'index') loadIndexPanel();
 }
 
+async function loadSplitPartPreviewByName(partFilename, parentStem) {
+  const section = document.getElementById('pdf-preview-section');
+  const strip   = document.getElementById('pdf-thumb-strip');
+  const viewer  = document.getElementById('pdf-page-viewer');
+  const countEl = document.getElementById('preview-page-count');
+  const subEl   = document.getElementById('preview-sub');
+
+  section.style.display = 'block';
+  strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
+  viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Select a page to preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
+
+  // Keep parent name in heading
+  document.getElementById('preview-pdf-name').textContent = parentStem;
+
+  try {
+    const res  = await fetch('/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(partFilename));
+    const data = await res.json();
+    if (data.error) { strip.innerHTML = `<div class="pdf-preview-loading">${data.error}</div>`; return; }
+    countEl.textContent = data.total + ' pages';
+    subEl.textContent   = partFilename;
+    strip.innerHTML = data.pages.map((p, i) => `
+      <div class="pdf-thumb-item${i===0?' active':''}" onclick="selectPreviewPage(${i})" id="thumb-${i}">
+        <img src="${p.thumb}" alt="Page ${p.num}" loading="lazy"/>
+        <span class="thumb-num">${p.num}</span>
+      </div>`).join('');
+    window._previewPages = data.pages;
+    if (data.pages.length) renderContinuousPreview(data.pages);
+  } catch(e) {
+    strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Failed to load preview.</div>';
+  }
+}
+
+async function previewParentGroup(parentStem, parts) {
+  selectedPdf = parts[0];
+  _splitStem  = parentStem;
+
+  // Build splits array by fetching page counts for each part
+  const splits = [];
+  // Ensure _pdfDetails is populated
+  if (!_pdfDetails.length) {
+    try {
+      const r = await fetch('/admin-panel/api/pdfs/');
+      const d = await r.json();
+      _pdfDetails = d.pdf_details || [];
+    } catch(e) {}
+  }
+  for (const partName of parts) {
+    try {
+      const res  = await fetch(`/admin-panel/api/pdf-pages/?pdf=${encodeURIComponent(partName)}`);
+      const data = await res.json();
+      const m = partName.match(/_(custom_)?p(\d+)-(\d+)\.pdf$/i);
+      const pages = m ? `${parseInt(m[2])}–${parseInt(m[3])}` : '?';
+      const detail = _pdfDetails.find(d => d.name === partName);
+      const isDone = detail && detail.chunks_count > 0;
+      splits.push({ filename: partName, pages, page_count: data.pages || 0, done: isDone });
+    } catch(e) {
+      splits.push({ filename: partName, pages: '?', page_count: 0, done: false });
+    }
+  }
+  _splitParts = splits;
+
+  // Show the preview section with parent name as heading
+  const section = document.getElementById('pdf-preview-section');
+  section.style.display = 'block';
+  document.getElementById('preview-pdf-name').textContent = parentStem;
+  document.getElementById('preview-page-count').textContent = `${parts.length} split parts`;
+  document.getElementById('preview-sub').textContent = 'Click a split part \u25b6 to preview its pages';
+
+  // Show splitter section with parts list (skip showSplitterForPdf which resets _splitParts)
+  const splitterSection = document.getElementById('splitter-section');
+  splitterSection.style.display = 'block';
+  splitterSection.classList.remove('collapsed');
+  document.getElementById('splitter-body').style.display = 'block';
+  document.getElementById('splitter-pdf-name').textContent = parentStem;
+  document.getElementById('splitter-pages-badge').textContent = `${parts.length} parts`;
+  document.getElementById('splitter-info-bar').style.display = 'flex';
+
+  // Compute proportional progress from existing split parts' stages
+  try {
+    const approveRes = await fetch('/admin-panel/api/approve-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: parentStem, split_parts: parts })
+    });
+    const approveData = await approveRes.json();
+    if (!approveData.error) {
+      const stage = approveData.stage || 'uploaded';
+      const doneCount = approveData.done_count !== undefined ? approveData.done_count : null;
+      const totalCount = parts.length;
+      if (doneCount !== null && doneCount < totalCount) {
+        const percent = 25 + (doneCount / totalCount) * 25;
+        _trackedPdf   = parentStem;
+        _trackedStage = 'uploaded';
+        _renderProgress(parentStem, 'uploaded', percent);
+        document.getElementById('workflow-progress-sub').textContent =
+          `${doneCount} of ${totalCount} parts chunked. Continue processing remaining parts.`;
+      } else {
+        setTrackedPdf(parentStem, stage);
+      }
+    }
+  } catch(e) {}
+
+  renderSplitParts(splits);
+}
+
 async function loadExistingUploads() {
   const list = document.getElementById('upload-file-list');
   if (!list) return;
@@ -65,8 +170,79 @@ async function loadExistingUploads() {
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
-    (data.pdfs || []).forEach(name => {
-      addFileItem(name, '', 'success', '✓ Uploaded');
+    const pdfs = data.pdfs || [];
+
+    // Separate plain PDFs from split parts
+    const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+    const groups  = {};  // parentStem -> [splitName, ...]
+    const plain   = [];
+
+    pdfs.forEach(name => {
+      if (splitRe.test(name)) {
+        const parentStem = name.replace(splitRe, '');
+        (groups[parentStem] = groups[parentStem] || []).push(name);
+      } else {
+        plain.push(name);
+      }
+    });
+
+    // Render plain PDFs
+    plain.forEach(name => addFileItem(name, '', 'success', '\u2713 Uploaded'));
+
+    // Render grouped splits
+    Object.entries(groups).forEach(([parentStem, parts]) => {
+      const group = document.createElement('div');
+      group.className = 'file-group';
+
+      // Parent row — same structure as .file-item
+      const header = document.createElement('div');
+      header.className = 'file-item';
+      header.innerHTML = `
+        <div class="file-item-icon"><i class="fa fa-file-pdf"></i></div>
+        <div class="file-item-info">
+          <div class="fname">${escHtml(parentStem)}</div>
+          <div class="fsize">${parts.length} split part${parts.length !== 1 ? 's' : ''}</div>
+        </div>
+        <span class="fstatus success">✓ Uploaded</span>
+        <button class="btn btn-sm btn-secondary file-preview-btn" onclick="previewParentGroup('${escHtml(parentStem)}', ${JSON.stringify(parts).replace(/"/g, '&quot;')})" title="Preview pages">
+          <i class="fa fa-eye"></i> Preview
+        </button>
+        <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(parentStem + '.pdf')}', this)" title="Delete PDF">
+          <i class="fa fa-trash"></i> Delete
+        </button>
+        <button class="btn btn-sm btn-secondary file-group-toggle" title="Show split parts">
+          <i class="fa fa-chevron-right"></i>
+        </button>`;
+      header.querySelector('.file-group-toggle').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = children.style.display === 'none';
+        children.style.display = isOpen ? 'flex' : 'none';
+        children.style.flexDirection = 'column';
+        e.currentTarget.querySelector('i').className = `fa fa-chevron-${isOpen ? 'down' : 'right'}`;
+      });
+
+      const children = document.createElement('div');
+      children.className = 'file-group-children';
+      children.style.display = 'none';
+      parts.forEach(partName => {
+        const child = document.createElement('div');
+        child.className = 'file-item';
+        child.innerHTML = `
+          <div class="file-item-icon"><i class="fa fa-file-pdf"></i></div>
+          <div class="file-item-info"><div class="fname">${escHtml(partName)}</div></div>
+          <span class="fstatus success">✓ Uploaded</span>
+          <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(partName)}')" title="Preview pages">
+            <i class="fa fa-eye"></i> Preview
+          </button>
+          <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(partName)}', this)" title="Delete PDF">
+            <i class="fa fa-trash"></i> Delete
+          </button>`;
+        children.appendChild(child);
+      });
+
+      group.appendChild(header);
+      group.appendChild(children);
+      list.appendChild(group);
     });
   } catch(e) {}
 }
@@ -114,6 +290,16 @@ async function uploadFile(file) {
     } else {
       setFileStatus(item, 'success', V2_INGEST_ENABLED ? '✓ Queued' : '✓ Uploaded');
       showToast(data.message || 'Uploaded successfully!', 'success');
+      // Track progress immediately on upload (25%)
+      try {
+        const approveRes = await fetch('/admin-panel/api/approve-pdf/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+          body: JSON.stringify({ filename: file.name })
+        });
+        const approveData = await approveRes.json();
+        if (!approveData.error) setTrackedPdf(file.name, approveData.stage || 'uploaded');
+      } catch(e) {}
       refreshStats();
       if (V2_INGEST_ENABLED && data.job_id) {
         pollV2IngestionJob(item, data.job_id);
@@ -281,6 +467,21 @@ async function loadPdfPreview(filename) {
   strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
   viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Select a page to preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
 
+  // Approve this PDF for progress tracking
+  try {
+    const approveRes = await fetch('/admin-panel/api/approve-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename })
+    });
+    const approveData = await approveRes.json();
+    if (!approveData.error) {
+      setTrackedPdf(filename, approveData.stage || 'uploaded');
+    }
+  } catch(e) {
+    console.error('Failed to approve PDF:', e);
+  }
+
   try {
     const res  = await fetch('/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(filename));
     const data = await res.json();
@@ -318,7 +519,7 @@ async function loadSplitPartPreview(idx) {
   const subEl   = document.getElementById('preview-sub');
 
   section.style.display = 'block';
-  nameEl.textContent    = part.filename;
+  nameEl.textContent    = _splitStem || part.filename;
   countEl.textContent   = `${part.page_count} page${part.page_count !== 1 ? 's' : ''}`;
   subEl.textContent     = `Split part · original pages ${part.pages}`;
   strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering split part…</div>';
@@ -446,9 +647,10 @@ async function loadPdfList() {
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
+    _pdfDetails = data.pdf_details || [];
     tbody.innerHTML = '';
 
-    const pdfDetails = data.pdf_details || [];
+    const pdfDetails = _pdfDetails.filter(item => item.status === 'Ready');
     if (!pdfDetails.length) {
       tbody.innerHTML = `
         <tr>
@@ -499,7 +701,13 @@ async function loadPdfList() {
 
       // 2. Create Embedding OR Create Chunks (VLM Run)
       if (item.status === 'Ready') {
-        if (item.document_id) {
+        if (item.has_embeddings) {
+          actionButtons += `
+            <button class="btn btn-sm embed-btn" disabled title="Already embedded" style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed">
+              <i class="fa fa-check-circle"></i> Embedded
+            </button>
+          `;
+        } else if (item.document_id) {
           actionButtons += `
             <button class="btn btn-sm btn-primary embed-btn" onclick="triggerEmbeddingInline('${item.document_id}', '${escHtml(item.name)}')" title="Generate embeddings and index to Qdrant">
               <i class="fa fa-brain"></i> Create Embedding
@@ -529,7 +737,7 @@ async function loadPdfList() {
 
       // 3. Delete Button
       actionButtons += `
-        <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" title="Delete PDF and associated data">
+        <button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')" title="Delete embeddings only">
           <i class="fa fa-trash"></i> Delete
         </button>
       `;
@@ -551,6 +759,19 @@ async function loadPdfList() {
       `;
       tbody.appendChild(tr);
     });
+
+    // Correct progress bar if the tracked PDF's actual embedding state doesn't match
+    if (_trackedPdf && ['indexed', 'tested'].includes(_trackedStage)) {
+      const stem = _trackedPdf.replace(/\.pdf$/i, '');
+      const trackedDetail = pdfDetails.find(d =>
+        d.name === _trackedPdf || d.name === stem + '.pdf' ||
+        d.name.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') === stem
+      );
+      if (trackedDetail && !trackedDetail.has_embeddings) {
+        _trackedStage = 'chunked';
+        _renderProgress(_trackedPdf, 'chunked');
+      }
+    }
 
   } catch(e) {
     console.error("Error loading PDF list: ", e);
@@ -589,6 +810,13 @@ async function runChunkingForPdf(name, btnEl) {
 }
 
 async function triggerEmbeddingInline(documentId, pdfName) {
+  console.log('triggerEmbeddingInline called with:', { documentId, pdfName });
+  
+  if (!documentId) {
+    showToast('No document ID found for this PDF.', 'error');
+    return;
+  }
+  
   try {
     const auditResponse = await fetch(`/admin-panel/api/v2/documents/${documentId}/index-audit/`);
     const audit = await auditResponse.json();
@@ -601,6 +829,11 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       return;
     }
     const count = audit.pending_embeddings;
+    
+    if (count === 0) {
+      showToast('All chunks are already indexed.', 'info');
+      return;
+    }
     
     const row = document.querySelector(`#pdf-selector-table-body tr[data-pdf="${pdfName}"]`);
     const embedBtn = row ? row.querySelector('.embed-btn') : null;
@@ -618,9 +851,37 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || 'Indexing failed.');
       
+      // Update progress to 'indexed' (75%)
+      try {
+        const stageRes = await fetch('/admin-panel/api/update-pdf-stage/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+          body: JSON.stringify({ filename: pdfName, stage: 'indexed' })
+        });
+        const stageData = await stageRes.json();
+        console.log('Stage update response:', stageData);
+        
+        if (stageRes.ok) {
+          console.log('Successfully updated PDF stage to indexed');
+        } else {
+          console.error('Failed to update stage:', stageData);
+        }
+      } catch(e) {
+        console.error('Failed to update stage:', e);
+      }
+      
       showToast(`Indexed ${data.indexed} chunk(s) for "${pdfName}".`, 'success');
-      refreshStats();
-      loadPdfList();
+
+      // Immediately render 75% — do not rely on refreshStats which may return stale 'tested'
+      const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+      _trackedPdf   = displayPdf;
+      _trackedStage = 'indexed';
+      _trackedPercent = null;
+      _renderProgress(displayPdf, 'indexed');
+      await loadPdfList();
+      if (document.getElementById('panel-index')?.classList.contains('active')) {
+        await loadIndexPanel();
+      }
     } catch(error) {
       showToast(error.message, 'error');
       if (embedBtn) {
@@ -629,7 +890,7 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       }
     }
   } catch(e) {
-    showToast('Failed to perform index audit.', 'error');
+    showToast('Failed to perform index audit: ' + e.message, 'error');
   }
 }
 
@@ -648,8 +909,6 @@ async function runChunking() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
   }
-  prog.classList.add('visible');
-  log.classList.add('visible');
   log.textContent = `▶ Starting chunk extraction for: ${selectedPdf}\n`;
 
   let p = 0;
@@ -674,20 +933,25 @@ async function runChunking() {
     label.textContent = 'Complete';
 
     if (data.error) {
-      log.textContent += '\n✗ ERROR:\n' + data.error;
       showToast(`Chunking failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
     } else {
-      log.textContent += data.output || '\n✓ Chunks created successfully.';
       showToast('Product chunks created!', 'success');
+      advanceTrackedStage('chunked');
       refreshStats();
       loadPdfList();
       document.getElementById('next-to-index').style.display = 'flex';
       markStepDone('chunk');
     }
+    prog.classList.remove('visible');
+    log.classList.remove('visible');
+    fill.style.width = '0%';
+    pct.textContent = '0%';
+    label.textContent = 'Extracting products…';
   } catch(e) {
     clearInterval(ticker);
-    log.textContent += '\n✗ Network error.';
     showToast('Request failed.', 'error');
+    prog.classList.remove('visible');
+    log.classList.remove('visible');
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -894,6 +1158,28 @@ async function deletePdf(filename) {
   } catch(e) { showToast('Delete failed.', 'error'); }
 }
 
+async function deleteEmbeddingsOnly(filename) {
+  if (!confirm(`Delete "${filename}" and all its associated data?`)) return;
+  try {
+    const res  = await fetch('/admin-panel/api/delete-embeddings/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showToast(data.message, 'success');
+    // Immediately downgrade progress bar to chunked (50%)
+    const stem = filename.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '').replace(/\.pdf$/i, '');
+    const displayPdf = (_trackedPdf && (_trackedPdf === stem || _trackedPdf === filename)) ? _trackedPdf : stem;
+    _trackedPdf   = displayPdf;
+    _trackedStage = 'chunked';
+    _renderProgress(displayPdf, 'chunked');
+    loadPdfList();
+    if (typeof loadIndexPanel === 'function') loadIndexPanel();
+  } catch(e) { showToast('Delete failed.', 'error'); }
+}
+
 // -- Stats refresh -------------------------------------------------------------────────────
 function updateCatalogTable(processed) {
   const container = document.getElementById('catalog-overview-body');
@@ -988,13 +1274,23 @@ async function refreshStats() {
   try {
     const res  = await fetch('/admin-panel/api/stats/');
     const data = await res.json();
+    console.log('Stats received:', { 
+      pdf_progress: data.pdf_progress, 
+      approved_pdfs: data.approved_pdfs,
+      tracked_pdf: data.tracked_pdf,
+      tracked_stage: data.tracked_stage,
+      tracked_percent: data.tracked_percent,
+      total_split_parts: data.total_split_parts
+    });
     document.getElementById('stat-pdfs').textContent      = data.total_pdfs ?? '—';
     document.getElementById('stat-processed').textContent = (data.processed||[]).length;
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
     document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
     updateWorkflowProgress(data);
     updateCatalogTable(data.processed || []);
-  } catch(e) {}
+  } catch(e) {
+    console.error('Error refreshing stats:', e);
+  }
 }
 
 function _num(value) {
@@ -1002,65 +1298,139 @@ function _num(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function updateWorkflowProgress(data = {}) {
-  const root = document.getElementById('workflow-progress');
-  if (!root) return;
+// ── Per-PDF progress tracking ─────────────────────────────────────────────────
+// stages: uploaded=25%  chunked=50%  indexed=75%  tested=100%
+let _trackedPdf     = null;
+let _trackedStage   = null;
+let _trackedPercent = null;  // custom percent for partial-split progress
 
-  const totalPdfs = 'session_uploaded_pdfs' in data ? data.session_uploaded_pdfs.length : -1;
-  const chunks     = 'session_chunks' in data ? _num(data.session_chunks) : -1;
-  const indexed    = 'session_indexed' in data ? _num(data.session_indexed) : -1;
+const STAGE_CONFIG = {
+  uploaded: { percent: 25,  stepNo: 1, active: 'upload', title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
+  chunked:  { percent: 50,  stepNo: 2, active: 'chunk',  title: 'Chunks created',       sub: 'Product chunks ready. Now index & embed for semantic search.' },
+  indexed:  { percent: 75,  stepNo: 3, active: 'index',  title: 'Indexed & embedded',   sub: 'Chunks are indexed. Test the catalog chat to validate results.' },
+  tested:   { percent: 100, stepNo: 4, active: 'chat',   title: 'Catalog ready!',        sub: 'All steps complete. The catalog is live for product queries.' },
+};
 
-  // If session keys missing (initial DOM call fallback) force 0
-  const sessionPdfs    = totalPdfs < 0 ? 0 : totalPdfs;
-  const sessionChunks  = chunks < 0 ? 0 : chunks;
-  const sessionIndexed = indexed < 0 ? 0 : indexed;
-  const allPdfs    = _num(data.total_pdfs ?? document.getElementById('stat-pdfs')?.textContent);
-  const allChunks  = _num(data.indexed ?? document.getElementById('stat-chunks')?.textContent);
-  const allIndexed = _num(data.indexed ?? document.getElementById('stat-indexed')?.textContent);
+function setTrackedPdf(filename, stage) {
+  _trackedPdf     = filename;
+  _trackedStage   = stage;
+  _trackedPercent = null;
+  _renderProgress(filename, stage);
+}
 
-  let percent = 0;
-  let stepNo = 0;
-  let active = 'upload';
-  let title = 'Catalog setup progress';
-  let sub = 'Upload a PDF to start the catalog pipeline.';
-
-  if (sessionPdfs > 0) {
-    percent = 25; stepNo = 1; active = 'chunk';
-    title = 'PDF uploaded';
-    sub = 'Next step: create product chunks from the uploaded catalog.';
+function advanceTrackedStage(stage, fallbackPdf) {
+  const pdf = _trackedPdf || fallbackPdf || null;
+  if (!pdf) return;
+  const order = ['uploaded', 'chunked', 'indexed', 'tested'];
+  const cur = _trackedStage ? order.indexOf(_trackedStage) : -1;
+  if (order.indexOf(stage) > cur) {
+    _trackedPdf   = pdf;
+    _trackedStage = stage;
+    _renderProgress(pdf, stage);
+    fetch('/admin-panel/api/update-pdf-stage/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: pdf, stage })
+    }).catch(() => {});
   }
-  if (sessionChunks > 0) {
-    percent = 75; stepNo = 3; active = 'index';
-    title = 'Chunks created';
-    sub = 'Product chunks are ready. Index them for semantic search.';
-  }
-  if (sessionIndexed > 0) {
-    percent = 100; stepNo = 4; active = 'chat';
-    title = 'Catalog search ready';
-    sub = 'Chunks are indexed. You can validate answers in Test Chat.';
-  }
+}
 
-  document.getElementById('workflow-step-label').textContent = `Step ${stepNo} of 4`;
-  document.getElementById('workflow-progress-title').textContent = title;
-  document.getElementById('workflow-progress-sub').textContent = sub;
-  document.getElementById('workflow-progress-percent').textContent = `${percent}%`;
-  document.getElementById('workflow-progress-fill').style.width = `${percent}%`;
+function _renderProgress(filename, stage, customPercent) {
+  const cfg = STAGE_CONFIG[stage];
+  if (!cfg) return;
+  const percent = (customPercent !== undefined) ? customPercent : cfg.percent;
+  _trackedPercent = (customPercent !== undefined) ? customPercent : null;
+  document.getElementById('workflow-step-label').textContent   = `Step ${cfg.stepNo} of 4`;
+  document.getElementById('workflow-progress-title').textContent = cfg.title;
+  document.getElementById('workflow-progress-sub').textContent   = cfg.sub;
+  document.getElementById('workflow-progress-percent').textContent = `${Math.round(percent)}%`;
+  document.getElementById('workflow-progress-fill').style.width   = `${percent}%`;
 
-  document.getElementById('progress-upload-count').textContent = `${allPdfs} uploaded`;
-  document.getElementById('progress-chunk-count').textContent = `${allChunks} chunk${allChunks === 1 ? '' : 's'}`;
-  document.getElementById('progress-index-count').textContent = `${allIndexed} indexed`;
+  const nameBar = document.getElementById('progress-pdf-name-bar');
+  const nameEl  = document.getElementById('progress-pdf-name');
+  if (filename) { nameEl.textContent = filename; nameBar.style.display = 'flex'; }
+  else          { nameBar.style.display = 'none'; }
 
-  const done = {
-    upload: sessionPdfs > 0,
-    chunk: sessionChunks > 0,
-    index: sessionIndexed > 0,
-    chat: sessionIndexed > 0,
-  };
-  document.querySelectorAll('[data-progress-step]').forEach(item => {
-    const key = item.dataset.progressStep;
-    item.classList.toggle('done', Boolean(done[key]));
-    item.classList.toggle('active', key === active && !done[key]);
+  const doneMap = { upload: false, chunk: false, index: false, chat: false };
+  if (stage === 'uploaded') { doneMap.upload = true; }
+  if (stage === 'chunked')  { doneMap.upload = doneMap.chunk = true; }
+  if (stage === 'indexed')  { doneMap.upload = doneMap.chunk = doneMap.index = true; }
+  if (stage === 'tested')   { doneMap.upload = doneMap.chunk = doneMap.index = doneMap.chat = true; }
+
+  document.querySelectorAll('[data-progress-step]').forEach(el => {
+    const key = el.dataset.progressStep;
+    el.classList.toggle('done',   Boolean(doneMap[key]));
+    el.classList.toggle('active', key === cfg.active && !doneMap[key]);
   });
+}
+
+function _resetProgress() {
+  _trackedPdf     = null;
+  _trackedStage   = null;
+  _trackedPercent = null;
+  document.getElementById('workflow-step-label').textContent    = 'Step 0 of 4';
+  document.getElementById('workflow-progress-title').textContent = 'Catalog setup progress';
+  document.getElementById('workflow-progress-sub').textContent   = 'Upload a PDF to start the catalog pipeline.';
+  document.getElementById('workflow-progress-percent').textContent = '0%';
+  document.getElementById('workflow-progress-fill').style.width  = '0%';
+  document.getElementById('progress-pdf-name-bar').style.display = 'none';
+  document.querySelectorAll('[data-progress-step]').forEach(el => el.classList.remove('done','active'));
+}
+
+function updateWorkflowProgress(data = {}) {
+  if (data.tracked_pdf && data.tracked_stage) {
+    // Never downgrade from 'tested' — local state is source of truth after approve button
+    const STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested'];
+    if (_trackedStage === 'tested' && STAGE_ORDER.indexOf(data.tracked_stage) < STAGE_ORDER.indexOf('tested')) {
+      return; // Keep current 100% state
+    }
+    _trackedPdf   = data.tracked_pdf;
+    _trackedStage = data.tracked_stage;
+    // Prefer locally-computed _trackedPercent (from runSingleSplit) over server value
+    const pct = _trackedPercent !== null ? _trackedPercent
+              : (data.tracked_percent !== undefined ? data.tracked_percent : undefined);
+    if (pct !== undefined) {
+      _renderProgress(data.tracked_pdf, data.tracked_stage, pct);
+      const totalParts = data.total_split_parts || null;
+      if (totalParts) {
+        let sub;
+        if (pct <= 50) {
+          const chunkedParts = Math.round((pct - 25) / 25 * totalParts);
+          sub = `${chunkedParts} of ${totalParts} parts chunked. Continue processing remaining parts.`;
+        } else {
+          const indexedParts = Math.round((pct - 50) / 25 * totalParts);
+          sub = `${indexedParts} of ${totalParts} parts indexed. Continue embedding remaining parts.`;
+        }
+        document.getElementById('workflow-progress-sub').textContent = sub;
+      }
+    } else {
+      _renderProgress(data.tracked_pdf, data.tracked_stage);
+    }
+  } else if (!_trackedPdf) {
+    _resetProgress();
+  }
+}
+
+function approvePdfForTracking() {
+  const filename = document.getElementById('preview-pdf-name').textContent.trim();
+  if (!filename) return;
+  const btn = document.getElementById('btn-approve-pdf');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Approving…';
+  fetch('/admin-panel/api/approve-pdf/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ filename })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) { showToast(data.error, 'error'); return; }
+    setTrackedPdf(filename, data.stage || 'uploaded');
+    showToast(`Tracking progress for "${filename}".`, 'success');
+    btn.innerHTML = '<i class="fa fa-check-circle"></i> Approved';
+  })
+  .catch(() => showToast('Approve failed.', 'error'))
+  .finally(() => { btn.disabled = false; });
 }
 
 // ── Text Splitter ────────────────────────────────────
@@ -1189,6 +1559,18 @@ function showSplitterForPdf(filename) {
   document.getElementById('split-parts-list').innerHTML = '';
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
   if (wholeBtn) wholeBtn.style.display = '';
+  // Show Done/Pending status for non-split PDF
+  const wholePdfStatus = document.getElementById('whole-pdf-status');
+  if (wholePdfStatus) {
+    if (!_pdfDetails.length) {
+      fetch('/admin-panel/api/pdfs/').then(r => r.json()).then(d => {
+        _pdfDetails = d.pdf_details || [];
+        _updateWholePdfStatus(filename);
+      }).catch(() => {});
+    } else {
+      _updateWholePdfStatus(filename);
+    }
+  }
   document.getElementById('splitter-preview').className = 'splitter-preview';
   document.getElementById('splitter-preview').innerHTML = '';
   document.getElementById('splitter-pdf-name').textContent = filename;
@@ -1200,7 +1582,21 @@ function showSplitterForPdf(filename) {
 
 let _splitStem    = null;
 let _splitParts   = [];
+let _pdfDetails   = [];
 let _pagesPerPart = 5;
+
+function _updateWholePdfStatus(filename) {
+  const el = document.getElementById('whole-pdf-status');
+  if (!el) return;
+  const detail = _pdfDetails.find(d => d.name === filename);
+  if (detail && detail.chunks_count > 0) {
+    el.style.display = 'flex';
+    el.innerHTML = `<i class="fa fa-check-circle" style="color:#22c55e"></i> <span style="color:#22c55e">Done &mdash; ${detail.chunks_count} chunk${detail.chunks_count !== 1 ? 's' : ''} created</span>`;
+  } else {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+}
 
 function toggleSplitter() {
   _splitterOpen = !_splitterOpen;
@@ -1247,7 +1643,7 @@ function setPreset(btn, val) {
 
 document.addEventListener('DOMContentLoaded', () => {
   // On fresh page load always start progress from session (0 until user does something)
-  updateWorkflowProgress({ session_uploaded_pdfs: [], session_chunks: 0, session_indexed: 0 });
+  updateWorkflowProgress({ pdf_progress: {}, approved_pdfs: [] });
   refreshStats();
   const customInput = document.getElementById('pages-per-input');
   if (customInput) {
@@ -1311,21 +1707,30 @@ function renderSplitParts(parts) {
   document.getElementById('next-to-chunk').style.display = 'none';
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
   if (wholeBtn) wholeBtn.style.display = 'none';
-  list.innerHTML = parts.map((p, i) => `
-    <div class="split-part-item" id="split-part-${i}" onclick="loadSplitPartPreview(${i})" title="Preview this split part">
+  const wholePdfStatus = document.getElementById('whole-pdf-status');
+  if (wholePdfStatus) { wholePdfStatus.style.display = 'none'; wholePdfStatus.innerHTML = ''; }
+  list.innerHTML = parts.map((p, i) => {
+    const isDone = !!p.done;
+    const statusCls  = isDone ? 'done'    : 'pending';
+    const statusText = isDone ? '\u2713 Done' : 'Pending';
+    const itemCls    = isDone ? 'split-part-item done' : 'split-part-item';
+    const runBtn     = isDone
+      ? `<button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})" title="Re-run"><i class="fa fa-redo"></i></button>`
+      : `<button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})"><i class="fa fa-play"></i> Run</button>`;
+    return `
+    <div class="${itemCls}" id="split-part-${i}" onclick="loadSplitPartPreview(${i})" title="Preview this split part">
       <div class="split-part-num">${i+1}</div>
       <div class="split-part-info">
         <div class="part-name">${escHtml(p.filename)}</div>
-        <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;·&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
+        <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;&middot;&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
       </div>
-      <span class="split-part-status pending" id="split-status-${i}">Pending</span>
+      <span class="split-part-status ${statusCls}" id="split-status-${i}">${statusText}</span>
       <button class="btn btn-sm btn-secondary split-preview-btn" onclick="event.stopPropagation();loadSplitPartPreview(${i})">
         <i class="fa fa-eye"></i>
       </button>
-      <button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})">
-        <i class="fa fa-play"></i> Run
-      </button>
-    </div>`).join('');
+      ${runBtn}
+    </div>`;
+  }).join('');
   if (parts.length) loadSplitPartPreview(0);
 }
 
@@ -1334,12 +1739,14 @@ async function runSingleSplit(idx) {
   const itemEl = document.getElementById(`split-part-${idx}`);
   const statEl = document.getElementById(`split-status-${idx}`);
   const btnEl  = document.getElementById(`split-btn-${idx}`);
+  const processAllBtn = document.getElementById('btn-run-all-splits');
 
   itemEl.className = 'split-part-item running';
   statEl.className = 'split-part-status running';
   statEl.textContent = 'Running…';
   btnEl.disabled = true;
   btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+  if (processAllBtn) { processAllBtn.disabled = true; processAllBtn.style.opacity = '0.5'; }
 
   try {
     const res  = await fetch('/admin-panel/api/pipeline-split/', {
@@ -1361,8 +1768,44 @@ async function runSingleSplit(idx) {
       itemEl.className = 'split-part-item done';
       statEl.className = 'split-part-status done';
       statEl.textContent = '✓ Done';
-      btnEl.innerHTML = '<i class="fa fa-check"></i>';
-      refreshStats();
+      btnEl.innerHTML = '<i class="fa fa-redo"></i>';
+      
+      // Update stage for this split part
+      try {
+        await fetch('/admin-panel/api/update-pdf-stage/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+          body: JSON.stringify({ filename: part.filename, stage: 'chunked' })
+        });
+      } catch(e) {}
+
+      // Proportional progress: 25% + (doneParts/totalParts) * 25%
+      if (_splitStem && _splitParts.length) {
+        const doneParts = _splitParts.filter((_, i) => {
+          const el = document.getElementById(`split-status-${i}`);
+          return el && el.textContent === '✓ Done';
+        }).length;
+        const totalParts = _splitParts.length;
+        const percent = 25 + (doneParts / totalParts) * 25;
+        const sub = doneParts < totalParts
+          ? `${doneParts} of ${totalParts} parts chunked. Continue processing remaining parts.`
+          : 'All parts chunked. Now index & embed for semantic search.';
+        _trackedPdf   = _splitStem;
+        _trackedStage = doneParts < totalParts ? 'uploaded' : 'chunked';
+        _renderProgress(_splitStem, 'uploaded', percent);
+        document.getElementById('workflow-progress-sub').textContent = sub;
+        if (doneParts === totalParts) {
+          // Persist full chunked stage to DB
+          fetch('/admin-panel/api/update-pdf-stage/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({ filename: _splitStem, stage: 'chunked' })
+          }).catch(() => {});
+        }
+      }
+
+      _trackedPercent = null;  // let server recompute fresh percent
+      await refreshStats();
       loadPdfList();
     }
   } catch(e) {
@@ -1373,13 +1816,15 @@ async function runSingleSplit(idx) {
   } finally {
     const currentBtn = document.getElementById(`split-btn-${idx}`);
     if (currentBtn) {
-      if (currentBtn.innerHTML.includes('check')) {
-        currentBtn.disabled = true;
+      if (currentBtn.innerHTML.includes('redo')) {
+        currentBtn.disabled = false;
       } else {
         currentBtn.innerHTML = '<i class="fa fa-play"></i> Run';
         currentBtn.disabled = false;
       }
     }
+    const processAllBtn2 = document.getElementById('btn-run-all-splits');
+    if (processAllBtn2) { processAllBtn2.disabled = false; processAllBtn2.style.opacity = ''; }
   }
 }
 
@@ -1597,6 +2042,31 @@ async function loadIndexPanel() {
       console.error('Failed to load PDF list in index panel', e);
     }
   }
+  
+  // Auto-detect and update progress when navigating to index panel
+  if (selectedPdf) {
+    try {
+      const statsRes = await fetch('/admin-panel/api/stats/');
+      const statsData = await statsRes.json();
+      const currentStage = (statsData.pdf_progress || {})[selectedPdf];
+      if (currentStage === 'chunked') {
+        const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+        const lookupPdf = splitRe2.test(selectedPdf)
+          ? selectedPdf.replace(splitRe2, '') + '.pdf'
+          : selectedPdf;
+        const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupPdf)}&index=1`);
+        const chunksData = await chunksRes.json();
+        if (chunksData.chunks && chunksData.chunks.some(c => c.status === 'Embedded')) {
+          await fetch('/admin-panel/api/update-pdf-stage/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({ filename: selectedPdf, stage: 'indexed' })
+          });
+          await refreshStats();
+        }
+      }
+    } catch (e) {}
+  }
 
   // 2. If selectedPdf is STILL not set (e.g. no PDFs exist)
   if (!selectedPdf) {
@@ -1613,21 +2083,30 @@ async function loadIndexPanel() {
     return;
   }
 
-  // 3. Update title and fetch chunks for selectedPdf
-  pdfTitleEl.textContent = selectedPdf;
+  // 3. Resolve the PDF name to use for chunks lookup:
+  //    If selectedPdf is a split part, use the parent stem so we aggregate all parts' chunks.
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const chunksPdf = splitRe.test(selectedPdf)
+    ? selectedPdf.replace(splitRe, '') + '.pdf'
+    : selectedPdf;
+  const displayName = splitRe.test(selectedPdf)
+    ? selectedPdf.replace(splitRe, '')
+    : selectedPdf;
+
+  pdfTitleEl.textContent = displayName;
   updateChatContextDisplay();
-  
+
   tableBody.innerHTML = `
     <tr>
       <td colspan="4" class="index-table-empty">
         <i class="fa fa-spinner fa-spin" style="font-size: 24px; display: block; margin-bottom: 10px; color: var(--orange);"></i>
-        Loading chunks for "${selectedPdf}"...
+        Loading chunks for "${escHtml(displayName)}"...
       </td>
     </tr>
   `;
 
   try {
-    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(selectedPdf)}`);
+    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}&index=1`);
     const data = await res.json();
     if (data.error) {
       tableBody.innerHTML = `
@@ -1644,6 +2123,10 @@ async function loadIndexPanel() {
       _cachedIndexChunks = data.chunks || [];
       _indexSelectedDocId = data.document_id;
       renderIndexChunks(_cachedIndexChunks);
+      // Show approve button immediately if there are embedded chunks (no query required)
+      if (_cachedIndexChunks.some(c => c.status === 'Embedded')) {
+        showMarkAsTestedButton();
+      }
     }
   } catch (err) {
     tableBody.innerHTML = `
@@ -1838,9 +2321,92 @@ async function submitIndexChat() {
       const sourcesBlock = src ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">${src}</div>` : '';
       
       appendIndexChatMsg('bot', answerHtml + sourcesBlock);
+      
+      // Show "Mark as Tested" button if not already tested
+      showMarkAsTestedButton();
     }
   } catch (err) {
     document.getElementById('index-chat-typing')?.remove();
     appendIndexChatMsg('bot', '<span style="color:var(--orange)">Network error. Please try again.</span>');
+  }
+}
+
+function showMarkAsTestedButton() {
+  if (!selectedPdf) return;
+  
+  // Check if already exists
+  if (document.getElementById('mark-tested-btn')) return;
+  
+  // Find the chat input container
+  const chatInputRow = document.querySelector('.index-chat-input-row');
+  if (!chatInputRow) return;
+  
+  // Check if button container already exists, if not create it
+  let buttonContainer = document.getElementById('approval-button-container');
+  if (!buttonContainer) {
+    buttonContainer = document.createElement('div');
+    buttonContainer.id = 'approval-button-container';
+    buttonContainer.style.cssText = 'padding: 12px 16px 0 16px;';
+    chatInputRow.parentElement.appendChild(buttonContainer);
+  }
+  
+  const button = document.createElement('button');
+  button.id = 'mark-tested-btn';
+  button.className = 'btn btn-success';
+  button.style.cssText = 'width: 100%;';
+  button.innerHTML = '<i class="fa fa-check-circle"></i> Approve Testing (Mark as 100%)';
+  button.onclick = markPdfAsTested;
+  
+  buttonContainer.appendChild(button);
+}
+
+async function markPdfAsTested() {
+  // Get the PDF name from the Index panel title (more reliable)
+  const pdfTitleEl = document.getElementById('index-selected-pdf');
+  const pdfName = pdfTitleEl ? pdfTitleEl.textContent.trim() : selectedPdf;
+  
+  console.log('Approving PDF:', pdfName);
+  console.log('Selected PDF variable:', selectedPdf);
+  
+  if (!pdfName || pdfName === 'No PDF Selected') {
+    showToast('No PDF selected for testing approval', 'error');
+    return;
+  }
+  
+  const btn = document.getElementById('mark-tested-btn');
+  if (!btn) return;
+  
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Approving...';
+  
+  try {
+    const res = await fetch('/admin-panel/api/update-pdf-stage/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: pdfName, stage: 'tested' })
+    });
+    const data = await res.json();
+    
+    console.log('Update response:', data);
+    
+    if (res.ok) {
+      btn.innerHTML = '<i class="fa fa-check-double"></i> Approved! Testing Complete';
+      btn.style.cssText = 'width: 100%; background: #22c55e; color: white; font-weight: 600;';
+      btn.disabled = true;
+      // Update local state and render immediately — do NOT call refreshStats after
+      // because the server session may not reflect 'tested' yet and would overwrite back to 75%
+      const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+      _trackedPdf   = displayPdf;
+      _trackedStage = 'tested';
+      _renderProgress(displayPdf, 'tested');
+      showToast(`"${pdfName}" testing approved! Progress updated to 100%`, 'success');
+    } else {
+      throw new Error(data.error || 'Failed to update stage');
+    }
+  } catch (error) {
+    console.error('Approval error:', error);
+    showToast(error.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-check-circle"></i> Approve Testing (Mark as 100%)';
   }
 }
