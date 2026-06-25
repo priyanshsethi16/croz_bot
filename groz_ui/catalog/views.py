@@ -542,42 +542,89 @@ def approve_pdf(request):
     
     if not filename:
         return JsonResponse({'error': 'Missing filename.'}, status=400)
-    
+
     # Auto-detect the actual stage based on what's been completed
-    from .models import CatalogDocument, DocumentChunk
+    from .models import CatalogDocument, DocumentChunk, ApiKey
     from pathlib import Path
-    
+    import json as _j
+
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
     detected_stage = 'uploaded'
     pdf_stem = Path(filename).stem
-    
-    try:
-        # Try to find the document in database
-        doc = CatalogDocument.objects.filter(
-            original_filename__in=[pdf_stem, filename]
-        ).order_by('-version').first()
-        
-        if doc:
-            chunks_count = DocumentChunk.objects.filter(document=doc).count()
-            indexed_count = DocumentChunk.objects.filter(
-                document=doc,
-                index_status=DocumentChunk.IndexStatus.INDEXED
-            ).count()
-            
-            # Determine stage based on actual status
-            if indexed_count > 0:
-                detected_stage = 'indexed'  # 75% - has indexed chunks
-            elif chunks_count > 0:
-                detected_stage = 'chunked'  # 50% - has chunks but not indexed
+    done_count = None
+
+    # If caller passed split_parts list (parent stem preview), aggregate from all parts
+    split_parts = body.get('split_parts', []) if isinstance(body, dict) else []
+
+    if split_parts:
+        try:
+            _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            _stage_map = {}
+
+        part_stages = []
+        for part_name in split_parts:
+            part_stem = Path(part_name).stem
+            # Check DB stage map for this part
+            part_stage = _stage_map.get(part_name) or _stage_map.get(part_stem)
+            if part_stage in STAGE_ORDER:
+                part_stages.append(part_stage)
             else:
-                detected_stage = 'uploaded'  # 25% - uploaded but no chunks yet
-    except Exception:
-        pass
-    
-    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+                # Check DB chunks
+                try:
+                    doc = CatalogDocument.objects.filter(
+                        original_filename__in=[part_stem, part_name]
+                    ).order_by('-version').first()
+                    if doc:
+                        indexed_count = DocumentChunk.objects.filter(
+                            document=doc, index_status=DocumentChunk.IndexStatus.INDEXED
+                        ).count()
+                        chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                        if indexed_count > 0:
+                            part_stages.append('indexed')
+                        elif chunks_count > 0:
+                            part_stages.append('chunked')
+                        else:
+                            part_stages.append('uploaded')
+                    else:
+                        # Fallback: check filesystem vision_pipeline/data
+                        import re as _re
+                        sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', part_stem)[:60].strip('_')
+                        data_dir = Path(__file__).resolve().parent.parent.parent / 'vision_pipeline' / 'data'
+                        chunks_dir = data_dir / sanitized / 'chunks'
+                        if chunks_dir.exists() and list(chunks_dir.glob('*.md')):
+                            part_stages.append('chunked')
+                        elif (data_dir / sanitized / 'products.json').exists():
+                            part_stages.append('chunked')
+                        else:
+                            part_stages.append('uploaded')
+                except Exception:
+                    part_stages.append('uploaded')
+
+        if part_stages:
+            done_count = sum(1 for s in part_stages if s != 'uploaded')
+            # Overall progress = minimum stage (all parts must reach a stage)
+            detected_stage = min(part_stages, key=lambda s: STAGE_ORDER.index(s))
+    else:
+        try:
+            doc = CatalogDocument.objects.filter(
+                original_filename__in=[pdf_stem, filename]
+            ).order_by('-version').first()
+
+            if doc:
+                chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                indexed_count = DocumentChunk.objects.filter(
+                    document=doc,
+                    index_status=DocumentChunk.IndexStatus.INDEXED
+                ).count()
+                if indexed_count > 0:
+                    detected_stage = 'indexed'
+                elif chunks_count > 0:
+                    detected_stage = 'chunked'
+        except Exception:
+            pass
 
     # Load persisted stage from DB (survives logout/login)
-    from .models import ApiKey
-    import json as _j
     try:
         _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
     except Exception:
@@ -586,19 +633,25 @@ def approve_pdf(request):
     if db_stage not in STAGE_ORDER:
         db_stage = None
 
-    # Never downgrade — keep highest stage from DB, session, or detected
-    existing_session_stage = request.session.get('pdf_progress', {}).get(filename)
-    candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
-    detected_stage = max(candidate_stages, key=lambda s: STAGE_ORDER.index(s))
+    # Never downgrade only if detected_stage confirms data still exists (> uploaded means chunks/index present)
+    # If detected_stage is 'uploaded' (no chunks/index found), trust it — data was deleted
+    if detected_stage == 'uploaded':
+        final_stage = 'uploaded'
+    else:
+        existing_session_stage = request.session.get('pdf_progress', {}).get(filename)
+        candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
+        final_stage = max(candidate_stages, key=lambda s: STAGE_ORDER.index(s))
 
     # Replace — only track one PDF at a time
     request.session['approved_pdfs'] = [filename]
-    request.session['pdf_progress'] = {filename: detected_stage}
+    request.session['pdf_progress'] = {filename: final_stage}
     request.session.modified = True
-    
+
     return JsonResponse({
         'message': f'"{filename}" approved and ready for processing.',
-        'stage': detected_stage
+        'stage': final_stage,
+        'done_count': done_count if split_parts else None,
+        'total_count': len(split_parts) if split_parts else None,
     })
 
 
@@ -771,6 +824,134 @@ def catalog_stats(request):
 
     stats['pdf_progress'] = pdf_progress
     stats['approved_pdfs'] = approved_pdfs
+
+    # Compute tracked_pdf, tracked_stage, tracked_percent for the progress bar
+    # Prefer parent stem (without split suffix) as tracked_pdf
+    import re as _re
+    splits_dir = PROJECT_ROOT / 'input' / 'splits'
+    split_re = _re.compile(r'_(custom_)?p\d{4}-\d{4}(\.pdf)?$', _re.I)
+    tracked_pdf = None
+    tracked_stage = None
+    # Find the most recently approved entry, preferring parent stems
+    for fname in reversed(approved_pdfs):
+        if split_re.search(fname):
+            # This is a split part — use parent stem instead
+            parent = split_re.sub('', fname).rstrip('.')
+            if not tracked_pdf:
+                tracked_pdf = parent
+                tracked_stage = 'uploaded'  # will be recomputed below from actual data
+        else:
+            # Check if this is a parent stem that has a splits directory
+            split_parts_dir_check = splits_dir / fname
+            if split_parts_dir_check.exists() and list(split_parts_dir_check.glob('*.pdf')):
+                # Has splits — don't trust session stage, recompute from actual data
+                tracked_pdf = fname
+                tracked_stage = 'uploaded'  # will be recomputed below
+            else:
+                tracked_pdf = fname
+                tracked_stage = pdf_progress.get(fname)
+            break
+    if not tracked_stage or tracked_stage not in STAGE_ORDER:
+        tracked_stage = 'uploaded'
+    tracked_percent = None
+    total_parts = None
+
+    if tracked_pdf and tracked_stage in STAGE_ORDER:
+        # Check if this is a parent stem with split parts — always recompute from actual data
+        split_parts_dir = splits_dir / tracked_pdf
+        if split_parts_dir.exists():
+            split_part_files = sorted([f.name for f in split_parts_dir.glob('*.pdf')])
+            if split_part_files:
+                try:
+                    from .models import CatalogDocument, DocumentChunk
+                    import re as _re2
+                    vision_data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
+                    total_parts = len(split_part_files)
+                    chunked_count = 0
+                    indexed_count = 0
+
+                    for p in split_part_files:
+                        part_stem = Path(p).stem
+                        has_chunks = False
+                        has_index  = False
+
+                        # --- Check chunks ---
+                        # 1. session/DB stage map
+                        if (pdf_progress.get(p) or db_map.get(p) or
+                                pdf_progress.get(part_stem) or db_map.get(part_stem)) in STAGE_ORDER[1:]:
+                            has_chunks = True
+                        # 2. DB DocumentChunk records
+                        if not has_chunks:
+                            try:
+                                doc = CatalogDocument.objects.filter(
+                                    original_filename__in=[part_stem, p]
+                                ).first()
+                                if doc and DocumentChunk.objects.filter(document=doc).exists():
+                                    has_chunks = True
+                            except Exception:
+                                pass
+                        # 3. Filesystem vision_pipeline/data
+                        if not has_chunks:
+                            sanitized = _re2.sub(r'[^a-zA-Z0-9_\-]', '_', part_stem)[:60].strip('_')
+                            data_folder = vision_data_dir / sanitized
+                            if data_folder.exists() and (
+                                list(data_folder.glob('chunks/*.md')) or
+                                (data_folder / 'products.json').exists()
+                            ):
+                                has_chunks = True
+
+                        if has_chunks:
+                            chunked_count += 1
+
+                        # --- Check indexed ---
+                        # 1. session/DB stage map
+                        part_stage = (pdf_progress.get(p) or db_map.get(p) or
+                                      pdf_progress.get(part_stem) or db_map.get(part_stem))
+                        if part_stage in ('indexed', 'tested'):
+                            has_index = True
+                        # 2. DB indexed chunks
+                        if not has_index:
+                            try:
+                                doc = CatalogDocument.objects.filter(
+                                    original_filename__in=[part_stem, p]
+                                ).first()
+                                if doc and DocumentChunk.objects.filter(
+                                    document=doc,
+                                    index_status=DocumentChunk.IndexStatus.INDEXED
+                                ).exists():
+                                    has_index = True
+                            except Exception:
+                                pass
+
+                        if has_index:
+                            indexed_count += 1
+
+                    # Compute overall progress
+                    if indexed_count == total_parts:
+                        tracked_stage = 'indexed'   # 75%
+                    elif indexed_count > 0 or chunked_count == total_parts:
+                        # Between 50% and 75%: all chunked + some indexed
+                        tracked_percent = 50 + (indexed_count / total_parts) * 25
+                        tracked_stage = 'chunked'
+                    elif chunked_count > 0:
+                        # Between 25% and 50%: some chunked, none indexed
+                        tracked_percent = 25 + (chunked_count / total_parts) * 25
+                        tracked_stage = 'uploaded'
+                    else:
+                        tracked_stage = 'uploaded'  # 25%
+
+                except Exception:
+                    pass
+
+    if tracked_pdf and tracked_stage:
+        stats['tracked_pdf']   = tracked_pdf
+        stats['tracked_stage'] = tracked_stage
+        if tracked_percent is not None:
+            stats['tracked_percent']   = round(tracked_percent, 2)
+            stats['total_split_parts'] = total_parts
+        import logging
+        logging.warning(f'[STATS] tracked_pdf={tracked_pdf} tracked_stage={tracked_stage} tracked_percent={tracked_percent} total_parts={total_parts}')
+
     return JsonResponse(stats)
 
 
@@ -1108,6 +1289,29 @@ def delete_pdf(request):
         import logging
         logging.warning(f'Error deleting V2 database records for {filename}: {e}')
 
+    # Clear stage map entries for this PDF and its split parts
+    import json as _j
+    from .models import ApiKey
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        keys_to_remove = [k for k in _stage_map if k == filename or k == stem or k.startswith(stem + '_')]
+        for k in keys_to_remove:
+            del _stage_map[k]
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+    except Exception:
+        pass
+
+    # Clear session stage for this PDF
+    pdf_progress = request.session.get('pdf_progress', {})
+    approved_pdfs = request.session.get('approved_pdfs', [])
+    keys_to_remove = [k for k in pdf_progress if k == filename or k == stem or k.startswith(stem + '_')]
+    for k in keys_to_remove:
+        del pdf_progress[k]
+    approved_pdfs = [p for p in approved_pdfs if p != filename and p != stem and not p.startswith(stem + '_')]
+    request.session['pdf_progress'] = pdf_progress
+    request.session['approved_pdfs'] = approved_pdfs
+    request.session.modified = True
+
     return JsonResponse({'message': f'"{filename}" and all associated data deleted.'})
 
 
@@ -1144,29 +1348,54 @@ def list_chunks(request):
     if not doc:
         doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
 
-    # For split PDFs (e.g. Parent_custom_p0001-0004), fall back to parent doc
-    if not doc:
-        parent_stem = re.sub(r'_(custom_)?p\d{4}-\d{4}$', '', pdf_stem)
-        if parent_stem != pdf_stem:
-            doc = CatalogDocument.objects.filter(original_filename=parent_stem).order_by('-version').first()
-
     document_id = str(doc.id) if doc else None
+
     if doc:
         db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
         for c in db_chunks:
-            filename = f"chunk_{c.ordinal:04d}.md"
             prod_name = 'General Info'
             if c.family:
                 prod_name = c.family.product_name
             elif c.variant and c.variant.family:
                 prod_name = c.variant.family.product_name
             chunks.append({
-                'filename': filename,
+                'filename': f"chunk_{c.ordinal:04d}.md",
                 'content': c.text,
                 'ordinal': c.ordinal,
                 'product_name': prod_name,
                 'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
             })
+    else:
+        # No direct doc — check if this is a parent stem with split part documents
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+        if splits_dir.exists():
+            split_stems = sorted(
+                re.sub(r'[^a-zA-Z0-9_\-]', '_', p.stem)[:60].strip('_')
+                for p in splits_dir.glob('*.pdf')
+            )
+            split_docs = CatalogDocument.objects.filter(
+                original_filename__in=split_stems
+            ).order_by('original_filename')
+            if split_docs.exists():
+                # Use first split doc's id for chat context (covers all splits)
+                document_id = str(split_docs.first().id)
+                ordinal_offset = 0
+                for split_doc in split_docs:
+                    db_chunks = DocumentChunk.objects.filter(document=split_doc).order_by('ordinal')
+                    for c in db_chunks:
+                        prod_name = 'General Info'
+                        if c.family:
+                            prod_name = c.family.product_name
+                        elif c.variant and c.variant.family:
+                            prod_name = c.variant.family.product_name
+                        chunks.append({
+                            'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
+                            'content': c.text,
+                            'ordinal': ordinal_offset + c.ordinal,
+                            'product_name': prod_name,
+                            'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
+                        })
+                    ordinal_offset += DocumentChunk.objects.filter(document=split_doc).count()
 
     return JsonResponse({'document_id': document_id, 'chunks': chunks})
 

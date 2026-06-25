@@ -125,6 +125,31 @@ async function previewParentGroup(parentStem, parts) {
   document.getElementById('splitter-pages-badge').textContent = `${parts.length} parts`;
   document.getElementById('splitter-info-bar').style.display = 'flex';
 
+  // Compute proportional progress from existing split parts' stages
+  try {
+    const approveRes = await fetch('/admin-panel/api/approve-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: parentStem, split_parts: parts })
+    });
+    const approveData = await approveRes.json();
+    if (!approveData.error) {
+      const stage = approveData.stage || 'uploaded';
+      const doneCount = approveData.done_count !== undefined ? approveData.done_count : null;
+      const totalCount = parts.length;
+      if (doneCount !== null && doneCount < totalCount) {
+        const percent = 25 + (doneCount / totalCount) * 25;
+        _trackedPdf   = parentStem;
+        _trackedStage = 'uploaded';
+        _renderProgress(parentStem, 'uploaded', percent);
+        document.getElementById('workflow-progress-sub').textContent =
+          `${doneCount} of ${totalCount} parts chunked. Continue processing remaining parts.`;
+      } else {
+        setTrackedPdf(parentStem, stage);
+      }
+    }
+  } catch(e) {}
+
   renderSplitParts(splits);
 }
 
@@ -816,21 +841,12 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       }
       
       showToast(`Indexed ${data.indexed} chunk(s) for "${pdfName}".`, 'success');
-      
-      console.log('About to refresh stats after indexing');
+
+      // Clear local percent so refreshStats uses fresh server-computed value
+      _trackedPercent = null;
       await refreshStats();
-      
-      // Wait a bit and refresh again to ensure session is saved
-      await new Promise(resolve => setTimeout(resolve, 300));
-      await refreshStats();
-      
-      console.log('Stats refreshed, now refreshing PDF list');
       await loadPdfList();
-      console.log('PDF list refreshed');
-      
-      // Also refresh index panel if we're on it
       if (document.getElementById('panel-index')?.classList.contains('active')) {
-        console.log('Refreshing index panel');
         await loadIndexPanel();
       }
     } catch(error) {
@@ -1206,8 +1222,10 @@ async function refreshStats() {
     console.log('Stats received:', { 
       pdf_progress: data.pdf_progress, 
       approved_pdfs: data.approved_pdfs,
-      total_pdfs: data.total_pdfs,
-      processed: data.processed
+      tracked_pdf: data.tracked_pdf,
+      tracked_stage: data.tracked_stage,
+      tracked_percent: data.tracked_percent,
+      total_split_parts: data.total_split_parts
     });
     document.getElementById('stat-pdfs').textContent      = data.total_pdfs ?? '—';
     document.getElementById('stat-processed').textContent = (data.processed||[]).length;
@@ -1227,8 +1245,9 @@ function _num(value) {
 
 // ── Per-PDF progress tracking ─────────────────────────────────────────────────
 // stages: uploaded=25%  chunked=50%  indexed=75%  tested=100%
-let _trackedPdf   = null;
-let _trackedStage = null;
+let _trackedPdf     = null;
+let _trackedStage   = null;
+let _trackedPercent = null;  // custom percent for partial-split progress
 
 const STAGE_CONFIG = {
   uploaded: { percent: 25,  stepNo: 1, active: 'upload', title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
@@ -1238,8 +1257,9 @@ const STAGE_CONFIG = {
 };
 
 function setTrackedPdf(filename, stage) {
-  _trackedPdf   = filename;
-  _trackedStage = stage;
+  _trackedPdf     = filename;
+  _trackedStage   = stage;
+  _trackedPercent = null;
   _renderProgress(filename, stage);
 }
 
@@ -1260,14 +1280,16 @@ function advanceTrackedStage(stage, fallbackPdf) {
   }
 }
 
-function _renderProgress(filename, stage) {
+function _renderProgress(filename, stage, customPercent) {
   const cfg = STAGE_CONFIG[stage];
   if (!cfg) return;
+  const percent = (customPercent !== undefined) ? customPercent : cfg.percent;
+  _trackedPercent = (customPercent !== undefined) ? customPercent : null;
   document.getElementById('workflow-step-label').textContent   = `Step ${cfg.stepNo} of 4`;
   document.getElementById('workflow-progress-title').textContent = cfg.title;
   document.getElementById('workflow-progress-sub').textContent   = cfg.sub;
-  document.getElementById('workflow-progress-percent').textContent = `${cfg.percent}%`;
-  document.getElementById('workflow-progress-fill').style.width   = `${cfg.percent}%`;
+  document.getElementById('workflow-progress-percent').textContent = `${Math.round(percent)}%`;
+  document.getElementById('workflow-progress-fill').style.width   = `${percent}%`;
 
   const nameBar = document.getElementById('progress-pdf-name-bar');
   const nameEl  = document.getElementById('progress-pdf-name');
@@ -1288,6 +1310,9 @@ function _renderProgress(filename, stage) {
 }
 
 function _resetProgress() {
+  _trackedPdf     = null;
+  _trackedStage   = null;
+  _trackedPercent = null;
   document.getElementById('workflow-step-label').textContent    = 'Step 0 of 4';
   document.getElementById('workflow-progress-title').textContent = 'Catalog setup progress';
   document.getElementById('workflow-progress-sub').textContent   = 'Upload a PDF to start the catalog pipeline.';
@@ -1301,7 +1326,26 @@ function updateWorkflowProgress(data = {}) {
   if (data.tracked_pdf && data.tracked_stage) {
     _trackedPdf   = data.tracked_pdf;
     _trackedStage = data.tracked_stage;
-    _renderProgress(data.tracked_pdf, data.tracked_stage);
+    // Prefer locally-computed _trackedPercent (from runSingleSplit) over server value
+    const pct = _trackedPercent !== null ? _trackedPercent
+              : (data.tracked_percent !== undefined ? data.tracked_percent : undefined);
+    if (pct !== undefined) {
+      _renderProgress(data.tracked_pdf, data.tracked_stage, pct);
+      const totalParts = data.total_split_parts || null;
+      if (totalParts) {
+        let sub;
+        if (pct <= 50) {
+          const chunkedParts = Math.round((pct - 25) / 25 * totalParts);
+          sub = `${chunkedParts} of ${totalParts} parts chunked. Continue processing remaining parts.`;
+        } else {
+          const indexedParts = Math.round((pct - 50) / 25 * totalParts);
+          sub = `${indexedParts} of ${totalParts} parts indexed. Continue embedding remaining parts.`;
+        }
+        document.getElementById('workflow-progress-sub').textContent = sub;
+      }
+    } else {
+      _renderProgress(data.tracked_pdf, data.tracked_stage);
+    }
   } else if (!_trackedPdf) {
     _resetProgress();
   }
@@ -1629,7 +1673,7 @@ async function runSingleSplit(idx) {
       statEl.textContent = '✓ Done';
       btnEl.innerHTML = '<i class="fa fa-check"></i>';
       
-      // Update stage to 'chunked' for this split part
+      // Update stage for this split part
       try {
         await fetch('/admin-panel/api/update-pdf-stage/', {
           method: 'POST',
@@ -1637,8 +1681,34 @@ async function runSingleSplit(idx) {
           body: JSON.stringify({ filename: part.filename, stage: 'chunked' })
         });
       } catch(e) {}
-      
-      refreshStats();
+
+      // Proportional progress: 25% + (doneParts/totalParts) * 25%
+      if (_splitStem && _splitParts.length) {
+        const doneParts = _splitParts.filter((_, i) => {
+          const el = document.getElementById(`split-status-${i}`);
+          return el && el.textContent === '✓ Done';
+        }).length;
+        const totalParts = _splitParts.length;
+        const percent = 25 + (doneParts / totalParts) * 25;
+        const sub = doneParts < totalParts
+          ? `${doneParts} of ${totalParts} parts chunked. Continue processing remaining parts.`
+          : 'All parts chunked. Now index & embed for semantic search.';
+        _trackedPdf   = _splitStem;
+        _trackedStage = doneParts < totalParts ? 'uploaded' : 'chunked';
+        _renderProgress(_splitStem, 'uploaded', percent);
+        document.getElementById('workflow-progress-sub').textContent = sub;
+        if (doneParts === totalParts) {
+          // Persist full chunked stage to DB
+          fetch('/admin-panel/api/update-pdf-stage/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({ filename: _splitStem, stage: 'chunked' })
+          }).catch(() => {});
+        }
+      }
+
+      _trackedPercent = null;  // let server recompute fresh percent
+      await refreshStats();
       loadPdfList();
     }
   } catch(e) {
@@ -1876,42 +1946,27 @@ async function loadIndexPanel() {
   
   // Auto-detect and update progress when navigating to index panel
   if (selectedPdf) {
-    console.log('Auto-detecting progress for:', selectedPdf);
     try {
       const statsRes = await fetch('/admin-panel/api/stats/');
       const statsData = await statsRes.json();
       const currentStage = (statsData.pdf_progress || {})[selectedPdf];
-      console.log('Current stage:', currentStage);
-      
-      // If chunks exist and PDF is at 'chunked' stage, check if it's actually indexed
       if (currentStage === 'chunked') {
-        const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(selectedPdf)}`);
+        const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+        const lookupPdf = splitRe2.test(selectedPdf)
+          ? selectedPdf.replace(splitRe2, '') + '.pdf'
+          : selectedPdf;
+        const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupPdf)}`);
         const chunksData = await chunksRes.json();
-        
-        if (chunksData.chunks && chunksData.chunks.length > 0) {
-          // Check if any chunks are embedded/indexed
-          const hasIndexed = chunksData.chunks.some(c => c.status === 'Embedded');
-          console.log('Has indexed chunks:', hasIndexed, 'Total chunks:', chunksData.chunks.length);
-          
-          if (hasIndexed) {
-            // Update to indexed stage
-            console.log('Auto-updating stage to indexed');
-            const updateRes = await fetch('/admin-panel/api/update-pdf-stage/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-              body: JSON.stringify({ filename: selectedPdf, stage: 'indexed' })
-            });
-            const updateData = await updateRes.json();
-            console.log('Stage update result:', updateData);
-            
-            // Refresh stats to show updated progress
-            await refreshStats();
-          }
+        if (chunksData.chunks && chunksData.chunks.some(c => c.status === 'Embedded')) {
+          await fetch('/admin-panel/api/update-pdf-stage/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+            body: JSON.stringify({ filename: selectedPdf, stage: 'indexed' })
+          });
+          await refreshStats();
         }
       }
-    } catch (e) {
-      console.error('Failed to auto-detect progress:', e);
-    }
+    } catch (e) {}
   }
 
   // 2. If selectedPdf is STILL not set (e.g. no PDFs exist)
@@ -1929,23 +1984,30 @@ async function loadIndexPanel() {
     return;
   }
 
-  // 3. Update title and fetch chunks for selectedPdf
-  pdfTitleEl.textContent = selectedPdf;
+  // 3. Resolve the PDF name to use for chunks lookup:
+  //    If selectedPdf is a split part, use the parent stem so we aggregate all parts' chunks.
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const chunksPdf = splitRe.test(selectedPdf)
+    ? selectedPdf.replace(splitRe, '') + '.pdf'
+    : selectedPdf;
+  const displayName = splitRe.test(selectedPdf)
+    ? selectedPdf.replace(splitRe, '')
+    : selectedPdf;
+
+  pdfTitleEl.textContent = displayName;
   updateChatContextDisplay();
-  
-  console.log('Loading chunks for PDF:', selectedPdf);
-  
+
   tableBody.innerHTML = `
     <tr>
       <td colspan="4" class="index-table-empty">
         <i class="fa fa-spinner fa-spin" style="font-size: 24px; display: block; margin-bottom: 10px; color: var(--orange);"></i>
-        Loading chunks for "${escHtml(selectedPdf)}"...
+        Loading chunks for "${escHtml(displayName)}"...
       </td>
     </tr>
   `;
 
   try {
-    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(selectedPdf)}`);
+    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}`);
     const data = await res.json();
     if (data.error) {
       tableBody.innerHTML = `
