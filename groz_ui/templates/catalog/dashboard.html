@@ -90,9 +90,6 @@
 
     <div class="sidebar-section">
       <div class="sidebar-label">Tools</div>
-      <button class="sidebar-link" data-panel="chat" onclick="showPanel('chat')">
-        <i class="fa fa-comments"></i> Chat
-      </button>
       {% if is_admin %}
       <button class="sidebar-link" data-panel="models" onclick="showPanel('models')">
         <i class="fa fa-key"></i> Models &amp; Keys
@@ -432,6 +429,7 @@
                     <button class="btn btn-secondary" id="btn-process-whole-pdf" onclick="showPanel('chunk')">
                       <i class="fa fa-layer-group"></i> Process Whole PDF
                     </button>
+                    <span id="whole-pdf-status" style="display:none;align-items:center;gap:6px;font-size:13px;font-weight:600"></span>
                   </div>
 
                   <div class="split-parts-wrap" id="split-parts-wrap" style="display:none">

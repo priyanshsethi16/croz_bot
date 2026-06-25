@@ -295,7 +295,34 @@ def _ensure_catalog_document(pdf_path):
 
 def _ingest_assembled_products_for_document(doc, assembled):
     from django.db import transaction
-    
+    import re as _re
+
+    # Delete stale Qdrant vectors for this document before replacing chunks
+    try:
+        from qdrant_client import models as _qmodels
+        from rag_pipeline.providers import COLLECTION, build_qdrant_client
+        _client = build_qdrant_client()
+        if _client.collection_exists(COLLECTION):
+            _stem = doc.original_filename
+            _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_')
+            for _src in [_stem, _sanitized]:
+                try:
+                    _client.delete(
+                        collection_name=COLLECTION,
+                        points_selector=_qmodels.FilterSelector(
+                            filter=_qmodels.Filter(
+                                must=[_qmodels.FieldCondition(
+                                    key='metadata.source_pdf',
+                                    match=_qmodels.MatchValue(value=_src),
+                                )]
+                            )
+                        ),
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     # Temporarily set is_active = False so we can update / replace the products
     was_active = doc.is_active
     if was_active:
@@ -306,7 +333,11 @@ def _ingest_assembled_products_for_document(doc, assembled):
         # Use transaction to ensure consistency
         with transaction.atomic():
             from .services.structured_ingestion import persist_assembled_products
-            persist_assembled_products(doc, assembled, replace=True)
+            from .models import DocumentChunk, ProductFamily
+            # Explicitly delete ALL existing chunks and families for clean re-creation
+            DocumentChunk.objects.filter(document=doc).delete()
+            ProductFamily.objects.filter(document=doc).delete()
+            persist_assembled_products(doc, assembled, replace=False)
     finally:
         # Restore is_active state
         doc.is_active = True
@@ -495,9 +526,9 @@ def list_pdfs(request):
                     else:
                         status = doc.status
                 
-                has_embeddings = (doc.status == CatalogDocument.Status.READY and doc.is_active)
-                if not has_embeddings:
-                    has_embeddings = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.INDEXED).exists()
+                has_indexed = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.INDEXED).exists()
+                has_stale   = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.STALE).exists()
+                has_embeddings = has_indexed and not has_stale
             else:
                 # Check filesystem chunks
                 sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_')
@@ -684,9 +715,10 @@ def update_pdf_stage(request):
     if current_db_stage not in STAGE_ORDER:
         current_db_stage = 'uploaded'
 
-    # Never downgrade
+    # Never downgrade — EXCEPT: allow indexed to overwrite tested (re-embedding after delete)
     if STAGE_ORDER.index(stage) < STAGE_ORDER.index(current_db_stage):
-        stage = current_db_stage
+        if not (stage == 'indexed' and current_db_stage == 'tested'):
+            stage = current_db_stage
 
     _stage_map[filename] = stage
     ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
@@ -1315,6 +1347,83 @@ def delete_pdf(request):
     return JsonResponse({'message': f'"{filename}" and all associated data deleted.'})
 
 
+# -- API: Delete embeddings only (Create Chunks panel) ────────────────────────
+
+@login_required
+@require_POST
+def delete_embeddings_only(request):
+    """Delete only Qdrant embeddings — keep PDF files, chunks, and DB records intact."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body     = json.loads(request.body)
+        filename = body.get('filename', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+    if not filename:
+        return JsonResponse({'error': 'Missing filename.'}, status=400)
+
+    import re
+    stem = Path(filename).stem
+    sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_') or 'catalog'
+
+    try:
+        from qdrant_client import models
+        from rag_pipeline.providers import COLLECTION, build_qdrant_client
+        client = build_qdrant_client()
+        if client.collection_exists(COLLECTION):
+            for source_stem in [stem, sanitized_stem]:
+                try:
+                    client.delete(
+                        collection_name=COLLECTION,
+                        points_selector=models.FilterSelector(
+                            filter=models.Filter(
+                                must=[models.FieldCondition(
+                                    key='metadata.source_pdf',
+                                    match=models.MatchValue(value=source_stem),
+                                )]
+                            )
+                        ),
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        for doc in CatalogDocument.objects.filter(original_filename__in=[filename, stem]):
+            DocumentChunk.objects.filter(document=doc).update(
+                index_status=DocumentChunk.IndexStatus.STALE
+            )
+    except Exception as e:
+        import logging
+        logging.warning(f'Error marking chunks stale for {filename}: {e}')
+
+    # Downgrade stage from indexed/tested → chunked so progress bar reflects reality
+    import json as _j
+    from .models import ApiKey
+    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    try:
+        _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        for key in [filename, stem]:
+            if _stage_map.get(key) in ('indexed', 'tested'):
+                _stage_map[key] = 'chunked'
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+    except Exception:
+        pass
+
+    # Also downgrade session stage
+    pdf_progress = request.session.get('pdf_progress', {})
+    for key in [filename, stem]:
+        if pdf_progress.get(key) in ('indexed', 'tested'):
+            pdf_progress[key] = 'chunked'
+    request.session['pdf_progress'] = pdf_progress
+    request.session.modified = True
+
+    return JsonResponse({'message': f'Embeddings deleted for "{filename}". Chunks and data remain intact.'})
+
+
 # -- API: List chunks for a PDF ────────────────────────────────────────────────
 
 def _parse_ordinal_from_filename(filename: str) -> int:
@@ -1344,6 +1453,7 @@ def list_chunks(request):
     from .models import CatalogDocument, DocumentChunk
 
     pdf_stem = Path(pdf_name).stem
+    index_only = request.GET.get('index') == '1'  # True = Index & Embed panel, exclude STALE
     doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
     if not doc:
         doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
@@ -1351,7 +1461,10 @@ def list_chunks(request):
     document_id = str(doc.id) if doc else None
 
     if doc:
-        db_chunks = DocumentChunk.objects.filter(document=doc).order_by('ordinal')
+        qs = DocumentChunk.objects.filter(document=doc)
+        if index_only:
+            qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+        db_chunks = qs.order_by('ordinal')
         for c in db_chunks:
             prod_name = 'General Info'
             if c.family:
@@ -1381,7 +1494,10 @@ def list_chunks(request):
                 document_id = str(split_docs.first().id)
                 ordinal_offset = 0
                 for split_doc in split_docs:
-                    db_chunks = DocumentChunk.objects.filter(document=split_doc).order_by('ordinal')
+                    qs = DocumentChunk.objects.filter(document=split_doc)
+                    if index_only:
+                        qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+                    db_chunks = qs.order_by('ordinal')
                     for c in db_chunks:
                         prod_name = 'General Info'
                         if c.family:
@@ -1395,7 +1511,7 @@ def list_chunks(request):
                             'product_name': prod_name,
                             'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
                         })
-                    ordinal_offset += DocumentChunk.objects.filter(document=split_doc).count()
+                    ordinal_offset += qs.count()
 
     return JsonResponse({'document_id': document_id, 'chunks': chunks})
 

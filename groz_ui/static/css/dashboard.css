@@ -338,6 +338,8 @@
 .btn-primary:hover { background: var(--orange-dark); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(232,80,10,0.3); }
 .btn-secondary { background: var(--white); color: var(--dark); border: 1.5px solid var(--border); }
 .btn-secondary:hover { border-color: var(--orange); color: var(--orange); }
+.btn-success { background: #22c55e; color: #fff; border: 1.5px solid #22c55e; }
+.btn-success:disabled { background: #22c55e !important; color: #fff !important; border-color: #22c55e !important; opacity: 1 !important; cursor: not-allowed; }
 .btn-danger { background: #fee2e2; color: #dc2626; border: 1.5px solid #fecaca; }
 .btn-danger:hover { background: #fecaca; }
 .btn-sm { padding: 7px 14px; font-size: 12px; }

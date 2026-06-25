@@ -96,15 +96,25 @@ async function previewParentGroup(parentStem, parts) {
 
   // Build splits array by fetching page counts for each part
   const splits = [];
+  // Ensure _pdfDetails is populated
+  if (!_pdfDetails.length) {
+    try {
+      const r = await fetch('/admin-panel/api/pdfs/');
+      const d = await r.json();
+      _pdfDetails = d.pdf_details || [];
+    } catch(e) {}
+  }
   for (const partName of parts) {
     try {
       const res  = await fetch(`/admin-panel/api/pdf-pages/?pdf=${encodeURIComponent(partName)}`);
       const data = await res.json();
       const m = partName.match(/_(custom_)?p(\d+)-(\d+)\.pdf$/i);
       const pages = m ? `${parseInt(m[2])}–${parseInt(m[3])}` : '?';
-      splits.push({ filename: partName, pages, page_count: data.pages || 0 });
+      const detail = _pdfDetails.find(d => d.name === partName);
+      const isDone = detail && detail.chunks_count > 0;
+      splits.push({ filename: partName, pages, page_count: data.pages || 0, done: isDone });
     } catch(e) {
-      splits.push({ filename: partName, pages: '?', page_count: 0 });
+      splits.push({ filename: partName, pages: '?', page_count: 0, done: false });
     }
   }
   _splitParts = splits;
@@ -637,9 +647,10 @@ async function loadPdfList() {
   try {
     const res  = await fetch('/admin-panel/api/pdfs/');
     const data = await res.json();
+    _pdfDetails = data.pdf_details || [];
     tbody.innerHTML = '';
 
-    const pdfDetails = data.pdf_details || [];
+    const pdfDetails = _pdfDetails.filter(item => item.status === 'Ready');
     if (!pdfDetails.length) {
       tbody.innerHTML = `
         <tr>
@@ -690,7 +701,13 @@ async function loadPdfList() {
 
       // 2. Create Embedding OR Create Chunks (VLM Run)
       if (item.status === 'Ready') {
-        if (item.document_id) {
+        if (item.has_embeddings) {
+          actionButtons += `
+            <button class="btn btn-sm embed-btn" disabled title="Already embedded" style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed">
+              <i class="fa fa-check-circle"></i> Embedded
+            </button>
+          `;
+        } else if (item.document_id) {
           actionButtons += `
             <button class="btn btn-sm btn-primary embed-btn" onclick="triggerEmbeddingInline('${item.document_id}', '${escHtml(item.name)}')" title="Generate embeddings and index to Qdrant">
               <i class="fa fa-brain"></i> Create Embedding
@@ -720,7 +737,7 @@ async function loadPdfList() {
 
       // 3. Delete Button
       actionButtons += `
-        <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" title="Delete PDF and associated data">
+        <button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')" title="Delete embeddings only">
           <i class="fa fa-trash"></i> Delete
         </button>
       `;
@@ -742,6 +759,19 @@ async function loadPdfList() {
       `;
       tbody.appendChild(tr);
     });
+
+    // Correct progress bar if the tracked PDF's actual embedding state doesn't match
+    if (_trackedPdf && ['indexed', 'tested'].includes(_trackedStage)) {
+      const stem = _trackedPdf.replace(/\.pdf$/i, '');
+      const trackedDetail = pdfDetails.find(d =>
+        d.name === _trackedPdf || d.name === stem + '.pdf' ||
+        d.name.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') === stem
+      );
+      if (trackedDetail && !trackedDetail.has_embeddings) {
+        _trackedStage = 'chunked';
+        _renderProgress(_trackedPdf, 'chunked');
+      }
+    }
 
   } catch(e) {
     console.error("Error loading PDF list: ", e);
@@ -842,9 +872,12 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       
       showToast(`Indexed ${data.indexed} chunk(s) for "${pdfName}".`, 'success');
 
-      // Clear local percent so refreshStats uses fresh server-computed value
+      // Immediately render 75% — do not rely on refreshStats which may return stale 'tested'
+      const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+      _trackedPdf   = displayPdf;
+      _trackedStage = 'indexed';
       _trackedPercent = null;
-      await refreshStats();
+      _renderProgress(displayPdf, 'indexed');
       await loadPdfList();
       if (document.getElementById('panel-index')?.classList.contains('active')) {
         await loadIndexPanel();
@@ -1125,6 +1158,28 @@ async function deletePdf(filename) {
   } catch(e) { showToast('Delete failed.', 'error'); }
 }
 
+async function deleteEmbeddingsOnly(filename) {
+  if (!confirm(`Delete "${filename}" and all its associated data?`)) return;
+  try {
+    const res  = await fetch('/admin-panel/api/delete-embeddings/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showToast(data.message, 'success');
+    // Immediately downgrade progress bar to chunked (50%)
+    const stem = filename.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '').replace(/\.pdf$/i, '');
+    const displayPdf = (_trackedPdf && (_trackedPdf === stem || _trackedPdf === filename)) ? _trackedPdf : stem;
+    _trackedPdf   = displayPdf;
+    _trackedStage = 'chunked';
+    _renderProgress(displayPdf, 'chunked');
+    loadPdfList();
+    if (typeof loadIndexPanel === 'function') loadIndexPanel();
+  } catch(e) { showToast('Delete failed.', 'error'); }
+}
+
 // -- Stats refresh -------------------------------------------------------------────────────
 function updateCatalogTable(processed) {
   const container = document.getElementById('catalog-overview-body');
@@ -1324,6 +1379,11 @@ function _resetProgress() {
 
 function updateWorkflowProgress(data = {}) {
   if (data.tracked_pdf && data.tracked_stage) {
+    // Never downgrade from 'tested' — local state is source of truth after approve button
+    const STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested'];
+    if (_trackedStage === 'tested' && STAGE_ORDER.indexOf(data.tracked_stage) < STAGE_ORDER.indexOf('tested')) {
+      return; // Keep current 100% state
+    }
     _trackedPdf   = data.tracked_pdf;
     _trackedStage = data.tracked_stage;
     // Prefer locally-computed _trackedPercent (from runSingleSplit) over server value
@@ -1499,6 +1559,18 @@ function showSplitterForPdf(filename) {
   document.getElementById('split-parts-list').innerHTML = '';
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
   if (wholeBtn) wholeBtn.style.display = '';
+  // Show Done/Pending status for non-split PDF
+  const wholePdfStatus = document.getElementById('whole-pdf-status');
+  if (wholePdfStatus) {
+    if (!_pdfDetails.length) {
+      fetch('/admin-panel/api/pdfs/').then(r => r.json()).then(d => {
+        _pdfDetails = d.pdf_details || [];
+        _updateWholePdfStatus(filename);
+      }).catch(() => {});
+    } else {
+      _updateWholePdfStatus(filename);
+    }
+  }
   document.getElementById('splitter-preview').className = 'splitter-preview';
   document.getElementById('splitter-preview').innerHTML = '';
   document.getElementById('splitter-pdf-name').textContent = filename;
@@ -1510,7 +1582,21 @@ function showSplitterForPdf(filename) {
 
 let _splitStem    = null;
 let _splitParts   = [];
+let _pdfDetails   = [];
 let _pagesPerPart = 5;
+
+function _updateWholePdfStatus(filename) {
+  const el = document.getElementById('whole-pdf-status');
+  if (!el) return;
+  const detail = _pdfDetails.find(d => d.name === filename);
+  if (detail && detail.chunks_count > 0) {
+    el.style.display = 'flex';
+    el.innerHTML = `<i class="fa fa-check-circle" style="color:#22c55e"></i> <span style="color:#22c55e">Done &mdash; ${detail.chunks_count} chunk${detail.chunks_count !== 1 ? 's' : ''} created</span>`;
+  } else {
+    el.style.display = 'none';
+    el.innerHTML = '';
+  }
+}
 
 function toggleSplitter() {
   _splitterOpen = !_splitterOpen;
@@ -1621,21 +1707,30 @@ function renderSplitParts(parts) {
   document.getElementById('next-to-chunk').style.display = 'none';
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
   if (wholeBtn) wholeBtn.style.display = 'none';
-  list.innerHTML = parts.map((p, i) => `
-    <div class="split-part-item" id="split-part-${i}" onclick="loadSplitPartPreview(${i})" title="Preview this split part">
+  const wholePdfStatus = document.getElementById('whole-pdf-status');
+  if (wholePdfStatus) { wholePdfStatus.style.display = 'none'; wholePdfStatus.innerHTML = ''; }
+  list.innerHTML = parts.map((p, i) => {
+    const isDone = !!p.done;
+    const statusCls  = isDone ? 'done'    : 'pending';
+    const statusText = isDone ? '\u2713 Done' : 'Pending';
+    const itemCls    = isDone ? 'split-part-item done' : 'split-part-item';
+    const runBtn     = isDone
+      ? `<button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})" title="Re-run"><i class="fa fa-redo"></i></button>`
+      : `<button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})"><i class="fa fa-play"></i> Run</button>`;
+    return `
+    <div class="${itemCls}" id="split-part-${i}" onclick="loadSplitPartPreview(${i})" title="Preview this split part">
       <div class="split-part-num">${i+1}</div>
       <div class="split-part-info">
         <div class="part-name">${escHtml(p.filename)}</div>
-        <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;·&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
+        <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;&middot;&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
       </div>
-      <span class="split-part-status pending" id="split-status-${i}">Pending</span>
+      <span class="split-part-status ${statusCls}" id="split-status-${i}">${statusText}</span>
       <button class="btn btn-sm btn-secondary split-preview-btn" onclick="event.stopPropagation();loadSplitPartPreview(${i})">
         <i class="fa fa-eye"></i>
       </button>
-      <button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})">
-        <i class="fa fa-play"></i> Run
-      </button>
-    </div>`).join('');
+      ${runBtn}
+    </div>`;
+  }).join('');
   if (parts.length) loadSplitPartPreview(0);
 }
 
@@ -1644,12 +1739,14 @@ async function runSingleSplit(idx) {
   const itemEl = document.getElementById(`split-part-${idx}`);
   const statEl = document.getElementById(`split-status-${idx}`);
   const btnEl  = document.getElementById(`split-btn-${idx}`);
+  const processAllBtn = document.getElementById('btn-run-all-splits');
 
   itemEl.className = 'split-part-item running';
   statEl.className = 'split-part-status running';
   statEl.textContent = 'Running…';
   btnEl.disabled = true;
   btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+  if (processAllBtn) { processAllBtn.disabled = true; processAllBtn.style.opacity = '0.5'; }
 
   try {
     const res  = await fetch('/admin-panel/api/pipeline-split/', {
@@ -1671,7 +1768,7 @@ async function runSingleSplit(idx) {
       itemEl.className = 'split-part-item done';
       statEl.className = 'split-part-status done';
       statEl.textContent = '✓ Done';
-      btnEl.innerHTML = '<i class="fa fa-check"></i>';
+      btnEl.innerHTML = '<i class="fa fa-redo"></i>';
       
       // Update stage for this split part
       try {
@@ -1719,13 +1816,15 @@ async function runSingleSplit(idx) {
   } finally {
     const currentBtn = document.getElementById(`split-btn-${idx}`);
     if (currentBtn) {
-      if (currentBtn.innerHTML.includes('check')) {
-        currentBtn.disabled = true;
+      if (currentBtn.innerHTML.includes('redo')) {
+        currentBtn.disabled = false;
       } else {
         currentBtn.innerHTML = '<i class="fa fa-play"></i> Run';
         currentBtn.disabled = false;
       }
     }
+    const processAllBtn2 = document.getElementById('btn-run-all-splits');
+    if (processAllBtn2) { processAllBtn2.disabled = false; processAllBtn2.style.opacity = ''; }
   }
 }
 
@@ -1955,7 +2054,7 @@ async function loadIndexPanel() {
         const lookupPdf = splitRe2.test(selectedPdf)
           ? selectedPdf.replace(splitRe2, '') + '.pdf'
           : selectedPdf;
-        const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupPdf)}`);
+        const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupPdf)}&index=1`);
         const chunksData = await chunksRes.json();
         if (chunksData.chunks && chunksData.chunks.some(c => c.status === 'Embedded')) {
           await fetch('/admin-panel/api/update-pdf-stage/', {
@@ -2007,7 +2106,7 @@ async function loadIndexPanel() {
   `;
 
   try {
-    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}`);
+    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}&index=1`);
     const data = await res.json();
     if (data.error) {
       tableBody.innerHTML = `
@@ -2024,6 +2123,10 @@ async function loadIndexPanel() {
       _cachedIndexChunks = data.chunks || [];
       _indexSelectedDocId = data.document_id;
       renderIndexChunks(_cachedIndexChunks);
+      // Show approve button immediately if there are embedded chunks (no query required)
+      if (_cachedIndexChunks.some(c => c.status === 'Embedded')) {
+        showMarkAsTestedButton();
+      }
     }
   } catch (err) {
     tableBody.innerHTML = `
@@ -2290,20 +2393,13 @@ async function markPdfAsTested() {
       btn.innerHTML = '<i class="fa fa-check-double"></i> Approved! Testing Complete';
       btn.style.cssText = 'width: 100%; background: #22c55e; color: white; font-weight: 600;';
       btn.disabled = true;
-      advanceTrackedStage('tested', pdfName);
+      // Update local state and render immediately — do NOT call refreshStats after
+      // because the server session may not reflect 'tested' yet and would overwrite back to 75%
+      const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+      _trackedPdf   = displayPdf;
+      _trackedStage = 'tested';
+      _renderProgress(displayPdf, 'tested');
       showToast(`"${pdfName}" testing approved! Progress updated to 100%`, 'success');
-      // Force refresh stats multiple times to ensure update
-      await refreshStats();
-      
-      setTimeout(async () => {
-        await refreshStats();
-        console.log('Second refresh completed');
-      }, 500);
-      
-      setTimeout(async () => {
-      refreshStats();
-        console.log('Third refresh completed');
-      }, 1500);
     } else {
       throw new Error(data.error || 'Failed to update stage');
     }
