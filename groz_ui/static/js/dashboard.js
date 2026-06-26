@@ -53,6 +53,7 @@ function showPanel(name) {
   closeSidebar();
   if (name === 'overview') refreshStats();
   if (name === 'chunk') loadPdfList();
+  if (name === 'families') loadFamilyPanel();
   if (name === 'upload') loadExistingUploads();
   if (name === 'models') loadModelConfiguration();
   if (name === 'index') loadIndexPanel();
@@ -698,6 +699,13 @@ async function loadPdfList() {
           <i class="fa fa-layer-group"></i> Chunks
         </button>
       `;
+      if (IS_ADMIN && item.chunks_count > 0 && item.document_id) {
+        actionButtons += `
+          <button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})' title="Review product families">
+            <i class="fa fa-sitemap"></i> Families
+          </button>
+        `;
+      }
 
       // 2. Create Embedding OR Create Chunks (VLM Run)
       if (item.status === 'Ready') {
@@ -779,6 +787,18 @@ async function loadPdfList() {
 }
 
 let selectedPdf = null;
+let _familyPanelState = {
+  pdf: '',
+  document_id: '',
+  chunks: [],
+  families: [],
+  chunksById: {},
+  familiesById: {},
+  search: '',
+};
+let _familySelectedChunkIds = new Set();
+let _familySelectedId = '';
+let _familyPanelAutoLoaded = false;
 function getParsingInstructions() {
   return (document.getElementById('chunk-parsing-instructions')?.value
     || document.getElementById('split-parsing-instructions')?.value
@@ -794,9 +814,37 @@ function syncParsingInstructions(source) {
 }
 
 function selectPdfRow(rowEl, name) {
-  document.querySelectorAll('#pdf-selector-table-body tr').forEach(r => r.classList.remove('selected'));
+  _highlightPdfRow(name);
   rowEl.classList.add('selected');
   selectedPdf = name;
+}
+
+function _highlightPdfRow(name) {
+  document.querySelectorAll('#pdf-selector-table-body tr').forEach(r => {
+    r.classList.toggle('selected', r.dataset.pdf === name);
+  });
+}
+
+function _findPdfDetail(name) {
+  if (!name) return null;
+  const stem = String(name).replace(/\.pdf$/i, '');
+  return _pdfDetails.find(item =>
+    item.name === name ||
+    item.name === `${stem}.pdf` ||
+    item.name.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') === stem
+  ) || null;
+}
+
+function _defaultChunkedPdf() {
+  return _pdfDetails.find(item => item.chunks_count > 0) || null;
+}
+
+function openFamilies(pdfName) {
+  if (pdfName) {
+    selectedPdf = pdfName;
+    _highlightPdfRow(pdfName);
+  }
+  showPanel('families');
 }
 
 async function runChunkingForPdf(name, btnEl) {
@@ -1194,7 +1242,7 @@ function updateCatalogTable(processed) {
     `;
     if (IS_ADMIN) {
       emptyHtml += `
-        <p style="font-size:13px;margin-bottom:20px">Follow the 3-step workflow to get started.</p>
+        <p style="font-size:13px;margin-bottom:20px">Follow the 5-step workflow to get started.</p>
         <button class="btn btn-primary" onclick="showPanel('upload')">
           <i class="fa fa-upload"></i> Upload Your First PDF
         </button>
@@ -1243,6 +1291,10 @@ function updateCatalogTable(processed) {
             <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
               <i class="fa fa-layer-group"></i> Chunks
             </button>
+            ${IS_ADMIN && item.chunks > 0 ? `
+            <button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})'>
+              <i class="fa fa-sitemap"></i> Families
+            </button>` : ''}
             <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
               <i class="fa fa-comments"></i> Test
             </button>
@@ -1299,16 +1351,17 @@ function _num(value) {
 }
 
 // ── Per-PDF progress tracking ─────────────────────────────────────────────────
-// stages: uploaded=25%  chunked=50%  indexed=75%  tested=100%
+// stages: uploaded=25%  chunked=50%  families=70%  indexed=85%  tested=100%
 let _trackedPdf     = null;
 let _trackedStage   = null;
 let _trackedPercent = null;  // custom percent for partial-split progress
 
 const STAGE_CONFIG = {
-  uploaded: { percent: 25,  stepNo: 1, active: 'upload', title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
-  chunked:  { percent: 50,  stepNo: 2, active: 'chunk',  title: 'Chunks created',       sub: 'Product chunks ready. Now index & embed for semantic search.' },
-  indexed:  { percent: 75,  stepNo: 3, active: 'index',  title: 'Indexed & embedded',   sub: 'Chunks are indexed. Test the catalog chat to validate results.' },
-  tested:   { percent: 100, stepNo: 4, active: 'chat',   title: 'Catalog ready!',        sub: 'All steps complete. The catalog is live for product queries.' },
+  uploaded: { percent: 25,  stepNo: 1, active: 'upload',   title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
+  chunked:  { percent: 50,  stepNo: 2, active: 'chunk',    title: 'Chunks created',       sub: 'Product chunks are ready. Review product families before indexing.' },
+  families: { percent: 70,  stepNo: 3, active: 'families', title: 'Product families',     sub: 'Group chunks into canonical families and approve the final mapping.' },
+  indexed:  { percent: 85,  stepNo: 4, active: 'index',    title: 'Indexed & embedded',   sub: 'Approved families are indexed for semantic search.' },
+  tested:   { percent: 100, stepNo: 5, active: 'chat',     title: 'Catalog ready!',        sub: 'All steps complete. The catalog is live for product queries.' },
 };
 
 function setTrackedPdf(filename, stage) {
@@ -1321,7 +1374,7 @@ function setTrackedPdf(filename, stage) {
 function advanceTrackedStage(stage, fallbackPdf) {
   const pdf = _trackedPdf || fallbackPdf || null;
   if (!pdf) return;
-  const order = ['uploaded', 'chunked', 'indexed', 'tested'];
+  const order = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
   const cur = _trackedStage ? order.indexOf(_trackedStage) : -1;
   if (order.indexOf(stage) > cur) {
     _trackedPdf   = pdf;
@@ -1340,7 +1393,7 @@ function _renderProgress(filename, stage, customPercent) {
   if (!cfg) return;
   const percent = (customPercent !== undefined) ? customPercent : cfg.percent;
   _trackedPercent = (customPercent !== undefined) ? customPercent : null;
-  document.getElementById('workflow-step-label').textContent   = `Step ${cfg.stepNo} of 4`;
+  document.getElementById('workflow-step-label').textContent   = `Step ${cfg.stepNo} of 5`;
   document.getElementById('workflow-progress-title').textContent = cfg.title;
   document.getElementById('workflow-progress-sub').textContent   = cfg.sub;
   document.getElementById('workflow-progress-percent').textContent = `${Math.round(percent)}%`;
@@ -1351,11 +1404,12 @@ function _renderProgress(filename, stage, customPercent) {
   if (filename) { nameEl.textContent = filename; nameBar.style.display = 'flex'; }
   else          { nameBar.style.display = 'none'; }
 
-  const doneMap = { upload: false, chunk: false, index: false, chat: false };
+  const doneMap = { upload: false, chunk: false, families: false, index: false, chat: false };
   if (stage === 'uploaded') { doneMap.upload = true; }
   if (stage === 'chunked')  { doneMap.upload = doneMap.chunk = true; }
-  if (stage === 'indexed')  { doneMap.upload = doneMap.chunk = doneMap.index = true; }
-  if (stage === 'tested')   { doneMap.upload = doneMap.chunk = doneMap.index = doneMap.chat = true; }
+  if (stage === 'families') { doneMap.upload = doneMap.chunk = doneMap.families = true; }
+  if (stage === 'indexed')  { doneMap.upload = doneMap.chunk = doneMap.families = doneMap.index = true; }
+  if (stage === 'tested')   { doneMap.upload = doneMap.chunk = doneMap.families = doneMap.index = doneMap.chat = true; }
 
   document.querySelectorAll('[data-progress-step]').forEach(el => {
     const key = el.dataset.progressStep;
@@ -1368,7 +1422,7 @@ function _resetProgress() {
   _trackedPdf     = null;
   _trackedStage   = null;
   _trackedPercent = null;
-  document.getElementById('workflow-step-label').textContent    = 'Step 0 of 4';
+  document.getElementById('workflow-step-label').textContent    = 'Step 0 of 5';
   document.getElementById('workflow-progress-title').textContent = 'Catalog setup progress';
   document.getElementById('workflow-progress-sub').textContent   = 'Upload a PDF to start the catalog pipeline.';
   document.getElementById('workflow-progress-percent').textContent = '0%';
@@ -1380,7 +1434,7 @@ function _resetProgress() {
 function updateWorkflowProgress(data = {}) {
   if (data.tracked_pdf && data.tracked_stage) {
     // Never downgrade from 'tested' — local state is source of truth after approve button
-    const STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested'];
+    const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
     if (_trackedStage === 'tested' && STAGE_ORDER.indexOf(data.tracked_stage) < STAGE_ORDER.indexOf('tested')) {
       return; // Keep current 100% state
     }
@@ -1970,6 +2024,449 @@ function closeChunks() {
   document.body.style.overflow = '';
 }
 
+// ── Product Families ────────────────────────────────────────────────────────
+function _familyStatusLabel(status) {
+  const labels = {
+    approved: 'Approved',
+    needs_review: 'Needs review',
+    rejected: 'Rejected',
+  };
+  return labels[status] || 'Unassigned';
+}
+
+function _familyStatusBadge(status) {
+  const key = status || 'muted';
+  return `<span class="family-badge ${escAttr(key)}">${escHtml(_familyStatusLabel(status))}</span>`;
+}
+
+function _familySelectedChunks() {
+  return [..._familySelectedChunkIds]
+    .map(id => _familyPanelState.chunksById[id])
+    .filter(Boolean);
+}
+
+function _familySelectedRecord() {
+  return _familySelectedId ? (_familyPanelState.familiesById[_familySelectedId] || null) : null;
+}
+
+function _familyPageLabel(chunk) {
+  const start = Number(chunk.page_start || 0);
+  const end = Number(chunk.page_end || chunk.page_start || 0);
+  if (!start && !end) return '—';
+  return start === end ? `Page ${start}` : `Pages ${start}-${end}`;
+}
+
+function _familyResetForm() {
+  _familySelectedId = '';
+  _familySelectedChunkIds = new Set();
+  const id = document.getElementById('family-id');
+  const name = document.getElementById('family-name');
+  const code = document.getElementById('family-code');
+  const category = document.getElementById('family-category');
+  const status = document.getElementById('family-review-status');
+  if (id) id.value = '';
+  if (name) name.value = '';
+  if (code) code.value = '';
+  if (category) category.value = '';
+  if (status) status.value = 'approved';
+}
+
+function renderFamilySelectionSummary() {
+  const badge = document.getElementById('family-editor-chunk-count');
+  const summary = document.getElementById('family-selection-summary');
+  const selected = _familySelectedChunks();
+  const family = _familySelectedRecord();
+
+  if (badge) {
+    badge.textContent = `${selected.length} selected`;
+  }
+
+  if (!summary) return;
+  if (!selected.length) {
+    summary.innerHTML = 'No chunks selected.';
+    return;
+  }
+
+  const familyNames = [...new Set(selected.map(chunk => chunk.family_name).filter(Boolean))];
+  const pageStarts = selected.map(chunk => Number(chunk.page_start || 0)).filter(Boolean);
+  const pageEnds = selected.map(chunk => Number(chunk.page_end || chunk.page_start || 0)).filter(Boolean);
+  const pageStart = pageStarts.length ? Math.min(...pageStarts) : 0;
+  const pageEnd = pageEnds.length ? Math.max(...pageEnds) : 0;
+  const bits = [];
+
+  if (family) {
+    bits.push(`Editing <strong>${escHtml(family.product_name)}</strong>`);
+  }
+  bits.push(`<strong>${selected.length}</strong> chunk${selected.length === 1 ? '' : 's'} selected`);
+  if (familyNames.length === 1) {
+    bits.push(`Source family: <strong>${escHtml(familyNames[0])}</strong>`);
+  } else if (familyNames.length > 1) {
+    bits.push(`<strong>${familyNames.length}</strong> source families`);
+  } else {
+    bits.push('Unassigned chunks');
+  }
+  if (pageStart && pageEnd) {
+    bits.push(pageStart === pageEnd ? `Page ${pageStart}` : `Pages ${pageStart}-${pageEnd}`);
+  }
+
+  summary.innerHTML = bits.join(' &middot; ');
+}
+
+function renderFamilyChunks() {
+  const body = document.getElementById('family-chunks-table-body');
+  if (!body) return;
+
+  const chunks = _familyPanelState.chunks || [];
+  if (!chunks.length) {
+    body.innerHTML = `
+      <tr>
+        <td colspan="7" class="index-table-empty">
+          <i class="fa fa-sitemap" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
+          No chunks found for this PDF.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  body.innerHTML = chunks.map(chunk => {
+    const selected = _familySelectedChunkIds.has(chunk.id);
+    const familyName = chunk.family_name || 'Unassigned';
+    const familyCode = chunk.family_code || '';
+    const familyStatus = chunk.family_status || '';
+    const familyMeta = chunk.family_id
+      ? `
+        <span class="family-badge ${escAttr(familyStatus || 'muted')}">${escHtml(_familyStatusLabel(familyStatus))}</span>
+        ${familyCode ? `<span class="badge badge-grey">${escHtml(familyCode)}</span>` : ''}
+      `
+      : `<span class="family-badge muted">Unassigned</span>`;
+    const searchText = [
+      chunk.id,
+      chunk.filename,
+      chunk.product_name,
+      chunk.family_name,
+      chunk.family_code,
+      chunk.family_status,
+      chunk.excerpt,
+      chunk.page_start,
+      chunk.page_end,
+    ].join(' ').toLowerCase();
+
+    return `
+      <tr class="${selected ? 'selected' : ''}" data-chunk-id="${escAttr(chunk.id)}" data-search="${escAttr(searchText)}" onclick='familyRowToggle(event, ${JSON.stringify(chunk.id)})'>
+        <td class="family-row-check">
+          <input type="checkbox" ${selected ? 'checked' : ''} onchange='toggleFamilyChunkSelection(${JSON.stringify(chunk.id)}, this.checked)' />
+        </td>
+        <td class="family-chunk-id">${escHtml(`C${String(chunk.ordinal || 0).padStart(3, '0')}`)}</td>
+        <td class="family-product">
+          ${escHtml(chunk.product_name || 'General Info')}
+          <small>${escHtml(chunk.filename || '')}</small>
+        </td>
+        <td class="family-chunk-family">
+          <div class="family-name">${escHtml(familyName)}</div>
+          <div class="family-meta">
+            ${familyMeta}
+          </div>
+        </td>
+        <td>${escHtml(_familyPageLabel(chunk))}</td>
+        <td class="family-excerpt">${escHtml(chunk.excerpt || '')}</td>
+        <td class="family-status">
+          ${chunk.status === 'Embedded'
+            ? '<span class="badge badge-green"><i class="fa fa-database"></i> Embedded</span>'
+            : '<span class="badge badge-grey"><i class="fa fa-check-circle"></i> Ready</span>'}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  handleFamilySearch();
+}
+
+function renderFamilyCards() {
+  const list = document.getElementById('family-card-list');
+  const badge = document.getElementById('family-count-badge');
+  if (!list) return;
+
+  const families = _familyPanelState.families || [];
+  if (badge) badge.textContent = String(families.length);
+
+  if (!families.length) {
+    list.innerHTML = '<div class="family-card-empty">No product families created yet for this PDF.</div>';
+    return;
+  }
+
+  list.innerHTML = families.map(family => {
+    const active = _familySelectedId === family.id;
+    const chunkPreview = (family.chunks || []).slice(0, 3).map(chunk => `C${String(chunk.ordinal || 0).padStart(3, '0')}`).join(', ');
+    const more = family.chunk_count > 3 ? ` +${family.chunk_count - 3} more` : '';
+    const pageText = family.page_start && family.page_end
+      ? (family.page_start === family.page_end ? `Page ${family.page_start}` : `Pages ${family.page_start}-${family.page_end}`)
+      : 'Page range unset';
+
+    return `
+      <div class="family-card${active ? ' active' : ''}" onclick='loadFamilyFromCard(${JSON.stringify(family.id)})'>
+        <div class="family-card-top">
+          <div>
+            <div class="family-card-title">${escHtml(family.product_name || 'Unnamed family')}</div>
+            <div class="family-card-sub">${escHtml(family.category || 'Uncategorized')} · ${escHtml(pageText)}</div>
+          </div>
+          ${_familyStatusBadge(family.review_status)}
+        </div>
+        <div class="family-card-meta">
+          <span class="badge badge-blue">${family.chunk_count} chunk${family.chunk_count === 1 ? '' : 's'}</span>
+          ${family.product_code ? `<span class="badge badge-grey">${escHtml(family.product_code)}</span>` : ''}
+          ${chunkPreview ? `<span class="badge badge-grey">${escHtml(chunkPreview)}${escHtml(more)}</span>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderFamilyWorkspace() {
+  const familyPdf = document.getElementById('family-panel-pdf');
+  if (familyPdf) {
+    familyPdf.textContent = _familyPanelState.pdf || 'Select a chunked PDF to review families';
+  }
+  renderFamilyChunks();
+  renderFamilyCards();
+  renderFamilySelectionSummary();
+}
+
+function familyRowToggle(event, chunkId) {
+  if (event && event.target && event.target.closest('input,button,label,a,select,option')) return;
+  toggleFamilyChunkSelection(chunkId, !_familySelectedChunkIds.has(chunkId));
+}
+
+function toggleFamilyChunkSelection(chunkId, checked) {
+  const normalizedId = String(chunkId);
+  if (checked) {
+    _familySelectedChunkIds.add(normalizedId);
+  } else {
+    _familySelectedChunkIds.delete(normalizedId);
+  }
+  renderFamilyChunks();
+  renderFamilySelectionSummary();
+}
+
+function loadFamilyFromCard(familyId) {
+  const family = _familyPanelState.familiesById[String(familyId)];
+  if (!family) return;
+  _familySelectedId = family.id;
+  _familySelectedChunkIds = new Set((family.chunks || []).map(chunk => String(chunk.id)));
+
+  const id = document.getElementById('family-id');
+  const name = document.getElementById('family-name');
+  const code = document.getElementById('family-code');
+  const category = document.getElementById('family-category');
+  const status = document.getElementById('family-review-status');
+  if (id) id.value = family.id;
+  if (name) name.value = family.product_name || '';
+  if (code) code.value = family.product_code || '';
+  if (category) category.value = family.raw_category || '';
+  if (status) status.value = family.review_status || 'approved';
+
+  renderFamilyWorkspace();
+}
+
+function clearFamilyForm() {
+  _familyResetForm();
+  renderFamilyWorkspace();
+}
+
+function handleFamilySearch() {
+  const input = document.getElementById('family-chunk-search');
+  if (!input) return;
+  const q = input.value.trim().toLowerCase();
+  _familyPanelState.search = q;
+  document.querySelectorAll('#family-chunks-table-body tr[data-chunk-id]').forEach(row => {
+    const haystack = row.dataset.search || '';
+    row.style.display = !q || haystack.includes(q) ? '' : 'none';
+  });
+}
+
+async function loadFamilyPanel(force = false) {
+  if (!IS_ADMIN) return;
+  const body = document.getElementById('family-chunks-table-body');
+  const cardList = document.getElementById('family-card-list');
+  if (!body || !cardList) return;
+
+  try {
+    if (!_pdfDetails.length || force) {
+      const res = await fetch('/admin-panel/api/pdfs/');
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        _pdfDetails = data.pdf_details || [];
+      }
+    }
+
+    let pdfName = selectedPdf;
+    let detail = _findPdfDetail(pdfName);
+    if (!detail || !detail.chunks_count) {
+      detail = _defaultChunkedPdf();
+      if (detail) {
+        pdfName = detail.name;
+        selectedPdf = pdfName;
+        _highlightPdfRow(pdfName);
+      }
+    }
+
+    if (!pdfName || !detail || !detail.chunks_count) {
+      _familyPanelState = {
+        pdf: '',
+        document_id: '',
+        chunks: [],
+        families: [],
+        chunksById: {},
+        familiesById: {},
+        search: '',
+      };
+      _familyResetForm();
+      renderFamilyWorkspace();
+      return;
+    }
+
+    const res = await fetch(`/admin-panel/api/families/?pdf=${encodeURIComponent(pdfName)}`);
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Could not load product families.');
+    }
+
+    const nextState = {
+      pdf: data.pdf || pdfName,
+      document_id: data.document_id || '',
+      chunks: data.chunks || [],
+      families: data.families || [],
+      chunksById: Object.fromEntries((data.chunks || []).map(chunk => [String(chunk.id), chunk])),
+      familiesById: Object.fromEntries((data.families || []).map(family => [String(family.id), family])),
+      search: document.getElementById('family-chunk-search')?.value || '',
+    };
+
+    _familyPanelState = nextState;
+    if (selectedPdf !== nextState.pdf) {
+      selectedPdf = nextState.pdf;
+      _highlightPdfRow(selectedPdf);
+    }
+
+    if (_familySelectedId && !_familyPanelState.familiesById[_familySelectedId]) {
+      _familyResetForm();
+    } else if (_familySelectedId) {
+      const family = _familyPanelState.familiesById[_familySelectedId];
+      _familySelectedChunkIds = new Set((family.chunks || []).map(chunk => String(chunk.id)));
+      const id = document.getElementById('family-id');
+      const name = document.getElementById('family-name');
+      const code = document.getElementById('family-code');
+      const category = document.getElementById('family-category');
+      const status = document.getElementById('family-review-status');
+      if (id) id.value = family.id;
+      if (name) name.value = family.product_name || '';
+      if (code) code.value = family.product_code || '';
+      if (category) category.value = family.raw_category || '';
+      if (status) status.value = family.review_status || 'approved';
+    } else {
+      const validChunkIds = new Set(Object.keys(_familyPanelState.chunksById));
+      _familySelectedChunkIds = new Set([..._familySelectedChunkIds].filter(id => validChunkIds.has(String(id))));
+    }
+
+    renderFamilyWorkspace();
+  } catch (error) {
+    body.innerHTML = `
+      <tr>
+        <td colspan="7" class="index-table-empty" style="color:var(--orange)">
+          <i class="fa fa-exclamation-triangle" style="font-size: 32px; display: block; margin-bottom: 10px;"></i>
+          ${escHtml(error.message)}
+        </td>
+      </tr>
+    `;
+    cardList.innerHTML = '<div class="family-card-empty">Failed to load product families.</div>';
+    showToast(error.message, 'error');
+  }
+}
+
+async function saveProductFamily() {
+  const pdfName = _familyPanelState.pdf || selectedPdf || '';
+  const familyId = (document.getElementById('family-id')?.value || _familySelectedId || '').trim();
+  const productName = document.getElementById('family-name')?.value.trim() || '';
+  const productCode = document.getElementById('family-code')?.value.trim() || '';
+  const rawCategory = document.getElementById('family-category')?.value.trim() || '';
+  const reviewStatus = document.getElementById('family-review-status')?.value || 'approved';
+  const chunkIds = [..._familySelectedChunkIds];
+
+  if (!pdfName) {
+    showToast('Select a chunked PDF first.', 'error');
+    return;
+  }
+  if (!productName) {
+    showToast('Product family name is required.', 'error');
+    return;
+  }
+  if (!chunkIds.length) {
+    showToast('Select at least one chunk.', 'error');
+    return;
+  }
+
+  const button = document.querySelector('.family-actions .btn-primary');
+  if (button) {
+    button.disabled = true;
+    button.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Saving…';
+  }
+
+  try {
+    const res = await fetch('/admin-panel/api/families/save/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({
+        pdf: pdfName,
+        family_id: familyId,
+        product_name: productName,
+        product_code: productCode,
+        raw_category: rawCategory,
+        review_status: reviewStatus,
+        chunk_ids: chunkIds,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Could not save product family.');
+
+    _familyPanelState = {
+      pdf: data.pdf || pdfName,
+      document_id: data.document_id || _familyPanelState.document_id,
+      chunks: data.chunks || [],
+      families: data.families || [],
+      chunksById: Object.fromEntries((data.chunks || []).map(chunk => [String(chunk.id), chunk])),
+      familiesById: Object.fromEntries((data.families || []).map(family => [String(family.id), family])),
+      search: document.getElementById('family-chunk-search')?.value || '',
+    };
+    _familySelectedId = data.family?.id || familyId || '';
+    _familySelectedChunkIds = new Set((data.family?.chunks || []).map(chunk => String(chunk.id)));
+
+    const id = document.getElementById('family-id');
+    const name = document.getElementById('family-name');
+    const code = document.getElementById('family-code');
+    const category = document.getElementById('family-category');
+    const status = document.getElementById('family-review-status');
+    if (id) id.value = _familySelectedId;
+    if (name) name.value = data.family?.product_name || productName;
+    if (code) code.value = data.family?.product_code || productCode;
+    if (category) category.value = data.family?.raw_category || rawCategory;
+    if (status) status.value = data.family?.review_status || reviewStatus;
+
+    renderFamilyWorkspace();
+    document.getElementById('next-to-index-families').style.display = 'flex';
+    markStepDone('families');
+    advanceTrackedStage('families', pdfName);
+    refreshStats();
+    loadPdfList();
+    showToast(data.message || 'Product family saved.', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.innerHTML = '<i class="fa fa-save"></i> Save Family';
+    }
+  }
+}
+
 // Minimal markdown → HTML for chunk display
 function mdToHtml(md) {
   if (!md) return '';
@@ -2010,6 +2507,10 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+function escAttr(s) {
+  return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ── Step 3 Index & Embed Dashboard Logic ──
 let _cachedIndexChunks = [];
 let _indexChatGlobalContext = false;
@@ -2021,22 +2522,18 @@ async function loadIndexPanel() {
   if (!pdfTitleEl || !tableBody) return;
 
   // 1. If selectedPdf is not set, try to select the first PDF from PDF list
-  if (!selectedPdf) {
+  if (!selectedPdf || !_findPdfDetail(selectedPdf)?.chunks_count) {
     try {
-      const res = await fetch('/admin-panel/api/pdfs/');
-      const data = await res.json();
-      const pdfs = data.pdf_details || [];
-      if (pdfs.length > 0) {
-        // Auto select the first processed PDF
-        selectedPdf = pdfs[0].name;
-        // Highlight active row in Step 2 table if we are there
-        document.querySelectorAll('#pdf-selector-table-body tr').forEach(r => {
-          if (r.dataset.pdf === selectedPdf) {
-            r.classList.add('selected');
-          } else {
-            r.classList.remove('selected');
-          }
-        });
+      if (!_pdfDetails.length) {
+        const res = await fetch('/admin-panel/api/pdfs/');
+        const data = await res.json();
+        _pdfDetails = data.pdf_details || [];
+      }
+      const pdfs = _pdfDetails || [];
+      const picked = _findPdfDetail(selectedPdf) || _defaultChunkedPdf() || pdfs[0];
+      if (picked) {
+        selectedPdf = picked.name;
+        _highlightPdfRow(selectedPdf);
       }
     } catch (e) {
       console.error('Failed to load PDF list in index panel', e);

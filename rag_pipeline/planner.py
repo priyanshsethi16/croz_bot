@@ -141,7 +141,10 @@ def deterministic_plan(query: str, scope: QueryScope | None = None) -> QueryPlan
     if codes and re.search(r'\b(show|find|details?|specifications?|specs?|information|what is)\b', lowered):
         return QueryPlan(intent=QueryIntent.EXACT_LOOKUP, scope=scope, entities=entities)
 
-    if re.search(r'\b(all|every|available|types? of|list)\b', lowered):
+    if (
+        re.search(r'\b(all|every|available|types? of|list)\b', lowered)
+        and not re.search(r'\ball\s+about\b', lowered)
+    ):
         category = _category_phrase(query)
         if category:
             entities.append(QueryEntity(type='category', value=category))

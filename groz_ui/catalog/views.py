@@ -3,6 +3,7 @@ import os
 import secrets
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from django.conf import settings
@@ -13,6 +14,7 @@ from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from .models import DocumentChunk, ProductFamily
 
 PROJECT_ROOT = settings.PROJECT_ROOT
 
@@ -20,6 +22,26 @@ PROJECT_ROOT = settings.PROJECT_ROOT
 def _clean_parsing_instructions(value) -> str:
     """Limit optional admin PDF-specific VLM instructions before subprocess use."""
     return str(value or '').strip()[:4000]
+
+
+def _resolve_catalog_document(pdf_name: str):
+    from .models import CatalogDocument
+
+    pdf_name = Path(str(pdf_name or '')).name
+    if not pdf_name:
+        return None
+    pdf_stem = Path(pdf_name).stem
+    doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
+    if not doc:
+        doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+    return doc
+
+
+def _chunk_excerpt(text: str, limit: int = 180) -> str:
+    cleaned = ' '.join(str(text or '').split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit - 1].rstrip() + '…'
 
 
 def _get_catalog_stats():
@@ -136,6 +158,7 @@ def _get_catalog_stats():
             'pending_jobs': IngestionJob.objects.filter(
                 status__in=(IngestionJob.Status.PENDING, IngestionJob.Status.RUNNING),
             ).count(),
+            'families': ProductFamily.objects.count(),
             'needs_review': ProductFamily.objects.filter(
                 review_status=ProductFamily.ReviewStatus.NEEDS_REVIEW,
             ).count(),
@@ -579,7 +602,7 @@ def approve_pdf(request):
     from pathlib import Path
     import json as _j
 
-    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
     detected_stage = 'uploaded'
     pdf_stem = Path(filename).stem
     done_count = None
@@ -689,7 +712,7 @@ def approve_pdf(request):
 @login_required
 @require_POST
 def update_pdf_stage(request):
-    """Update a PDF's progress stage: uploaded (25%), chunked (50%), indexed (75%), tested (100%)."""
+    """Update a PDF's progress stage: uploaded, chunked, families, indexed, tested."""
     if not request.user.is_staff:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
     try:
@@ -699,10 +722,10 @@ def update_pdf_stage(request):
     except Exception:
         return JsonResponse({'error': 'Invalid request.'}, status=400)
     
-    if not filename or stage not in ['uploaded', 'chunked', 'indexed', 'tested']:
+    if not filename or stage not in ['uploaded', 'chunked', 'families', 'indexed', 'tested']:
         return JsonResponse({'error': 'Invalid filename or stage.'}, status=400)
 
-    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
 
     # Persist to DB (ApiKey table) so stage survives logout/login
     from .models import ApiKey
@@ -835,7 +858,7 @@ def catalog_stats(request):
 
     # Restore from DB for any tracked PDF whose session state is missing/outdated
     from .models import ApiKey
-    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
     try:
         import json as _j
         db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
@@ -1403,7 +1426,7 @@ def delete_embeddings_only(request):
     # Downgrade stage from indexed/tested → chunked so progress bar reflects reality
     import json as _j
     from .models import ApiKey
-    STAGE_ORDER = ['uploaded', 'chunked', 'indexed', 'tested']
+    STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
     try:
         _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
         for key in [filename, stem]:
@@ -1454,9 +1477,7 @@ def list_chunks(request):
 
     pdf_stem = Path(pdf_name).stem
     index_only = request.GET.get('index') == '1'  # True = Index & Embed panel, exclude STALE
-    doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
-    if not doc:
-        doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+    doc = _resolve_catalog_document(pdf_name)
 
     document_id = str(doc.id) if doc else None
 
@@ -1466,16 +1487,25 @@ def list_chunks(request):
             qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
         db_chunks = qs.order_by('ordinal')
         for c in db_chunks:
+            family = c.family
             prod_name = 'General Info'
-            if c.family:
-                prod_name = c.family.product_name
+            if family:
+                prod_name = family.product_name
             elif c.variant and c.variant.family:
                 prod_name = c.variant.family.product_name
             chunks.append({
+                'id': str(c.id),
                 'filename': f"chunk_{c.ordinal:04d}.md",
                 'content': c.text,
+                'excerpt': _chunk_excerpt(c.text),
                 'ordinal': c.ordinal,
                 'product_name': prod_name,
+                'family_id': str(c.family_id) if c.family_id else '',
+                'family_name': family.product_name if family else '',
+                'family_code': family.product_code if family else '',
+                'family_status': family.review_status if family else '',
+                'page_start': c.page_start,
+                'page_end': c.page_end,
                 'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
             })
     else:
@@ -1499,21 +1529,269 @@ def list_chunks(request):
                         qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
                     db_chunks = qs.order_by('ordinal')
                     for c in db_chunks:
+                        family = c.family
                         prod_name = 'General Info'
-                        if c.family:
-                            prod_name = c.family.product_name
+                        if family:
+                            prod_name = family.product_name
                         elif c.variant and c.variant.family:
                             prod_name = c.variant.family.product_name
                         chunks.append({
+                            'id': str(c.id),
                             'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
                             'content': c.text,
+                            'excerpt': _chunk_excerpt(c.text),
                             'ordinal': ordinal_offset + c.ordinal,
                             'product_name': prod_name,
+                            'family_id': str(c.family_id) if c.family_id else '',
+                            'family_name': family.product_name if family else '',
+                            'family_code': family.product_code if family else '',
+                            'family_status': family.review_status if family else '',
+                            'page_start': c.page_start,
+                            'page_end': c.page_end,
                             'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
                         })
                     ordinal_offset += qs.count()
 
     return JsonResponse({'document_id': document_id, 'chunks': chunks})
+
+
+def _serialize_family_editor_chunk(chunk):
+    family = chunk.family
+    return {
+        'id': str(chunk.id),
+        'ordinal': chunk.ordinal,
+        'filename': f'chunk_{chunk.ordinal:04d}.md',
+        'product_name': family.product_name if family else (chunk.variant.family.product_name if chunk.variant and chunk.variant.family else 'General Info'),
+        'product_code': family.product_code if family else '',
+        'family_id': str(family.id) if family else '',
+        'family_name': family.product_name if family else '',
+        'family_code': family.product_code if family else '',
+        'family_status': family.review_status if family else '',
+        'page_start': chunk.page_start,
+        'page_end': chunk.page_end,
+        'status': 'Embedded' if chunk.index_status == DocumentChunk.IndexStatus.INDEXED else 'Ready',
+        'excerpt': _chunk_excerpt(chunk.text),
+    }
+
+
+def _serialize_family_editor_family(family):
+    chunks = list(family.chunks.all().order_by('ordinal'))
+    return {
+        'id': str(family.id),
+        'product_name': family.product_name,
+        'product_code': family.product_code,
+        'raw_category': family.raw_category,
+        'category': family.normalized_category.name if family.normalized_category else family.raw_category,
+        'review_status': family.review_status,
+        'page_start': family.page_start,
+        'page_end': family.page_end,
+        'chunk_count': len(chunks),
+        'chunks': [
+            {
+                'id': str(chunk.id),
+                'ordinal': chunk.ordinal,
+                'filename': f'chunk_{chunk.ordinal:04d}.md',
+                'excerpt': _chunk_excerpt(chunk.text),
+                'page_start': chunk.page_start,
+                'page_end': chunk.page_end,
+            }
+            for chunk in chunks
+        ],
+    }
+
+
+@login_required
+def list_product_families(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    pdf_name = request.GET.get('pdf', '').strip()
+    if not pdf_name:
+        return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
+
+    doc = _resolve_catalog_document(pdf_name)
+    if not doc:
+        return JsonResponse({'error': 'PDF not found.'}, status=404)
+
+    from django.db.models import Prefetch
+    from .models import DocumentChunk, ProductFamily
+
+    chunks = [
+        _serialize_family_editor_chunk(chunk)
+        for chunk in DocumentChunk.objects.filter(document=doc).select_related(
+            'family',
+            'family__normalized_category',
+            'variant',
+            'variant__family',
+        ).order_by('ordinal')
+    ]
+    families = [
+        _serialize_family_editor_family(family)
+        for family in ProductFamily.objects.filter(document=doc).select_related(
+            'normalized_category',
+        ).prefetch_related(
+            Prefetch('chunks', queryset=DocumentChunk.objects.select_related('family').order_by('ordinal')),
+        ).order_by('product_name', 'product_code', 'id')
+    ]
+    return JsonResponse({
+        'document_id': str(doc.id),
+        'pdf': doc.original_filename,
+        'status': doc.status,
+        'is_active': doc.is_active,
+        'chunk_count': len(chunks),
+        'family_count': len(families),
+        'chunks': chunks,
+        'families': families,
+    })
+
+
+@login_required
+@require_POST
+def save_product_family(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    pdf_name = str(body.get('pdf', '')).strip()
+    product_name = str(body.get('product_name', '')).strip()
+    product_code = str(body.get('product_code', '')).strip()
+    raw_category = str(body.get('raw_category', '')).strip()
+    review_status = str(body.get('review_status', 'approved')).strip().lower()
+    family_id = str(body.get('family_id', '')).strip()
+    chunk_ids = body.get('chunk_ids', [])
+    if not pdf_name:
+        return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
+    if not product_name:
+        return JsonResponse({'error': 'Product family name is required.'}, status=400)
+    if review_status not in {ProductFamily.ReviewStatus.APPROVED, ProductFamily.ReviewStatus.NEEDS_REVIEW, ProductFamily.ReviewStatus.REJECTED}:
+        return JsonResponse({'error': 'Invalid review status.'}, status=400)
+    if not isinstance(chunk_ids, list):
+        return JsonResponse({'error': 'chunk_ids must be an array.'}, status=400)
+
+    chunk_ids = [str(chunk_id).strip() for chunk_id in chunk_ids if str(chunk_id).strip()]
+    if not chunk_ids:
+        return JsonResponse({'error': 'Select at least one chunk to save a family.'}, status=400)
+    doc = _resolve_catalog_document(pdf_name)
+    if not doc:
+        return JsonResponse({'error': 'PDF not found.'}, status=404)
+
+    from django.db import transaction
+    from django.db.models import Count
+    from django.db.models import Prefetch
+    from django.utils import timezone
+    from .services.taxonomy import resolve_category
+
+    with transaction.atomic():
+        if family_id:
+            family = ProductFamily.objects.filter(id=family_id, document=doc).select_for_update().first()
+            if not family:
+                return JsonResponse({'error': 'Family not found.'}, status=404)
+            current_family_chunks = list(
+                DocumentChunk.objects.select_for_update().filter(
+                    document=doc,
+                    family=family,
+                )
+            )
+        else:
+            family = ProductFamily(
+                document=doc,
+                source_key=f'ui:{uuid.uuid4()}',
+            )
+            current_family_chunks = []
+
+        chunks = []
+        if chunk_ids:
+            chunks = list(
+                DocumentChunk.objects.select_for_update().filter(
+                    document=doc,
+                    id__in=chunk_ids,
+                )
+            )
+            if len(chunks) != len(chunk_ids):
+                return JsonResponse({'error': 'One or more chunks were not found.'}, status=404)
+        selected_chunk_ids = {chunk.id for chunk in chunks}
+
+        category = resolve_category(
+            product_name=product_name,
+            raw_category=raw_category,
+        )
+        family.product_name = product_name
+        family.product_code = product_code
+        family.raw_category = raw_category
+        family.normalized_category = category
+        family.review_status = review_status
+        computed_page_start = min((chunk.page_start for chunk in chunks if chunk.page_start), default=0)
+        computed_page_end = max((chunk.page_end for chunk in chunks if chunk.page_end), default=computed_page_start)
+        family.page_start = int(body.get('page_start') or computed_page_start or family.page_start or 0)
+        family.page_end = int(body.get('page_end') or computed_page_end or family.page_end or family.page_start or 0)
+        family.save()
+
+        if chunk_ids:
+            updated_at = timezone.now()
+            for chunk in chunks:
+                chunk.family = family
+                chunk.updated_at = updated_at
+            DocumentChunk.objects.bulk_update(chunks, ('family', 'updated_at'))
+
+            deselected_chunks = [
+                chunk for chunk in current_family_chunks
+                if chunk.id not in selected_chunk_ids
+            ]
+            if deselected_chunks:
+                for chunk in deselected_chunks:
+                    chunk.family = None
+                    chunk.updated_at = updated_at
+                DocumentChunk.objects.bulk_update(deselected_chunks, ('family', 'updated_at'))
+
+        empty_family_ids = list(
+            ProductFamily.objects.filter(document=doc)
+            .exclude(id=family.id)
+            .annotate(chunk_total=Count('chunks'))
+            .filter(chunk_total=0)
+            .values_list('id', flat=True)
+        )
+        if empty_family_ids:
+            ProductFamily.objects.filter(id__in=empty_family_ids).delete()
+
+        refresh_chunk_ids = {chunk.id for chunk in current_family_chunks} | selected_chunk_ids
+        indexed_chunks = DocumentChunk.objects.filter(
+            document=doc,
+            id__in=refresh_chunk_ids,
+            index_status=DocumentChunk.IndexStatus.INDEXED,
+        ).select_related(
+            'document', 'family', 'family__normalized_category',
+            'family__normalized_category__parent', 'variant',
+        )
+        if indexed_chunks.exists():
+            from .services.indexing import refresh_chunk_payloads
+            refresh_chunk_payloads(indexed_chunks)
+
+    families = [
+        _serialize_family_editor_family(item)
+        for item in ProductFamily.objects.filter(document=doc).select_related(
+            'normalized_category',
+        ).prefetch_related(
+            Prefetch('chunks', queryset=DocumentChunk.objects.select_related('family').order_by('ordinal')),
+        ).order_by('product_name', 'product_code', 'id')
+    ]
+    chunks = [
+        _serialize_family_editor_chunk(chunk)
+        for chunk in DocumentChunk.objects.filter(document=doc).select_related(
+            'family',
+            'family__normalized_category',
+            'variant',
+            'variant__family',
+        ).order_by('ordinal')
+    ]
+    return JsonResponse({
+        'message': f'Product family "{product_name}" saved.',
+        'family': _serialize_family_editor_family(family),
+        'chunks': chunks,
+        'families': families,
+        'document_id': str(doc.id),
+    })
 
 
 @login_required

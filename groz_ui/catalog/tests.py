@@ -45,7 +45,7 @@ from .services.query_repository import find_by_product_codes
 from .services.query_repository import resolve_product_code_tokens
 from .services.manual_ingestion import persist_manual_chunks
 from .services.taxonomy import resolve_category
-from rag_pipeline.planner import QueryIntent, QueryPlan, QueryRoute, QueryScope, QueryTask
+from rag_pipeline.planner import QueryIntent, QueryPlan, QueryRoute, QueryScope, QueryTask, deterministic_plan
 from vision_pipeline.manual_chunker import ManualChunkData
 
 
@@ -525,6 +525,35 @@ class CatalogV2QueryEngineTests(TestCase):
         self.assertTrue(result.complete)
         self.assertEqual({item['product_code'] for item in result.products}, {'CHID', 'CHID-CU'})
 
+    def test_active_needs_review_families_are_queryable_until_rejected(self):
+        family = ProductFamily.objects.create(
+            document=self.document,
+            source_key='p3:drill',
+            product_name='Cordless Impact Drill Driver',
+            product_code='BLMD-358JST',
+            raw_category='Cordless Impact Drill Driver',
+            review_status=ProductFamily.ReviewStatus.NEEDS_REVIEW,
+            page_start=3,
+            page_end=3,
+        )
+
+        result = list_products(scope=QueryScope(document_ids=[str(self.document.id)]), page_size=50)
+        self.assertIn('BLMD-358JST', {item['product_code'] for item in result.products})
+
+        family.review_status = ProductFamily.ReviewStatus.REJECTED
+        family.save(update_fields=('review_status', 'updated_at'))
+
+        result = list_products(scope=QueryScope(document_ids=[str(self.document.id)]), page_size=50)
+        self.assertNotIn('BLMD-358JST', {item['product_code'] for item in result.products})
+
+    def test_all_about_query_uses_semantic_rag_plan(self):
+        plan = deterministic_plan(
+            'Summaries all about Cordless Impact Drill Driver.',
+            QueryScope(document_ids=[str(self.document.id)]),
+        )
+
+        self.assertEqual(plan.intent, QueryIntent.GENERAL_SEMANTIC)
+
     def test_same_code_with_different_product_names_keeps_both_records(self):
         other_catalog = Catalog.objects.create(name='Other Query Catalog', slug='other-query-catalog')
         other_document = CatalogDocument.objects.create(
@@ -991,6 +1020,136 @@ This model selection may be wrong.'''
 
         self.assertEqual(normalized.tasks[0].categories, ['hammer'])
         self.assertEqual(normalized.tasks[0].materials, ['copper', 'brass'])
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class CatalogV2FamilyWorkflowTests(TestCase):
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            username='family-admin',
+            password='test-password',
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+        session = self.client.session
+        session['admin_access_token'] = 'test-family-token'
+        session.save()
+        self.catalog = Catalog.objects.create(name='Family Catalog', slug='family-catalog')
+        self.document = CatalogDocument.objects.create(
+            catalog=self.catalog,
+            original_filename='family.pdf',
+            file=SimpleUploadedFile('family.pdf', b'%PDF-test'),
+            checksum_sha256='6' * 64,
+            version=1,
+            page_count=3,
+            status=CatalogDocument.Status.READY,
+            is_active=True,
+        )
+
+    def _family(self, source_key: str, product_name: str, *, product_code: str = '', raw_category: str = ''):
+        return ProductFamily.objects.create(
+            document=self.document,
+            source_key=source_key,
+            product_name=product_name,
+            product_code=product_code,
+            raw_category=raw_category,
+            review_status=ProductFamily.ReviewStatus.NEEDS_REVIEW,
+            page_start=1,
+            page_end=1,
+        )
+
+    def _chunk(self, ordinal: int, *, family=None, text: str = 'Chunk text'):
+        return DocumentChunk.objects.create(
+            document=self.document,
+            family=family,
+            chunk_type=DocumentChunk.ChunkType.PRODUCT_FAMILY,
+            text=text,
+            page_start=ordinal,
+            page_end=ordinal,
+            content_hash=hashlib.sha256(f'chunk-{ordinal}-{text}'.encode()).hexdigest(),
+            ordinal=ordinal,
+            index_status=DocumentChunk.IndexStatus.PENDING,
+        )
+
+    def test_list_product_families_returns_family_and_chunk_context(self):
+        family = self._family(
+            source_key='ui:family-list',
+            product_name='Cordless Impact Drill Driver',
+            product_code='BLMD-358JST',
+            raw_category='Cordless Impact Drill',
+        )
+        chunk = self._chunk(1, family=family, text='Cordless Impact Drill chunk')
+
+        response = self.client.get('/admin-panel/api/families/?pdf=family.pdf')
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['family_count'], 1)
+        self.assertEqual(body['chunk_count'], 1)
+        self.assertEqual(body['families'][0]['product_name'], 'Cordless Impact Drill Driver')
+        self.assertEqual(body['chunks'][0]['family_name'], 'Cordless Impact Drill Driver')
+        self.assertEqual(body['chunks'][0]['id'], str(chunk.id))
+
+    def test_save_product_family_replaces_membership_and_cleans_up_empties(self):
+        target_family = self._family(
+            source_key='ui:target',
+            product_name='Old Family',
+            product_code='OLD-1',
+            raw_category='Old family',
+        )
+        other_family = self._family(
+            source_key='ui:other',
+            product_name='Other Family',
+            product_code='OTH-1',
+            raw_category='Other family',
+        )
+        chunk_one = self._chunk(1, family=target_family, text='Chunk one')
+        chunk_two = self._chunk(2, family=target_family, text='Chunk two')
+        chunk_three = self._chunk(3, family=other_family, text='Chunk three')
+
+        response = self.client.post(
+            '/admin-panel/api/families/save/',
+            data=json.dumps({
+                'pdf': 'family.pdf',
+                'family_id': str(target_family.id),
+                'product_name': 'Cordless Impact Drill Driver',
+                'product_code': 'BLMD-358JST',
+                'raw_category': 'Cordless Impact Drill',
+                'review_status': 'approved',
+                'chunk_ids': [str(chunk_one.id), str(chunk_three.id)],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        target_family.refresh_from_db()
+        chunk_one.refresh_from_db()
+        chunk_two.refresh_from_db()
+        chunk_three.refresh_from_db()
+
+        self.assertEqual(target_family.product_name, 'Cordless Impact Drill Driver')
+        self.assertEqual(chunk_one.family_id, target_family.id)
+        self.assertIsNone(chunk_two.family_id)
+        self.assertEqual(chunk_three.family_id, target_family.id)
+        self.assertFalse(ProductFamily.objects.filter(id=other_family.id).exists())
+
+        body = response.json()
+        self.assertEqual(body['family']['product_name'], 'Cordless Impact Drill Driver')
+        self.assertEqual(body['family']['chunk_count'], 2)
+        self.assertEqual(len(body['families']), 1)
+
+    def test_update_pdf_stage_accepts_families_stage(self):
+        response = self.client.post(
+            '/admin-panel/api/update-pdf-stage/',
+            data=json.dumps({
+                'filename': 'family.pdf',
+                'stage': 'families',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['stage'], 'families')
 
 
 class CatalogV2ManualIngestionTests(TestCase):

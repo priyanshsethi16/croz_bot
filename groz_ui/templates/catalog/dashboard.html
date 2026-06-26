@@ -74,9 +74,13 @@
         <i class="fa fa-layer-group"></i> Create Chunks
         <span class="step-num">2</span>
       </button>
+      <button class="sidebar-link" data-panel="families" onclick="showPanel('families')">
+        <i class="fa fa-sitemap"></i> Product Families
+        <span class="step-num">3</span>
+      </button>
       <button class="sidebar-link" data-panel="index" onclick="showPanel('index')">
         <i class="fa fa-database"></i> Index &amp; Embed
-        <span class="step-num">3</span>
+        <span class="step-num">4</span>
       </button>
     </div>
     {% else %}
@@ -107,7 +111,7 @@
         <button class="sidebar-toggle" id="sidebar-toggle"><i class="fa fa-bars"></i></button>
         <div>
           <h1>{% if is_admin %}Admin <span>Dashboard</span>{% else %}User <span>Dashboard</span>{% endif %}</h1>
-          <p>{% if is_admin %}Manage catalog PDFs — upload, chunk, and index for semantic search{% else %}View catalog status and test product queries{% endif %}</p>
+          <p>{% if is_admin %}Manage catalog PDFs — upload, chunk, review families, and index for semantic search{% else %}View catalog status and test product queries{% endif %}</p>
         </div>
       </div>
     </div>
@@ -161,15 +165,22 @@
           <div class="step-sub">Extract products via AI</div>
         </div>
       </div>
-      <div class="step-item" data-step="index" onclick="showPanel('index')">
+      <div class="step-item" data-step="families" onclick="showPanel('families')">
         <div class="step-circle">3</div>
+        <div class="step-text">
+          <div class="step-title">Product Families</div>
+          <div class="step-sub">Review and group chunks</div>
+        </div>
+      </div>
+      <div class="step-item" data-step="index" onclick="showPanel('index')">
+        <div class="step-circle">4</div>
         <div class="step-text">
           <div class="step-title">Index &amp; Embed</div>
           <div class="step-sub">Vector search ready</div>
         </div>
       </div>
       <div class="step-item" data-step="chat" onclick="showPanel('chat')">
-        <div class="step-circle">4</div>
+        <div class="step-circle">5</div>
         <div class="step-text">
           <div class="step-title">Test Chat</div>
           <div class="step-sub">Validate results</div>
@@ -177,9 +188,9 @@
       </div>
     </div>
     <div class="workflow-progress" id="workflow-progress">
-      <div class="progress-head">
-        <div>
-          <div class="progress-eyebrow" id="workflow-step-label">Step 0 of 4</div>
+          <div class="progress-head">
+            <div>
+          <div class="progress-eyebrow" id="workflow-step-label">Step 0 of 5</div>
           <h3 id="workflow-progress-title">Catalog setup progress</h3>
           <p id="workflow-progress-sub">Upload a PDF to start the catalog pipeline.</p>
         </div>
@@ -206,10 +217,15 @@
           <b>Split &amp; Parse</b>
           <small>50%</small>
         </div>
+        <div class="milestone" data-progress-step="families">
+          <span><i class="fa fa-sitemap"></i></span>
+          <b>Product Families</b>
+          <small>70%</small>
+        </div>
         <div class="milestone" data-progress-step="index">
           <span><i class="fa fa-database"></i></span>
           <b>Index &amp; Embed</b>
-          <small>75%</small>
+          <small>85%</small>
         </div>
         <div class="milestone" data-progress-step="chat">
           <span><i class="fa fa-comments"></i></span>
@@ -285,7 +301,7 @@
             <i class="fa fa-inbox" style="font-size:40px;margin-bottom:14px;display:block;color:#d0d0d0"></i>
             <p style="font-size:14px;font-weight:600;margin-bottom:8px">No PDFs processed yet</p>
             {% if is_admin %}
-            <p style="font-size:13px;margin-bottom:20px">Follow the 3-step workflow to get started.</p>
+            <p style="font-size:13px;margin-bottom:20px">Follow the 5-step workflow to get started.</p>
             <button class="btn btn-primary" onclick="showPanel('upload')">
               <i class="fa fa-upload"></i> Upload Your First PDF
             </button>
@@ -310,7 +326,7 @@
               <p>Upload one or more industrial product catalog PDFs</p>
             </div>
           </div>
-          <span class="badge badge-orange">Step 1 of 3</span>
+          <span class="badge badge-orange">Step 1 of 5</span>
         </div>
         <div class="panel-body">
           <div class="upload-zone" id="upload-zone"
@@ -470,7 +486,7 @@
               <p>AI vision extracts products, specs &amp; variants into individual markdown chunks</p>
             </div>
           </div>
-          <span class="badge badge-orange">Step 2 of 3</span>
+          <span class="badge badge-orange">Step 2 of 5</span>
         </div>
         <div class="panel-body">
           <p style="font-size:13px;color:var(--grey);margin-bottom:16px">
@@ -523,7 +539,135 @@
           </div>
           <div class="log-output" id="chunk-log"></div>
           <div class="next-step-bar" id="next-to-index" style="display:none">
-            <p><i class="fa fa-check-circle"></i> Chunks created! Now index for semantic search.</p>
+            <p><i class="fa fa-check-circle"></i> Chunks created! Now review product families.</p>
+            <button class="btn btn-primary btn-sm" onclick="showPanel('families')">
+              Next: Product Families <i class="fa fa-arrow-right"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- ══ PANEL: Product Families (admin only) ══ -->
+    {% if is_admin %}
+    <div class="panel" id="panel-families">
+      <div class="panel-card">
+        <div class="panel-head">
+          <div class="panel-head-left">
+            <div class="panel-head-icon"><i class="fa fa-sitemap"></i></div>
+            <div>
+              <h3>Step 3 — Product Families</h3>
+              <p>Group extracted chunks into canonical product families before indexing</p>
+            </div>
+          </div>
+          <span class="badge badge-orange">Step 3 of 5</span>
+        </div>
+        <div class="panel-body">
+          <div class="family-toolbar">
+            <div class="family-toolbar-info">
+              <i class="fa fa-file-pdf"></i>
+              <span id="family-panel-pdf">Select a chunked PDF to review families</span>
+            </div>
+            <div class="family-search-box">
+              <i class="fa fa-search"></i>
+              <input type="text" id="family-chunk-search" placeholder="Search chunks..." oninput="handleFamilySearch()" />
+            </div>
+            <div class="family-toolbar-actions">
+              <button class="btn btn-sm btn-secondary" onclick="loadFamilyPanel(true)">
+                <i class="fa fa-sync"></i> Refresh
+              </button>
+              <button class="btn btn-sm btn-secondary" onclick="showPanel('chunk')">
+                <i class="fa fa-layer-group"></i> Back to Chunks
+              </button>
+            </div>
+          </div>
+
+          <div class="family-review-layout">
+            <section class="family-review-table-panel">
+              <div class="family-review-hint">
+                Select one or more chunk rows, then save them into a product family on the right.
+              </div>
+              <div class="table-wrap">
+                <table class="family-review-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 44px;"></th>
+                      <th style="width: 90px;">CHUNK</th>
+                      <th style="width: 240px;">PRODUCT</th>
+                      <th style="width: 190px;">FAMILY</th>
+                      <th style="width: 90px;">PAGES</th>
+                      <th>EXCERPT</th>
+                      <th style="width: 110px; text-align: center;">STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody id="family-chunks-table-body">
+                    <tr>
+                      <td colspan="7" class="index-table-empty">
+                        <i class="fa fa-sitemap" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
+                        Loading families…
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="family-editor-card">
+              <div class="family-editor-head">
+                <div>
+                  <h4>Family Editor</h4>
+                  <p>Create or update a family, then assign selected chunks to it.</p>
+                </div>
+                <span class="badge badge-blue" id="family-editor-chunk-count">0 selected</span>
+              </div>
+
+              <input type="hidden" id="family-id" />
+              <div class="family-field">
+                <label for="family-name">Product family name</label>
+                <input type="text" id="family-name" placeholder="Cordless Impact Drill Driver 13mm (1/2&quot;)" />
+              </div>
+              <div class="family-field">
+                <label for="family-code">Product code</label>
+                <input type="text" id="family-code" placeholder="BLMD-358JST" />
+              </div>
+              <div class="family-field">
+                <label for="family-category">Raw category</label>
+                <input type="text" id="family-category" placeholder="Cordless Impact Drill" />
+              </div>
+              <div class="family-field">
+                <label for="family-review-status">Review status</label>
+                <select id="family-review-status">
+                  <option value="approved">Approved</option>
+                  <option value="needs_review">Needs review</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
+              <div class="family-selection-summary" id="family-selection-summary">
+                No chunks selected.
+              </div>
+
+              <div class="family-actions">
+                <button class="btn btn-primary" onclick="saveProductFamily()">
+                  <i class="fa fa-save"></i> Save Family
+                </button>
+                <button class="btn btn-secondary" onclick="clearFamilyForm()">
+                  <i class="fa fa-eraser"></i> Clear
+                </button>
+              </div>
+
+              <div class="family-card-list-head">
+                <span>Existing Families</span>
+                <span id="family-count-badge" class="badge badge-grey">0</span>
+              </div>
+              <div class="family-card-list" id="family-card-list">
+                <div class="family-card-empty">Load a chunked PDF to review product families.</div>
+              </div>
+            </aside>
+          </div>
+
+          <div class="next-step-bar" id="next-to-index-families" style="display:none">
+            <p><i class="fa fa-check-circle"></i> Families saved! Now index approved chunks.</p>
             <button class="btn btn-primary btn-sm" onclick="showPanel('index')">
               Next: Index &amp; Embed <i class="fa fa-arrow-right"></i>
             </button>
@@ -541,11 +685,11 @@
           <div class="panel-head-left">
             <div class="panel-head-icon"><i class="fa fa-database"></i></div>
             <div>
-              <h3>Step 3 — Index &amp; Embed</h3>
+              <h3>Step 4 — Index &amp; Embed</h3>
               <p>Review created dense and BM25 embeddings for instant hybrid search</p>
             </div>
           </div>
-          <span class="badge badge-orange">Step 3 of 3</span>
+          <span class="badge badge-orange">Step 4 of 5</span>
         </div>
         <div class="panel-body">
           <div class="index-dashboard-layout">

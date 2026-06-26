@@ -65,8 +65,8 @@ def _family_queryset(scope: QueryScope):
     return (
         ProductFamily.objects.filter(
             document__in=documents,
-            review_status=ProductFamily.ReviewStatus.APPROVED,
         )
+        .exclude(review_status=ProductFamily.ReviewStatus.REJECTED)
         .select_related('document', 'document__catalog', 'normalized_category')
         .prefetch_related(Prefetch('variants', queryset=ProductVariant.objects.order_by('product_code', 'order_number', 'name')))
     )
