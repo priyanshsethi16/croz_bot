@@ -132,11 +132,21 @@ def _get_catalog_stats():
                         'products': len(products),
                     })
 
+    total_chunks = sum(p['chunks'] for p in processed)
+
+    # Use DB-based indexed chunk count as primary; fall back to Qdrant point count
+    indexed = 0
     try:
-        from rag_pipeline.providers import indexed_document_count
-        indexed = indexed_document_count()
+        from .models import DocumentChunk as _DC
+        indexed = _DC.objects.filter(index_status=_DC.IndexStatus.INDEXED).count()
     except Exception:
-        indexed = 0
+        pass
+    if indexed == 0:
+        try:
+            from rag_pipeline.providers import indexed_document_count
+            indexed = indexed_document_count()
+        except Exception:
+            indexed = 0
 
     stats = {
         'total_pdfs': len(pdfs),
@@ -146,6 +156,7 @@ def _get_catalog_stats():
             for proc in processed
         )],
         'indexed': indexed,
+        'total_chunks': total_chunks,
     }
     try:
         from .models import CatalogDocument, DocumentChunk, IngestionJob, ProductFamily
@@ -162,9 +173,7 @@ def _get_catalog_stats():
             'needs_review': ProductFamily.objects.filter(
                 review_status=ProductFamily.ReviewStatus.NEEDS_REVIEW,
             ).count(),
-            'indexed_chunks': DocumentChunk.objects.filter(
-                index_status=DocumentChunk.IndexStatus.INDEXED,
-            ).count(),
+            'indexed_chunks': indexed,
         }
     except Exception:
         stats['v2'] = {}
@@ -200,7 +209,16 @@ def admin_login(request):
 def admin_logout(request):
     # Invalidate the token before logout so back-button cached pages fail validation
     request.session.pop('admin_access_token', None)
+    # Clear progress tracking so the progress bar starts fresh on next login
+    request.session.pop('pdf_progress', None)
+    request.session.pop('approved_pdfs', None)
     request.session.modified = True
+    # Clear the persisted DB stage map so it doesn't restore on next login
+    try:
+        from .models import ApiKey
+        ApiKey.objects.filter(name='pdf_stage_map').update(value='{}')
+    except Exception:
+        pass
     logout(request)
     return redirect('/')
 
@@ -209,6 +227,10 @@ def admin_logout(request):
 
 @login_required
 def dashboard(request):
+    # Reset progress bar state on every page load — user must re-select a PDF
+    request.session['pdf_progress'] = {}
+    request.session['approved_pdfs'] = []
+    request.session.modified = True
     stats = _get_catalog_stats()
     return render(request, 'catalog/dashboard.html', {
         'stats': stats,
@@ -856,22 +878,31 @@ def catalog_stats(request):
     pdf_progress = request.session.get('pdf_progress', {})
     approved_pdfs = request.session.get('approved_pdfs', [])
 
-    # Restore from DB for any tracked PDF whose session state is missing/outdated
+    # Only restore from DB if the session already has an active tracked PDF
+    # (i.e. user has interacted this session). On fresh page load, keep it empty.
     from .models import ApiKey
     STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
-    try:
-        import json as _j
-        db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
-    except Exception:
-        db_map = {}
-    for fname, db_stage in db_map.items():
-        if db_stage not in STAGE_ORDER:
-            continue
-        session_stage = pdf_progress.get(fname)
-        if not session_stage or STAGE_ORDER.index(db_stage) > STAGE_ORDER.index(session_stage):
-            pdf_progress[fname] = db_stage
-            if fname not in approved_pdfs:
-                approved_pdfs = [fname]
+    db_map = {}
+    if approved_pdfs:  # only restore when user has already selected something
+        try:
+            import json as _j
+            db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            db_map = {}
+        for fname, db_stage in db_map.items():
+            if db_stage not in STAGE_ORDER:
+                continue
+            session_stage = pdf_progress.get(fname)
+            if not session_stage or STAGE_ORDER.index(db_stage) > STAGE_ORDER.index(session_stage):
+                pdf_progress[fname] = db_stage
+                if fname not in approved_pdfs:
+                    approved_pdfs = [fname]
+    else:
+        try:
+            import json as _j
+            db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            db_map = {}
 
     request.session['pdf_progress'] = pdf_progress
     request.session['approved_pdfs'] = approved_pdfs
@@ -904,7 +935,14 @@ def catalog_stats(request):
                 tracked_stage = 'uploaded'  # will be recomputed below
             else:
                 tracked_pdf = fname
-                tracked_stage = pdf_progress.get(fname)
+                # Check both the full filename and the stem against stage map
+                _stem = Path(fname).stem
+                _stage_from_progress = pdf_progress.get(fname) or pdf_progress.get(_stem)
+                # Also directly check db_map for 'tested' since it may be keyed by stem
+                if db_map.get(fname) == 'tested' or db_map.get(_stem) == 'tested':
+                    tracked_stage = 'tested'
+                else:
+                    tracked_stage = _stage_from_progress
             break
     if not tracked_stage or tracked_stage not in STAGE_ORDER:
         tracked_stage = 'uploaded'
@@ -994,6 +1032,21 @@ def catalog_stats(request):
                         tracked_stage = 'uploaded'
                     else:
                         tracked_stage = 'uploaded'  # 25%
+
+                    # 'tested' cannot be inferred from chunk data — it requires explicit
+                    # user approval. If DB stage map records 'tested' for the parent stem
+                    # or any split part, honour it (highest stage wins).
+                    db_parent_stage = db_map.get(tracked_pdf) or db_map.get(tracked_pdf + '.pdf')
+                    if db_parent_stage == 'tested':
+                        tracked_stage = 'tested'
+                        tracked_percent = None
+                    else:
+                        for p in split_part_files:
+                            part_stem = Path(p).stem
+                            if (db_map.get(p) or db_map.get(part_stem)) == 'tested':
+                                tracked_stage = 'tested'
+                                tracked_percent = None
+                                break
 
                 except Exception:
                     pass

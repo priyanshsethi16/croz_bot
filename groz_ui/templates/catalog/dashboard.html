@@ -135,7 +135,7 @@
       <div class="stat-card">
         <div class="stat-icon"><i class="fa fa-cube"></i></div>
         <div>
-          <div class="stat-value" id="stat-chunks">{{ stats.indexed }}</div>
+          <div class="stat-value" id="stat-chunks">{{ stats.total_chunks }}</div>
           <div class="stat-label">Chunks Created</div>
         </div>
       </div>
@@ -442,7 +442,7 @@
                     <button class="btn btn-primary" id="btn-split-pdf" onclick="doSplit()">
                       <i class="fa fa-cut"></i> Split &amp; Process Parts
                     </button>
-                    <button class="btn btn-secondary" id="btn-process-whole-pdf" onclick="showPanel('chunk')">
+                    <button class="btn btn-secondary" id="btn-process-whole-pdf" onclick="processWholePdf(this)">
                       <i class="fa fa-layer-group"></i> Process Whole PDF
                     </button>
                     <span id="whole-pdf-status" style="display:none;align-items:center;gap:6px;font-size:13px;font-weight:600"></span>

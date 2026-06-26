@@ -51,7 +51,7 @@ function showPanel(name) {
   document.querySelector(`.step-item[data-step="${name}"]`)?.classList.add('active');
 
   closeSidebar();
-  if (name === 'overview') refreshStats();
+  if (name === 'overview') { _userSelectedPdf = null; refreshStats(); }
   if (name === 'chunk') loadPdfList();
   if (name === 'families') loadFamilyPanel();
   if (name === 'upload') loadExistingUploads();
@@ -95,6 +95,13 @@ async function previewParentGroup(parentStem, parts) {
   selectedPdf = parts[0];
   _splitStem  = parentStem;
 
+  // Immediately switch progress bar to this PDF before any async calls
+  _trackedPdf     = parentStem;
+  _trackedStage   = 'uploaded';
+  _trackedPercent = null;
+  _trackedSetAt   = Date.now();
+  _approvedAt     = 0;
+  _renderProgress(parentStem, 'uploaded');
   // Build splits array by fetching page counts for each part
   const splits = [];
   // Ensure _pdfDetails is populated
@@ -468,6 +475,13 @@ async function loadPdfPreview(filename) {
   strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
   viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Select a page to preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
 
+  // Immediately switch progress bar to this PDF before any async calls
+  _trackedPdf     = filename.replace(/\.pdf$/i, '');
+  _trackedStage   = 'uploaded';
+  _trackedPercent = null;
+  _trackedSetAt   = Date.now();
+  _approvedAt     = 0; // clear guard so server can update freely
+
   // Approve this PDF for progress tracking
   try {
     const approveRes = await fetch('/admin-panel/api/approve-pdf/', {
@@ -817,6 +831,18 @@ function selectPdfRow(rowEl, name) {
   _highlightPdfRow(name);
   rowEl.classList.add('selected');
   selectedPdf = name;
+  _userSelectedPdf = name;
+  // Update progress bar to reflect this PDF's stage
+  fetch('/admin-panel/api/approve-pdf/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ filename: name })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.error) setTrackedPdf(name, data.stage || 'uploaded');
+  })
+  .catch(() => {});
 }
 
 function _highlightPdfRow(name) {
@@ -855,6 +881,50 @@ async function runChunkingForPdf(name, btnEl) {
   }
   _activeChunkingBtn = btnEl;
   await runChunking();
+}
+
+async function processWholePdf(btnEl) {
+  if (!selectedPdf) { showToast('No PDF selected.', 'error'); return; }
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+  try {
+    const res = await fetch('/admin-panel/api/pipeline/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({
+        filename: selectedPdf,
+        parsing_instructions: getParsingInstructions()
+      })
+    });
+    const data = await res.json();
+    if (data.error) {
+      showToast(`Chunking failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
+    } else {
+      showToast('Product chunks created!', 'success');
+      advanceTrackedStage('chunked');
+      _setWholePdfDone(btnEl);
+      refreshStats();
+      loadPdfList();
+      const nextEl = document.getElementById('next-to-index');
+      if (nextEl) nextEl.style.display = 'flex';
+      markStepDone('chunk');
+    }
+  } catch(e) {
+    showToast('Request failed.', 'error');
+  } finally {
+    btnEl.disabled = false;
+  }
+}
+
+function _setWholePdfDone(btnEl) {
+  if (btnEl) {
+    btnEl.innerHTML = '<i class="fa fa-redo"></i> Re-run';
+  }
+  const statusEl = document.getElementById('whole-pdf-status');
+  if (statusEl) {
+    statusEl.style.display = 'flex';
+    statusEl.innerHTML = '<i class="fa fa-check-circle" style="color:#22c55e"></i> <span style="color:#22c55e">Chunks created — ready to index</span>';
+  }
 }
 
 async function triggerEmbeddingInline(documentId, pdfName) {
@@ -925,6 +995,7 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       _trackedPdf   = displayPdf;
       _trackedStage = 'indexed';
       _trackedPercent = null;
+      _trackedSetAt = Date.now();
       _renderProgress(displayPdf, 'indexed');
       await loadPdfList();
       if (document.getElementById('panel-index')?.classList.contains('active')) {
@@ -1222,6 +1293,7 @@ async function deleteEmbeddingsOnly(filename) {
     const displayPdf = (_trackedPdf && (_trackedPdf === stem || _trackedPdf === filename)) ? _trackedPdf : stem;
     _trackedPdf   = displayPdf;
     _trackedStage = 'chunked';
+    _trackedSetAt = Date.now();
     _renderProgress(displayPdf, 'chunked');
     loadPdfList();
     if (typeof loadIndexPanel === 'function') loadIndexPanel();
@@ -1355,6 +1427,8 @@ function _num(value) {
 let _trackedPdf     = null;
 let _trackedStage   = null;
 let _trackedPercent = null;  // custom percent for partial-split progress
+let _trackedSetAt   = 0;     // timestamp when _trackedPdf was last set locally
+let _userSelectedPdf = null; // PDF explicitly selected by user clicking a row
 
 const STAGE_CONFIG = {
   uploaded: { percent: 25,  stepNo: 1, active: 'upload',   title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
@@ -1368,6 +1442,7 @@ function setTrackedPdf(filename, stage) {
   _trackedPdf     = filename;
   _trackedStage   = stage;
   _trackedPercent = null;
+  _trackedSetAt   = Date.now();
   _renderProgress(filename, stage);
 }
 
@@ -1379,6 +1454,7 @@ function advanceTrackedStage(stage, fallbackPdf) {
   if (order.indexOf(stage) > cur) {
     _trackedPdf   = pdf;
     _trackedStage = stage;
+    _trackedSetAt = Date.now();
     _renderProgress(pdf, stage);
     fetch('/admin-panel/api/update-pdf-stage/', {
       method: 'POST',
@@ -1437,6 +1513,14 @@ function updateWorkflowProgress(data = {}) {
     const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
     if (_trackedStage === 'tested' && STAGE_ORDER.indexOf(data.tracked_stage) < STAGE_ORDER.indexOf('tested')) {
       return; // Keep current 100% state
+    }
+    // If user explicitly selected a row, don't let server overwrite with a different PDF
+    if (_userSelectedPdf && _userSelectedPdf !== data.tracked_pdf) {
+      return;
+    }
+    // If user just switched to a new PDF locally (within 5s), ignore stale server data
+    if (_trackedPdf && _trackedPdf !== data.tracked_pdf && (Date.now() - _trackedSetAt) < 5000) {
+      return;
     }
     _trackedPdf   = data.tracked_pdf;
     _trackedStage = data.tracked_stage;
@@ -1612,7 +1696,7 @@ function showSplitterForPdf(filename) {
   document.getElementById('split-parts-wrap').style.display = 'none';
   document.getElementById('split-parts-list').innerHTML = '';
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
-  if (wholeBtn) wholeBtn.style.display = '';
+  if (wholeBtn) { wholeBtn.style.display = ''; wholeBtn.innerHTML = '<i class="fa fa-layer-group"></i> Process Whole PDF'; }
   // Show Done/Pending status for non-split PDF
   const wholePdfStatus = document.getElementById('whole-pdf-status');
   if (wholePdfStatus) {
@@ -1641,14 +1725,17 @@ let _pagesPerPart = 5;
 
 function _updateWholePdfStatus(filename) {
   const el = document.getElementById('whole-pdf-status');
+  const wholeBtn = document.getElementById('btn-process-whole-pdf');
   if (!el) return;
   const detail = _pdfDetails.find(d => d.name === filename);
   if (detail && detail.chunks_count > 0) {
     el.style.display = 'flex';
     el.innerHTML = `<i class="fa fa-check-circle" style="color:#22c55e"></i> <span style="color:#22c55e">Done &mdash; ${detail.chunks_count} chunk${detail.chunks_count !== 1 ? 's' : ''} created</span>`;
+    if (wholeBtn) wholeBtn.innerHTML = '<i class="fa fa-redo"></i> Re-run';
   } else {
     el.style.display = 'none';
     el.innerHTML = '';
+    if (wholeBtn) wholeBtn.innerHTML = '<i class="fa fa-layer-group"></i> Process Whole PDF';
   }
 }
 
@@ -1846,6 +1933,7 @@ async function runSingleSplit(idx) {
           : 'All parts chunked. Now index & embed for semantic search.';
         _trackedPdf   = _splitStem;
         _trackedStage = doneParts < totalParts ? 'uploaded' : 'chunked';
+        _trackedSetAt = Date.now();
         _renderProgress(_splitStem, 'uploaded', percent);
         document.getElementById('workflow-progress-sub').textContent = sub;
         if (doneParts === totalParts) {
@@ -1962,35 +2050,52 @@ function renderChunks(pdfName, chunks) {
         </div>
       </div>
       <div class="chunk-rendered" id="chunk-rendered-${i}">${mdToHtml(c.content)}</div>
-      <textarea class="chunk-editor" id="chunk-editor-${i}" style="display:none">${escHtml(c.content)}</textarea>
+      <div class="chunk-edit-pane" id="chunk-edit-pane-${i}" style="display:none">
+        <textarea class="chunk-editor" id="chunk-editor-${i}" oninput="updateChunkPreview(${i})">${escHtml(c.content)}</textarea>
+        <div class="chunk-edit-preview" id="chunk-preview-${i}">${mdToHtml(c.content)}</div>
+      </div>
     </div>`).join('');
 }
 
 function editChunk(idx) {
   document.getElementById(`chunk-rendered-${idx}`).style.display = 'none';
-  document.getElementById(`chunk-editor-${idx}`).style.display = 'block';
+  document.getElementById(`chunk-edit-pane-${idx}`).style.display = 'block';
+  const preview = document.getElementById(`chunk-preview-${idx}`);
+  preview.contentEditable = 'true';
+  // Re-render cleanly so spacing is tight (no stale browser-injected divs)
+  const pdfName = document.getElementById('chunks-drawer-title').textContent;
+  const chunk = _chunksCache[pdfName]?.[idx];
+  preview.innerHTML = mdToHtml(chunk?.content || '');
+  preview.focus();
   document.getElementById(`chunk-edit-${idx}`).style.display = 'none';
   document.getElementById(`chunk-save-${idx}`).style.display = 'inline-flex';
   document.getElementById(`chunk-cancel-${idx}`).style.display = 'inline-flex';
 }
 
 function cancelEditChunk(idx) {
-  const pane = document.getElementById(`chunk-pane-${idx}`);
   const pdfName = document.getElementById('chunks-drawer-title').textContent;
   const chunk = _chunksCache[pdfName]?.[idx];
-  pane.querySelector(`#chunk-editor-${idx}`).value = chunk?.content || '';
+  const preview = document.getElementById(`chunk-preview-${idx}`);
+  preview.contentEditable = 'false';
+  preview.innerHTML = mdToHtml(chunk?.content || '');
   document.getElementById(`chunk-rendered-${idx}`).style.display = 'block';
-  document.getElementById(`chunk-editor-${idx}`).style.display = 'none';
+  document.getElementById(`chunk-edit-pane-${idx}`).style.display = 'none';
   document.getElementById(`chunk-edit-${idx}`).style.display = 'inline-flex';
   document.getElementById(`chunk-save-${idx}`).style.display = 'none';
   document.getElementById(`chunk-cancel-${idx}`).style.display = 'none';
+}
+
+function updateChunkPreview(idx) {
+  // no-op: preview is now contenteditable, no textarea to sync
 }
 
 async function saveChunk(idx) {
   const pdfName = document.getElementById('chunks-drawer-title').textContent;
   const chunk = _chunksCache[pdfName]?.[idx];
   if (!chunk) return;
-  const content = document.getElementById(`chunk-editor-${idx}`).value;
+  // Read edited content from the contenteditable preview div as plain text
+  const preview = document.getElementById(`chunk-preview-${idx}`);
+  const content = preview.innerText || preview.textContent || '';
   const btn = document.getElementById(`chunk-save-${idx}`);
   btn.disabled = true;
   try {
@@ -2003,6 +2108,7 @@ async function saveChunk(idx) {
     if (!res.ok || data.error) throw new Error(data.error || 'Save failed.');
     chunk.content = content;
     document.getElementById(`chunk-rendered-${idx}`).innerHTML = mdToHtml(content);
+    preview.contentEditable = 'false';
     cancelEditChunk(idx);
     showToast('Chunk saved. Re-index after review.', 'success');
   } catch (error) {
@@ -2858,12 +2964,10 @@ function showMarkAsTestedButton() {
 }
 
 async function markPdfAsTested() {
-  // Get the PDF name from the Index panel title (more reliable)
+  // Use selectedPdf (actual filename) as the canonical key, fall back to display title
   const pdfTitleEl = document.getElementById('index-selected-pdf');
-  const pdfName = pdfTitleEl ? pdfTitleEl.textContent.trim() : selectedPdf;
-  
-  console.log('Approving PDF:', pdfName);
-  console.log('Selected PDF variable:', selectedPdf);
+  const pdfName = selectedPdf || (pdfTitleEl ? pdfTitleEl.textContent.trim() : '');
+  const displayPdf = pdfTitleEl ? pdfTitleEl.textContent.trim() : pdfName;
   
   if (!pdfName || pdfName === 'No PDF Selected') {
     showToast('No PDF selected for testing approval', 'error');
@@ -2892,10 +2996,12 @@ async function markPdfAsTested() {
       btn.disabled = true;
       // Update local state and render immediately — do NOT call refreshStats after
       // because the server session may not reflect 'tested' yet and would overwrite back to 75%
-      const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
-      _trackedPdf   = displayPdf;
+      const _display = _trackedPdf || displayPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+      _trackedPdf   = _display;
       _trackedStage = 'tested';
-      _renderProgress(displayPdf, 'tested');
+      _trackedSetAt = Date.now();
+      _userSelectedPdf = null; // allow future refreshStats to reflect this state
+      _renderProgress(_display, 'tested');
       showToast(`"${pdfName}" testing approved! Progress updated to 100%`, 'success');
     } else {
       throw new Error(data.error || 'Failed to update stage');
