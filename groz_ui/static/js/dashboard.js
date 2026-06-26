@@ -2936,50 +2936,62 @@ async function submitIndexChat() {
 
 function showMarkAsTestedButton() {
   if (!selectedPdf) return;
-  
-  // Check if already exists
-  if (document.getElementById('mark-tested-btn')) return;
-  
-  // Find the chat input container
+
   const chatInputRow = document.querySelector('.index-chat-input-row');
   if (!chatInputRow) return;
-  
-  // Check if button container already exists, if not create it
+
   let buttonContainer = document.getElementById('approval-button-container');
   if (!buttonContainer) {
     buttonContainer = document.createElement('div');
     buttonContainer.id = 'approval-button-container';
-    buttonContainer.style.cssText = 'padding: 12px 16px 0 16px;';
+    buttonContainer.style.cssText = 'padding: 12px 16px 0 16px; display: flex; flex-direction: column; gap: 8px;';
     chatInputRow.parentElement.appendChild(buttonContainer);
   }
-  
-  const button = document.createElement('button');
-  button.id = 'mark-tested-btn';
-  button.className = 'btn btn-success';
-  button.style.cssText = 'width: 100%;';
-  button.innerHTML = '<i class="fa fa-check-circle"></i> Approve Testing (Mark as 100%)';
-  button.onclick = markPdfAsTested;
-  
-  buttonContainer.appendChild(button);
+  buttonContainer.innerHTML = ''; // clear and re-render
+
+  const alreadyTested = _trackedStage === 'tested';
+
+  // Approve button — always present, disabled+green when already approved
+  const approveBtn = document.createElement('button');
+  approveBtn.id = 'mark-tested-btn';
+  approveBtn.className = 'btn btn-success';
+  approveBtn.style.cssText = 'width: 100%;';
+  if (alreadyTested) {
+    approveBtn.disabled = true;
+    approveBtn.style.cssText = 'width: 100%; background: #22c55e; color: white; font-weight: 600; opacity: 1; cursor: not-allowed;';
+    approveBtn.innerHTML = '<i class="fa fa-check-double"></i> Approved! Testing Complete';
+  } else {
+    approveBtn.innerHTML = '<i class="fa fa-check-circle"></i> Approve Testing (Mark as 100%)';
+    approveBtn.onclick = markPdfAsTested;
+  }
+  buttonContainer.appendChild(approveBtn);
+
+  // Disapprove button — only shown when already approved
+  if (alreadyTested) {
+    const disapproveBtn = document.createElement('button');
+    disapproveBtn.id = 'disapprove-tested-btn';
+    disapproveBtn.style.cssText = 'width: 100%; background: transparent; border: 1px solid #9ca3af; color: #6b7280; font-size: 12px; padding: 6px; border-radius: 6px; cursor: pointer;';
+    disapproveBtn.innerHTML = '<i class="fa fa-undo"></i> Disapprove Testing';
+    disapproveBtn.onclick = disapproveTesting;
+    buttonContainer.appendChild(disapproveBtn);
+  }
 }
 
 async function markPdfAsTested() {
-  // Use selectedPdf (actual filename) as the canonical key, fall back to display title
   const pdfTitleEl = document.getElementById('index-selected-pdf');
   const pdfName = selectedPdf || (pdfTitleEl ? pdfTitleEl.textContent.trim() : '');
   const displayPdf = pdfTitleEl ? pdfTitleEl.textContent.trim() : pdfName;
-  
+
   if (!pdfName || pdfName === 'No PDF Selected') {
     showToast('No PDF selected for testing approval', 'error');
     return;
   }
-  
+
   const btn = document.getElementById('mark-tested-btn');
   if (!btn) return;
-  
   btn.disabled = true;
   btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Approving...';
-  
+
   try {
     const res = await fetch('/admin-panel/api/update-pdf-stage/', {
       method: 'POST',
@@ -2987,29 +2999,55 @@ async function markPdfAsTested() {
       body: JSON.stringify({ filename: pdfName, stage: 'tested' })
     });
     const data = await res.json();
-    
-    console.log('Update response:', data);
-    
-    if (res.ok) {
-      btn.innerHTML = '<i class="fa fa-check-double"></i> Approved! Testing Complete';
-      btn.style.cssText = 'width: 100%; background: #22c55e; color: white; font-weight: 600;';
-      btn.disabled = true;
-      // Update local state and render immediately — do NOT call refreshStats after
-      // because the server session may not reflect 'tested' yet and would overwrite back to 75%
-      const _display = _trackedPdf || displayPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
-      _trackedPdf   = _display;
-      _trackedStage = 'tested';
-      _trackedSetAt = Date.now();
-      _userSelectedPdf = null; // allow future refreshStats to reflect this state
-      _renderProgress(_display, 'tested');
-      showToast(`"${pdfName}" testing approved! Progress updated to 100%`, 'success');
-    } else {
-      throw new Error(data.error || 'Failed to update stage');
-    }
+    if (!res.ok) throw new Error(data.error || 'Failed to update stage');
+
+    const _display = _trackedPdf || displayPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+    _trackedPdf   = _display;
+    _trackedStage = 'tested';
+    _trackedSetAt = Date.now();
+    _userSelectedPdf = null;
+    _renderProgress(_display, 'tested');
+    showToast(`"${pdfName}" testing approved! Progress updated to 100%`, 'success');
+    showMarkAsTestedButton(); // re-render: disable approve + show disapprove button
   } catch (error) {
-    console.error('Approval error:', error);
     showToast(error.message, 'error');
     btn.disabled = false;
     btn.innerHTML = '<i class="fa fa-check-circle"></i> Approve Testing (Mark as 100%)';
+  }
+}
+
+async function disapproveTesting() {
+  const pdfTitleEl = document.getElementById('index-selected-pdf');
+  const pdfName = selectedPdf || (pdfTitleEl ? pdfTitleEl.textContent.trim() : '');
+  if (!pdfName || pdfName === 'No PDF Selected') return;
+
+  const btn = document.getElementById('mark-tested-btn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Disapproving...';
+
+  try {
+    const res = await fetch('/admin-panel/api/update-pdf-stage/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: pdfName, stage: 'indexed' })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update stage');
+
+    const _display = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+    _trackedPdf   = _display;
+    _trackedStage = 'indexed';
+    _trackedSetAt = Date.now();
+    _userSelectedPdf = null;
+    _renderProgress(_display, 'indexed');
+    showToast(`"${pdfName}" testing disapproved. Progress reverted to 85%.`, 'info');
+
+    // Re-render buttons: show clickable Approve button, hide Disapprove
+    showMarkAsTestedButton();
+  } catch (error) {
+    showToast(error.message, 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa fa-times-circle"></i> Disapprove Testing';
   }
 }
