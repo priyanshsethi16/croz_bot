@@ -277,16 +277,32 @@ def deactivate_document_points(document: CatalogDocument) -> None:
 def refresh_chunk_payloads(chunks) -> int:
     """Refresh V2 metadata only; preserve page content and both vectors."""
     client = build_qdrant_client()
+    if not client.collection_exists(COLLECTION):
+        return 0
+    
     refreshed = 0
     for chunk in chunks.select_related(
         'document', 'family', 'family__normalized_category',
         'family__normalized_category__parent', 'variant',
     ):
-        client.set_payload(
-            collection_name=COLLECTION,
-            payload=_metadata(chunk),
-            points=[str(chunk.qdrant_point_id or chunk.id)],
-            key='metadata',
-        )
-        refreshed += 1
+        try:
+            client.set_payload(
+                collection_name=COLLECTION,
+                payload=_metadata(chunk),
+                points=[str(chunk.qdrant_point_id or chunk.id)],
+                key='metadata',
+            )
+            refreshed += 1
+        except Exception as exc:
+            # Silently skip chunks that don't exist in Qdrant yet (not indexed)
+            # This can happen when chunks are marked as indexed in DB but haven't been embedded
+            import logging
+            logging.warning(
+                f'Could not refresh payload for chunk {chunk.id} (point {chunk.qdrant_point_id or chunk.id}): {exc}'
+            )
+            # Mark chunk as STALE so it gets re-indexed later
+            if chunk.index_status == DocumentChunk.IndexStatus.INDEXED:
+                DocumentChunk.objects.filter(id=chunk.id).update(
+                    index_status=DocumentChunk.IndexStatus.STALE
+                )
     return refreshed

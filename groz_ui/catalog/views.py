@@ -46,91 +46,31 @@ def _chunk_excerpt(text: str, limit: int = 180) -> str:
 
 def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
+    import re as _re
     input_dir = PROJECT_ROOT / 'input'
     splits_dir = PROJECT_ROOT / 'input' / 'splits'
-    data_dir  = PROJECT_ROOT / 'vision_pipeline' / 'data'
 
     pdfs      = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
     processed = []
 
-    # 1. Add database-driven processed documents (from HEAD / dev)
+    # DB-only: processed documents with chunks in Postgres
+    # Show each split part individually with its own stats (don't group)
     try:
         from .models import CatalogDocument, DocumentChunk
         for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
             chunk_count = DocumentChunk.objects.filter(document=doc).count()
-            if chunk_count > 0:
-                processed.append({
-                    'name': doc.original_filename,
-                    'chunks': chunk_count,
-                    'products': doc.product_families.count(),
-                })
+            if chunk_count == 0:
+                continue
+            fn = doc.original_filename
+            # Add .pdf extension if missing
+            display = fn if fn.endswith('.pdf') else f'{fn}.pdf'
+            processed.append({
+                'name': display,
+                'chunks': chunk_count,
+                'products': doc.product_families.count()
+            })
     except Exception:
         pass
-
-    # 2. Add filesystem-driven processed split parts / parent PDFs (from priyansh3)
-    import re
-    folder_to_pdf = {}
-    
-    # Map sanitized folder names to actual split PDF filenames
-    if splits_dir.exists():
-        for stem_dir in splits_dir.iterdir():
-            if stem_dir.is_dir():
-                for split_pdf in stem_dir.glob('*.pdf'):
-                    sanitized = re.sub(r'[^a-zA-Z0-9_\-]', '_', split_pdf.stem)[:60].strip('_')
-                    folder_to_pdf[sanitized] = split_pdf.name
-    
-    # Scan splits_dir to find processed split parts
-    if splits_dir.exists():
-        for stem_dir in splits_dir.iterdir():
-            if stem_dir.is_dir():
-                for split_pdf in stem_dir.glob('*.pdf'):
-                    split_name = split_pdf.name
-                    # Skip if already added
-                    if any(p['name'] == split_name or p['name'].replace('.pdf', '') == split_name.replace('.pdf', '') for p in processed):
-                        continue
-                    sanitized_name = re.sub(r'[^a-zA-Z0-9_\-]', '_', split_pdf.stem)[:60].strip('_')
-                    data_folder = data_dir / sanitized_name if data_dir.exists() else None
-                    chunks = []
-                    products = []
-                    if data_folder and data_folder.exists():
-                        chunks = list((data_folder / 'chunks').glob('*.md')) if (data_folder / 'chunks').exists() else []
-                        prod_json = data_folder / 'products.json'
-                        if prod_json.exists():
-                            try:
-                                products = json.loads(prod_json.read_text())
-                            except Exception:
-                                pass
-                    chunks_count = len(chunks) if chunks else len(products)
-                    if chunks_count > 0:
-                        processed.append({
-                            'name': split_name,
-                            'chunks': chunks_count,
-                            'products': len(products),
-                        })
-    
-    # Scan data_dir to find processed parent PDFs / other folders
-    if data_dir.exists():
-        for d in sorted(data_dir.iterdir()):
-            if d.is_dir():
-                # Skip if already added
-                if any(p['name'] == d.name or p['name'].replace('.pdf', '') == d.name or p['name'] == folder_to_pdf.get(d.name, '') for p in processed):
-                    continue
-                chunks = list((d / 'chunks').glob('*.md')) if (d / 'chunks').exists() else []
-                prod_json = d / 'products.json'
-                products = []
-                if prod_json.exists():
-                    try:
-                        products = json.loads(prod_json.read_text())
-                    except Exception:
-                        pass
-                chunks_count = len(chunks) if chunks else len(products)
-                if chunks_count > 0:
-                    pdf_name = folder_to_pdf.get(d.name, d.name + '.pdf')
-                    processed.append({
-                        'name': pdf_name,
-                        'chunks': chunks_count,
-                        'products': len(products),
-                    })
 
     total_chunks = sum(p['chunks'] for p in processed)
 
@@ -433,25 +373,7 @@ def run_pipeline(request):
             request.session['pdf_progress'] = pdf_progress
             request.session.modified = True
 
-        # Auto-ingest into the database
-        try:
-            import re as _re
-            _stem = pdf_path.stem
-            _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_') or 'catalog'
-            _data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized
-            _assembled_file = _data_dir / 'assembled_products.json'
-            _products_file = _data_dir / 'products.json'
-
-            _ingest_file = _assembled_file if _assembled_file.exists() else (_products_file if _products_file.exists() else None)
-            if _ingest_file:
-                _doc = _ensure_catalog_document(pdf_path)
-                _ingest_data = json.loads(_ingest_file.read_text(encoding='utf-8'))
-                if isinstance(_ingest_data, list):
-                    _ingest_assembled_products_for_document(_doc, _ingest_data)
-        except Exception as _ingest_err:
-            import logging
-            logging.warning(f"Auto-ingestion failed in run_pipeline: {_ingest_err}", exc_info=True)
-
+        # Pipeline ingests directly into Postgres — no post-run file reading needed
         return JsonResponse({'message': 'Pipeline completed.', 'output': output[-3000:]})
     except subprocess.TimeoutExpired:
         return JsonResponse({'error': 'Pipeline timed out (10 min limit).'}, status=500)
@@ -465,7 +387,6 @@ def run_pipeline(request):
 def list_pdfs(request):
     input_dir = PROJECT_ROOT / 'input'
     splits_dir = PROJECT_ROOT / 'input' / 'splits'
-    data_dir  = PROJECT_ROOT / 'vision_pipeline' / 'data'
     
     pdfs = sorted(p.name for p in input_dir.glob('*.pdf')) if input_dir.exists() else []
     
@@ -497,7 +418,7 @@ def list_pdfs(request):
     # Combine filtered main PDFs and split PDFs
     all_pdfs = filtered_pdfs + split_pdfs
     
-    # Build set of stems that already have chunks
+    # Build set of stems that already have chunks (DB only)
     chunked = set()
     try:
         from .models import CatalogDocument, DocumentChunk
@@ -506,14 +427,6 @@ def list_pdfs(request):
                 chunked.add(doc.original_filename)
     except Exception:
         pass
-
-    if data_dir.exists():
-        for d in data_dir.iterdir():
-            if d.is_dir():
-                has_chunks = (d / 'chunks').exists() and list((d / 'chunks').glob('*.md'))
-                has_products = (d / 'products.json').exists()
-                if has_chunks or has_products:
-                    chunked.add(d.name)
 
     # Gather rich metadata for each PDF/part
     pdf_details = []
@@ -575,13 +488,7 @@ def list_pdfs(request):
                 has_stale   = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.STALE).exists()
                 has_embeddings = has_indexed and not has_stale
             else:
-                # Check filesystem chunks
-                sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_')
-                chunks_dir = data_dir / sanitized_stem / 'chunks'
-                if chunks_dir.exists():
-                    chunks_count = len(list(chunks_dir.glob('*.md')))
-                    if chunks_count > 0:
-                        status = 'Ready'
+                status = 'Pending'
             
             pdf_details.append({
                 'name': pdf_name,
@@ -663,17 +570,7 @@ def approve_pdf(request):
                         else:
                             part_stages.append('uploaded')
                     else:
-                        # Fallback: check filesystem vision_pipeline/data
-                        import re as _re
-                        sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', part_stem)[:60].strip('_')
-                        data_dir = Path(__file__).resolve().parent.parent.parent / 'vision_pipeline' / 'data'
-                        chunks_dir = data_dir / sanitized / 'chunks'
-                        if chunks_dir.exists() and list(chunks_dir.glob('*.md')):
-                            part_stages.append('chunked')
-                        elif (data_dir / sanitized / 'products.json').exists():
-                            part_stages.append('chunked')
-                        else:
-                            part_stages.append('uploaded')
+                        part_stages.append('uploaded')
                 except Exception:
                     part_stages.append('uploaded')
 
@@ -903,6 +800,13 @@ def catalog_stats(request):
             db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
         except Exception:
             db_map = {}
+        # On fresh page load with empty session, restore from DB stage map
+        if db_map:
+            # Pick the entry with the highest stage as the tracked PDF
+            STAGE_ORDER_LOCAL = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
+            best_fname = max(db_map, key=lambda k: STAGE_ORDER_LOCAL.index(db_map[k]) if db_map[k] in STAGE_ORDER_LOCAL else -1)
+            approved_pdfs = [best_fname]
+            pdf_progress = {best_fname: db_map[best_fname]}
 
     request.session['pdf_progress'] = pdf_progress
     request.session['approved_pdfs'] = approved_pdfs
@@ -938,11 +842,10 @@ def catalog_stats(request):
                 # Check both the full filename and the stem against stage map
                 _stem = Path(fname).stem
                 _stage_from_progress = pdf_progress.get(fname) or pdf_progress.get(_stem)
-                # Also directly check db_map for 'tested' since it may be keyed by stem
-                if db_map.get(fname) == 'tested' or db_map.get(_stem) == 'tested':
-                    tracked_stage = 'tested'
-                else:
-                    tracked_stage = _stage_from_progress
+                _stage_from_db = db_map.get(fname) or db_map.get(_stem)
+                # Pick highest stage between session and DB
+                _candidates = [s for s in [_stage_from_progress, _stage_from_db] if s in STAGE_ORDER]
+                tracked_stage = max(_candidates, key=lambda s: STAGE_ORDER.index(s)) if _candidates else 'uploaded'
             break
     if not tracked_stage or tracked_stage not in STAGE_ORDER:
         tracked_stage = 'uploaded'
@@ -958,7 +861,6 @@ def catalog_stats(request):
                 try:
                     from .models import CatalogDocument, DocumentChunk
                     import re as _re2
-                    vision_data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data'
                     total_parts = len(split_part_files)
                     chunked_count = 0
                     indexed_count = 0
@@ -968,12 +870,11 @@ def catalog_stats(request):
                         has_chunks = False
                         has_index  = False
 
-                        # --- Check chunks ---
-                        # 1. session/DB stage map
+                        # --- Check chunks: session/DB stage map ---
                         if (pdf_progress.get(p) or db_map.get(p) or
                                 pdf_progress.get(part_stem) or db_map.get(part_stem)) in STAGE_ORDER[1:]:
                             has_chunks = True
-                        # 2. DB DocumentChunk records
+                        # DB DocumentChunk records
                         if not has_chunks:
                             try:
                                 doc = CatalogDocument.objects.filter(
@@ -983,26 +884,16 @@ def catalog_stats(request):
                                     has_chunks = True
                             except Exception:
                                 pass
-                        # 3. Filesystem vision_pipeline/data
-                        if not has_chunks:
-                            sanitized = _re2.sub(r'[^a-zA-Z0-9_\-]', '_', part_stem)[:60].strip('_')
-                            data_folder = vision_data_dir / sanitized
-                            if data_folder.exists() and (
-                                list(data_folder.glob('chunks/*.md')) or
-                                (data_folder / 'products.json').exists()
-                            ):
-                                has_chunks = True
 
                         if has_chunks:
                             chunked_count += 1
 
-                        # --- Check indexed ---
-                        # 1. session/DB stage map
+                        # --- Check indexed: session/DB stage map ---
                         part_stage = (pdf_progress.get(p) or db_map.get(p) or
                                       pdf_progress.get(part_stem) or db_map.get(part_stem))
                         if part_stage in ('indexed', 'tested'):
                             has_index = True
-                        # 2. DB indexed chunks
+                        # DB indexed chunks
                         if not has_index:
                             try:
                                 doc = CatalogDocument.objects.filter(
@@ -1015,7 +906,6 @@ def catalog_stats(request):
                                     has_index = True
                             except Exception:
                                 pass
-
                         if has_index:
                             indexed_count += 1
 
@@ -1182,25 +1072,31 @@ def run_pipeline_split(request):
         if result.returncode != 0:
             return JsonResponse({'error': output[-2000:]}, status=500)
 
-        # Auto-ingest into the database
+        # Update stage for this split part in session + DB stage map
+        import json as _j
+        from .models import ApiKey
         try:
-            import re as _re
-            _stem = pdf_path.stem
-            _sanitized = _re.sub(r'[^a-zA-Z0-9_\-]', '_', _stem)[:60].strip('_') or 'catalog'
-            _data_dir = PROJECT_ROOT / 'vision_pipeline' / 'data' / _sanitized
-            _assembled_file = _data_dir / 'assembled_products.json'
-            _products_file = _data_dir / 'products.json'
+            _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            _stage_map = {}
+        _stage_map[part_file] = 'chunked'
 
-            _ingest_file = _assembled_file if _assembled_file.exists() else (_products_file if _products_file.exists() else None)
-            if _ingest_file:
-                _doc = _ensure_catalog_document(pdf_path)
-                _ingest_data = json.loads(_ingest_file.read_text(encoding='utf-8'))
-                if isinstance(_ingest_data, list):
-                    _ingest_assembled_products_for_document(_doc, _ingest_data)
-        except Exception as _ingest_err:
-            import logging
-            logging.warning(f"Auto-ingestion failed in run_pipeline_split: {_ingest_err}", exc_info=True)
+        # Also update parent stem stage proportionally
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / stem
+        all_parts = sorted(p.name for p in splits_dir.glob('*.pdf')) if splits_dir.exists() else [part_file]
+        done_parts = [p for p in all_parts if _stage_map.get(p) in ('chunked', 'families', 'indexed', 'tested')]
+        if len(done_parts) == len(all_parts):
+            _stage_map[stem] = 'chunked'
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
 
+        pdf_progress = request.session.get('pdf_progress', {})
+        pdf_progress[part_file] = 'chunked'
+        if len(done_parts) == len(all_parts):
+            pdf_progress[stem] = 'chunked'
+        request.session['pdf_progress'] = pdf_progress
+        request.session.modified = True
+
+        # Pipeline ingests directly into Postgres — no post-run file reading needed
         return JsonResponse({'message': f'{part_file} processed.', 'output': output[-2000:]})
     except subprocess.TimeoutExpired:
         return JsonResponse({'error': 'Pipeline timed out.'}, status=500)
@@ -2119,4 +2015,6 @@ def execute_index_v2(request, document_id):
     except ValueError as exc:
         return JsonResponse({'error': str(exc)}, status=409)
     except Exception as exc:
-        return JsonResponse({'error': f'V2 indexing failed: {exc}'}, status=500)
+        import traceback, logging
+        logging.error('execute_index_v2 error: %s', traceback.format_exc())
+        return JsonResponse({'error': f'V2 indexing failed: {exc}', 'detail': traceback.format_exc()}, status=500)

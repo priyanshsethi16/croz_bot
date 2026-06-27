@@ -24,13 +24,11 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 
 from vision_pipeline.pdf_to_images import rasterize_pdf
 from vision_pipeline.key_rotator import KeyRotator
-from vision_pipeline.chunk_writer import save_chunk
 from vision_pipeline.assembler import assemble_product_families
 from vision_pipeline.schema import validate_page_products
 
 
 def _pdf_slug(pdf_path: str) -> str:
-    """Derive a clean folder name from the PDF filename."""
     name = Path(pdf_path).stem
     name = re.sub(r"[^a-zA-Z0-9_\-]", "_", name)
     return name[:60].strip("_") or "catalog"
@@ -45,22 +43,6 @@ def load_config(config_path: str = None) -> dict:
         return yaml.safe_load(f) or {}
 
 
-def load_checkpoint(path: str) -> dict:
-    p = Path(path)
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-    return {"completed_pages": [], "product_count": 0}
-
-
-def save_checkpoint(data: dict, path: str) -> None:
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vision Pipeline — catalog extraction")
     parser.add_argument("--pdf", required=True, help="Path to input PDF catalog")
@@ -69,7 +51,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-raster", action="store_true", help="Reuse existing PNG pages")
     parser.add_argument("--document-id", default="", help="Trusted CatalogDocument UUID injected by V2 ingestion")
     parser.add_argument("--source-pdf", default="", help="Original PDF filename used for citations")
-    parser.add_argument("--output-slug", default="", help="Stable artifact folder name, normally the document UUID")
+    parser.add_argument("--output-slug", default="", help="Stable artifact folder name")
     parser.add_argument(
         "--parsing-instructions",
         default="",
@@ -88,6 +70,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _ingest_to_db(pdf_path: Path, assembled: list[dict]) -> None:
+    """Write assembled products directly into Postgres via Django ORM."""
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    groz_ui_dir = str(PROJECT_ROOT / "groz_ui")
+    if groz_ui_dir not in sys.path:
+        sys.path.insert(0, groz_ui_dir)
+
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "groz_ui.settings")
+
+    import django
+    from django.conf import settings as _settings
+    if not _settings.configured:
+        django.setup()
+
+    from catalog.views import _ensure_catalog_document, _ingest_assembled_products_for_document
+    doc = _ensure_catalog_document(pdf_path)
+    _ingest_assembled_products_for_document(doc, assembled)
+    print(f"  → Ingested {len(assembled)} product(s) into Postgres for '{pdf_path.name}'")
+
+
 def main():
     args = parse_args()
     cfg = load_config(args.config)
@@ -99,138 +101,111 @@ def main():
         cfg["parsing_instructions"] = parsing_instructions[:4000]
         cfg.setdefault("gemini", {})["parsing_instructions"] = cfg["parsing_instructions"]
 
-    pdf_path = args.pdf
-    if not Path(pdf_path).exists():
-        print(f"ERROR: PDF not found: {pdf_path}")
+    pdf_path = Path(args.pdf)
+    if not pdf_path.exists():
+        print(f"ERROR: PDF not found: {args.pdf}")
         sys.exit(1)
 
-    # ── Per-PDF output folders derived from PDF filename ──────────────────
-    slug = _pdf_slug(args.output_slug) if args.output_slug else _pdf_slug(pdf_path)
-    base = Path("vision_pipeline/data") / slug
-    pages_dir     = str(base / "pages")
-    chunks_dir    = str(base / "chunks")
-    products_json = str(base / "products.json")
-    checkpoint_file = str(base / "checkpoint.json")
+    # Pages go to a temp folder (rasterize needs a dir), cleaned up after
+    slug = _pdf_slug(args.output_slug) if args.output_slug else _pdf_slug(str(pdf_path))
+    pages_dir = str(Path("vision_pipeline/data") / slug / "pages")
 
     dpi = int(cfg.get("pdf", {}).get("dpi", 300))
 
     print("=" * 60)
     print("Vision Pipeline Starting")
     print(f"PDF    : {pdf_path}")
-    print(f"Output : {base}/")
     print("=" * 60)
 
     # ── Step 1: Rasterize ─────────────────────────────────────────────────
-    png_paths = rasterize_pdf(pdf_path=pdf_path, pages_dir=pages_dir, dpi=dpi)
+    png_paths = rasterize_pdf(pdf_path=str(pdf_path), pages_dir=pages_dir, dpi=dpi)
 
     if args.pages:
         start_p, end_p = args.pages
         png_paths = [p for p in png_paths if start_p <= int(p.stem.split("_")[1]) <= end_p]
         print(f"Page filter: {start_p}–{end_p} ({len(png_paths)} pages)")
 
-    # ── Step 2: Checkpoint ────────────────────────────────────────────────
-    checkpoint = load_checkpoint(checkpoint_file) if not args.no_resume else {
-        "completed_pages": [], "product_count": 0
-    }
-    completed_pages: set[int] = set(checkpoint.get("completed_pages", []))
-    product_count: int = checkpoint.get("product_count", 0)
-
-    all_products: list[dict] = []
-    if not args.no_resume and Path(products_json).exists():
-        try:
-            all_products = json.loads(Path(products_json).read_text(encoding="utf-8"))
-            print(f"Resuming: {len(completed_pages)} pages done, {len(all_products)} products so far")
-        except Exception:
-            all_products = []
-
-    # ── Step 3: Build extractor with key rotation ─────────────────────────
+    # ── Step 2: Build extractor ───────────────────────────────────────────
     rotator = KeyRotator(cfg)
     print(f"Provider: {rotator.describe()}")
+    print(f"Pages to process: {len(png_paths)}")
 
-    pending = [p for p in png_paths if int(p.stem.split("_")[1]) not in completed_pages]
-    print(f"Pages to process: {len(pending)} (skipping {len(completed_pages)} already done)")
-
+    all_products: list[dict] = []
     failed_pages: list[int] = []
 
-    with tqdm(total=len(pending), desc="Pages", unit="page") as pbar:
-        for png_path in pending:
+    with tqdm(total=len(png_paths), desc="Pages", unit="page") as pbar:
+        for png_path in png_paths:
             page_num = int(png_path.stem.split("_")[1])
             products = rotator.extract_page(png_path, page_num)
 
             if products is None:
-                # None signals a hard failure (all retries exhausted with errors)
-                tqdm.write(f"  p{page_num:03d} → [FAILED] all retries exhausted — will retry later")
+                tqdm.write(f"  p{page_num:03d} → [FAILED] all retries exhausted")
                 failed_pages.append(page_num)
                 pbar.update(1)
-                pbar.set_postfix({"products": product_count, "provider": rotator.active_provider(), "failed": len(failed_pages)})
                 continue
 
             if not products:
-                tqdm.write(f"  p{page_num:03d} → [EMPTY] no products found (cover/TOC/divider page)")
+                tqdm.write(f"  p{page_num:03d} → [EMPTY] no products found")
 
             validated, validation_issues = validate_page_products(
                 products,
                 page_num=page_num,
                 page_offset=args.page_offset,
-                source_pdf=args.source_pdf or Path(pdf_path).name,
+                source_pdf=args.source_pdf or pdf_path.name,
                 document_id=args.document_id,
             )
             if validation_issues:
-                tqdm.write(
-                    f"  p{page_num:03d} → [VALIDATION] "
-                    f"{len(validation_issues)} invalid product entr{'y' if len(validation_issues) == 1 else 'ies'}"
-                )
+                tqdm.write(f"  p{page_num:03d} → [VALIDATION] {len(validation_issues)} invalid entr{'y' if len(validation_issues) == 1 else 'ies'}")
             if products and not validated:
-                tqdm.write(f"  p{page_num:03d} → [FAILED] no valid product entries — will retry later")
+                tqdm.write(f"  p{page_num:03d} → [FAILED] no valid entries")
                 failed_pages.append(page_num)
                 pbar.update(1)
-                pbar.set_postfix({"products": product_count, "provider": rotator.active_provider(), "failed": len(failed_pages)})
                 continue
 
-            for validated_product in validated:
-                product = validated_product.model_dump(mode='json')
-                product_count += 1
-                chunk_path = save_chunk(product, product_count, chunks_dir)
-                product["chunk_path"] = str(chunk_path)
+            for vp in validated:
+                product = vp.model_dump(mode='json')
                 all_products.append(product)
                 tqdm.write(
                     f"  p{page_num:03d} → [{str(product.get('product_code') or '?'):12s}] "
                     f"{str(product.get('product_name') or '?')[:40]}"
                 )
 
-            completed_pages.add(page_num)
-            checkpoint["completed_pages"] = sorted(completed_pages)
-            checkpoint["product_count"] = product_count
-            save_checkpoint(checkpoint, checkpoint_file)
-
-            Path(products_json).parent.mkdir(parents=True, exist_ok=True)
-            Path(products_json).write_text(
-                json.dumps(all_products, indent=2, ensure_ascii=False),
-                encoding="utf-8"
-            )
-
             pbar.update(1)
-            pbar.set_postfix({"products": product_count, "provider": rotator.active_provider(), "failed": len(failed_pages)})
+            pbar.set_postfix({"products": len(all_products), "provider": rotator.active_provider(), "failed": len(failed_pages)})
 
     if failed_pages:
-        print(f"\nWARNING: {len(failed_pages)} pages failed and were NOT checkpointed: {failed_pages}")
-        print("Re-run the same command to retry them.")
+        print(f"\nWARNING: {len(failed_pages)} pages failed: {failed_pages}")
 
-    assembled_products = assemble_product_families(all_products)
-    assembled_json = str(base / 'assembled_products.json')
-    Path(assembled_json).write_text(
-        json.dumps(assembled_products, indent=2, ensure_ascii=False),
-        encoding='utf-8',
-    )
+    # ── Step 3: Assemble + ingest directly into Postgres ──────────────────
+    assembled = assemble_product_families(all_products)
 
     print("=" * 60)
     print("Vision Pipeline Complete!")
-    print(f"  Pages processed : {len(completed_pages)}")
-    print(f"  Products found  : {product_count}")
-    print(f"  Chunks saved    : {chunks_dir}/")
-    print(f"  JSON manifest   : {products_json}")
-    print(f"  Assembled JSON  : {assembled_json}")
+    print(f"  Pages processed : {len(png_paths) - len(failed_pages)}")
+    print(f"  Products found  : {len(all_products)}")
+    print(f"  Families        : {len(assembled)}")
     print("=" * 60)
+
+    if assembled:
+        try:
+            _ingest_to_db(pdf_path, assembled)
+        except Exception as e:
+            print(f"ERROR: Postgres ingestion failed: {e}")
+            import traceback; traceback.print_exc()
+            sys.exit(1)
+    else:
+        print("No products extracted — nothing written to Postgres.")
+
+    # ── Step 4: Cleanup entire artifact directory to free disk space ──────
+    try:
+        import shutil
+        artifact_dir = Path(pages_dir).parent
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
+            print(f"  → Cleaned up artifact dir: {artifact_dir}")
+    except Exception as e:
+        print(f"WARNING: Could not clean up artifact dir: {e}")
+
     if failed_pages:
         sys.exit(2)
 

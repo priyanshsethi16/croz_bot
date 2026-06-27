@@ -491,7 +491,16 @@ async function loadPdfPreview(filename) {
     });
     const approveData = await approveRes.json();
     if (!approveData.error) {
-      setTrackedPdf(filename, approveData.stage || 'uploaded');
+      // Only set the tracked PDF if it's not already at a higher stage
+      const serverStage = approveData.stage || 'uploaded';
+      const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
+      const currentStageIdx = _trackedStage ? STAGE_ORDER.indexOf(_trackedStage) : -1;
+      const serverStageIdx = STAGE_ORDER.indexOf(serverStage);
+      
+      // Only update if server stage is higher, or if we have no current stage
+      if (currentStageIdx === -1 || serverStageIdx > currentStageIdx) {
+        setTrackedPdf(filename, serverStage);
+      }
     }
   } catch(e) {
     console.error('Failed to approve PDF:', e);
@@ -832,7 +841,7 @@ function selectPdfRow(rowEl, name) {
   rowEl.classList.add('selected');
   selectedPdf = name;
   _userSelectedPdf = name;
-  // Update progress bar to reflect this PDF's stage
+  // Update progress bar to reflect this PDF's stage (always switch, don't prevent downgrade)
   fetch('/admin-panel/api/approve-pdf/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
@@ -840,7 +849,11 @@ function selectPdfRow(rowEl, name) {
   })
   .then(r => r.json())
   .then(data => {
-    if (!data.error) setTrackedPdf(name, data.stage || 'uploaded');
+    if (!data.error) {
+      const serverStage = data.stage || 'uploaded';
+      // Always switch to this PDF's stage when user clicks a row
+      setTrackedPdf(name, serverStage);
+    }
   })
   .catch(() => {});
 }
@@ -935,6 +948,17 @@ async function triggerEmbeddingInline(documentId, pdfName) {
     return;
   }
   
+  // First ensure product families are saved (40% → 60%)
+  const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
+  const currentStageIdx = _trackedStage ? STAGE_ORDER.indexOf(_trackedStage) : -1;
+  const familiesIdx = STAGE_ORDER.indexOf('families');
+  
+  if (currentStageIdx < familiesIdx) {
+    // Need to save product families first
+    advanceTrackedStage('families', pdfName);
+    await new Promise(resolve => setTimeout(resolve, 500)); // Brief pause to let user see the update
+  }
+  
   try {
     const auditResponse = await fetch(`/admin-panel/api/v2/documents/${documentId}/index-audit/`);
     const audit = await auditResponse.json();
@@ -969,7 +993,7 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || 'Indexing failed.');
       
-      // Update progress to 'indexed' (75%)
+      // Update progress to 'indexed' (80%)
       try {
         const stageRes = await fetch('/admin-panel/api/update-pdf-stage/', {
           method: 'POST',
@@ -990,13 +1014,23 @@ async function triggerEmbeddingInline(documentId, pdfName) {
       
       showToast(`Indexed ${data.indexed} chunk(s) for "${pdfName}".`, 'success');
 
-      // Immediately render 75% — do not rely on refreshStats which may return stale 'tested'
+      // Immediately update this row's button in the DOM
+      const row = document.querySelector(`#pdf-selector-table-body tr[data-pdf="${pdfName}"]`);
+      const btn = row ? row.querySelector('.embed-btn') : null;
+      if (btn) {
+        btn.disabled = true;
+        btn.style.cssText = 'background:#22c55e;color:#fff;opacity:1;cursor:not-allowed';
+        btn.innerHTML = '<i class="fa fa-check-circle"></i> Embedded';
+      }
+
+      // Immediately render 80% — do not rely on refreshStats which may return stale 'tested'
       const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
       _trackedPdf   = displayPdf;
       _trackedStage = 'indexed';
       _trackedPercent = null;
       _trackedSetAt = Date.now();
       _renderProgress(displayPdf, 'indexed');
+      await refreshStats();
       await loadPdfList();
       if (document.getElementById('panel-index')?.classList.contains('active')) {
         await loadIndexPanel();
@@ -1295,12 +1329,47 @@ async function deleteEmbeddingsOnly(filename) {
     _trackedStage = 'chunked';
     _trackedSetAt = Date.now();
     _renderProgress(displayPdf, 'chunked');
-    loadPdfList();
+    // Force fresh fetch by clearing cache, then reload table + stats
+    _pdfDetails = [];
+    await loadPdfList();
+    await refreshStats();
     if (typeof loadIndexPanel === 'function') loadIndexPanel();
   } catch(e) { showToast('Delete failed.', 'error'); }
 }
 
 // -- Stats refresh -------------------------------------------------------------────────────
+function selectPdfFromOverview(pdfName) {
+  // Immediately remove highlight from all rows and highlight clicked row (no delay)
+  document.querySelectorAll('.catalog-table tbody tr').forEach(row => {
+    row.style.backgroundColor = '';
+  });
+  
+  // Immediately highlight the clicked row
+  event.currentTarget.style.backgroundColor = 'rgba(220, 252, 231, 0.6)'; // light green
+  
+  // Then fetch the PDF's current stage and update progress bar
+  fetch('/admin-panel/api/approve-pdf/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ filename: pdfName })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.error) {
+      const serverStage = data.stage || 'uploaded';
+      const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
+      const currentStageIdx = _trackedStage ? STAGE_ORDER.indexOf(_trackedStage) : -1;
+      const serverStageIdx = STAGE_ORDER.indexOf(serverStage);
+      
+      // Update to server stage (allow both upgrade and showing current stage)
+      if (currentStageIdx === -1 || serverStageIdx >= currentStageIdx || _trackedPdf !== pdfName) {
+        setTrackedPdf(pdfName, serverStage);
+      }
+    }
+  })
+  .catch(() => {});
+}
+
 function updateCatalogTable(processed) {
   const container = document.getElementById('catalog-overview-body');
   if (!container) return;
@@ -1348,7 +1417,7 @@ function updateCatalogTable(processed) {
   // 1. Processed rows
   processed.forEach(item => {
     tableHtml += `
-      <tr>
+      <tr style="cursor:pointer" onclick="selectPdfFromOverview('${escHtml(item.name)}')">
         <td>
           <div class="pdf-name-cell">
             <i class="fa fa-file-pdf"></i>
@@ -1358,7 +1427,7 @@ function updateCatalogTable(processed) {
         <td><span class="badge badge-blue">${item.chunks}</span></td>
         <td><span class="badge badge-green">${item.products}</span></td>
         <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
-        <td>
+        <td onclick="event.stopPropagation()">
           <div class="table-actions">
             <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
               <i class="fa fa-layer-group"></i> Chunks
@@ -1423,7 +1492,7 @@ function _num(value) {
 }
 
 // ── Per-PDF progress tracking ─────────────────────────────────────────────────
-// stages: uploaded=25%  chunked=50%  families=70%  indexed=85%  tested=100%
+// stages: uploaded=20%  chunked=40%  families=60%  indexed=80%  tested=100%
 let _trackedPdf     = null;
 let _trackedStage   = null;
 let _trackedPercent = null;  // custom percent for partial-split progress
@@ -1431,11 +1500,11 @@ let _trackedSetAt   = 0;     // timestamp when _trackedPdf was last set locally
 let _userSelectedPdf = null; // PDF explicitly selected by user clicking a row
 
 const STAGE_CONFIG = {
-  uploaded: { percent: 25,  stepNo: 1, active: 'upload',   title: 'PDF uploaded',        sub: 'Preview the PDF then split & parse to extract product chunks.' },
-  chunked:  { percent: 50,  stepNo: 2, active: 'chunk',    title: 'Chunks created',       sub: 'Product chunks are ready. Review product families before indexing.' },
-  families: { percent: 70,  stepNo: 3, active: 'families', title: 'Product families',     sub: 'Group chunks into canonical families and approve the final mapping.' },
-  indexed:  { percent: 85,  stepNo: 4, active: 'index',    title: 'Indexed & embedded',   sub: 'Approved families are indexed for semantic search.' },
-  tested:   { percent: 100, stepNo: 5, active: 'chat',     title: 'Catalog ready!',        sub: 'All steps complete. The catalog is live for product queries.' },
+  uploaded: { percent: 20,  stepNo: 1, active: 'upload',   title: 'PDF uploaded & split',  sub: 'Preview the PDF then split & parse to extract product chunks.' },
+  chunked:  { percent: 40,  stepNo: 2, active: 'chunk',    title: 'Chunks created',         sub: 'Product chunks are ready. Review product families before indexing.' },
+  families: { percent: 60,  stepNo: 3, active: 'families', title: 'Product families',       sub: 'Group chunks into canonical families and approve the final mapping.' },
+  indexed:  { percent: 80,  stepNo: 4, active: 'index',    title: 'Chunks embedded',        sub: 'Approved families are indexed for semantic search.' },
+  tested:   { percent: 100, stepNo: 5, active: 'chat',     title: 'Admin approved!',        sub: 'All steps complete. The catalog is live for product queries.' },
 };
 
 function setTrackedPdf(filename, stage) {
@@ -1508,6 +1577,11 @@ function _resetProgress() {
 }
 
 function updateWorkflowProgress(data = {}) {
+  // On fresh page load (when _trackedPdf is null), ignore all server data
+  if (!_trackedPdf) {
+    return; // Don't update from server until user interacts
+  }
+  
   if (data.tracked_pdf && data.tracked_stage) {
     // Never downgrade from 'tested' — local state is source of truth after approve button
     const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
@@ -1544,8 +1618,6 @@ function updateWorkflowProgress(data = {}) {
     } else {
       _renderProgress(data.tracked_pdf, data.tracked_stage);
     }
-  } else if (!_trackedPdf) {
-    _resetProgress();
   }
 }
 
@@ -1783,8 +1855,13 @@ function setPreset(btn, val) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // On fresh page load always start progress from session (0 until user does something)
-  updateWorkflowProgress({ pdf_progress: {}, approved_pdfs: [] });
+  // On fresh page load, completely reset all progress tracking state
+  _trackedPdf = null;
+  _trackedStage = null;
+  _trackedPercent = null;
+  _trackedSetAt = 0;
+  _userSelectedPdf = null;
+  _resetProgress();
   refreshStats();
   const customInput = document.getElementById('pages-per-input');
   if (customInput) {
@@ -2044,6 +2121,9 @@ function renderChunks(pdfName, chunks) {
       <div class="chunk-toolbar">
         <span>${escHtml(c.filename)}</span>
         <div>
+          <button class="btn btn-sm btn-secondary" onclick="viewChunkPdf('${escHtml(pdfName)}')" title="View PDF pages for verification">
+            <i class="fa fa-file-pdf"></i> View PDF
+          </button>
           <button class="btn btn-sm btn-secondary" id="chunk-edit-${i}" onclick="editChunk(${i})"><i class="fa fa-edit"></i> Edit</button>
           <button class="btn btn-sm btn-primary" id="chunk-save-${i}" onclick="saveChunk(${i})" style="display:none"><i class="fa fa-save"></i> Save</button>
           <button class="btn btn-sm btn-secondary" id="chunk-cancel-${i}" onclick="cancelEditChunk(${i})" style="display:none">Cancel</button>
@@ -2128,6 +2208,211 @@ function closeChunks() {
   document.getElementById('chunks-drawer').classList.remove('open');
   document.getElementById('chunks-overlay').classList.remove('visible');
   document.body.style.overflow = '';
+  
+  // Also close the floating PDF preview when chunks drawer closes
+  const floatingPreview = document.getElementById('floating-pdf-preview');
+  if (floatingPreview) {
+    floatingPreview.style.display = 'none';
+  }
+}
+
+// Function to open PDF preview while keeping chunks drawer open
+async function viewChunkPdf(pdfName) {
+  // Create or show a floating PDF preview on the left side
+  let floatingPreview = document.getElementById('floating-pdf-preview');
+  
+  if (!floatingPreview) {
+    // Create the floating preview container
+    floatingPreview = document.createElement('div');
+    floatingPreview.id = 'floating-pdf-preview';
+    floatingPreview.style.cssText = `
+      position: fixed;
+      left: 0;
+      top: 0;
+      right: 660px;
+      height: 100vh;
+      background: white;
+      z-index: 600;
+      box-shadow: 2px 0 16px rgba(0,0,0,0.2);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      border-right: 2px solid var(--orange);
+    `;
+    
+    floatingPreview.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#fafafa;border-bottom:1px solid #e5e5e5;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <i class="fa fa-file-pdf" style="color:var(--orange);"></i>
+          <span style="font-size:13px;font-weight:600;color:var(--dark);" id="floating-pdf-name"></span>
+          <span style="background:var(--orange);color:#fff;font-size:11px;font-weight:700;padding:2px 9px;border-radius:10px;" id="floating-page-count"></span>
+        </div>
+        <button onclick="closeFloatingPdf()" style="width:32px;height:32px;border:1.5px solid #e5e5e5;background:white;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;color:#888;">
+          <i class="fa fa-times"></i>
+        </button>
+      </div>
+      <div style="display:flex;flex:1;min-height:0;">
+        <div id="floating-thumb-strip" style="width:120px;flex-shrink:0;border-right:1px solid #e5e5e5;overflow-y:auto;background:#f4f4f4;"></div>
+        <div id="floating-page-viewer" style="flex:1;display:flex;flex-direction:column;overflow:hidden;background:#f0f0f0;"></div>
+      </div>
+    `;
+    
+    document.body.appendChild(floatingPreview);
+  }
+  
+  // Show the floating preview
+  floatingPreview.style.display = 'flex';
+  
+  // Load PDF pages
+  const nameEl = document.getElementById('floating-pdf-name');
+  const countEl = document.getElementById('floating-page-count');
+  const strip = document.getElementById('floating-thumb-strip');
+  const viewer = document.getElementById('floating-page-viewer');
+  
+  nameEl.textContent = pdfName;
+  countEl.textContent = 'Loading...';
+  strip.innerHTML = '<div style="padding:40px 10px;text-align:center;color:#888;font-size:13px;"><i class="fa fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:10px;"></i>Loading pages...</div>';
+  viewer.innerHTML = '<div style="padding:40px;text-align:center;color:#888;font-size:13px;"><i class="fa fa-file-pdf" style="font-size:32px;display:block;margin-bottom:10px;color:#ccc;"></i>Select a page</div>';
+  
+  try {
+    const res = await fetch('/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(pdfName));
+    const data = await res.json();
+    
+    if (data.error) {
+      strip.innerHTML = `<div style="padding:20px 10px;text-align:center;color:#dc2626;font-size:12px;"><i class="fa fa-exclamation-triangle" style="display:block;margin-bottom:8px;"></i>${data.error}</div>`;
+      return;
+    }
+    
+    countEl.textContent = data.total + ' pages';
+    
+    // Render thumbnails
+    strip.innerHTML = data.pages.map((p, i) => `
+      <div class="floating-thumb" onclick="selectFloatingPage(${i})" id="floating-thumb-${i}" style="padding:10px 8px;cursor:pointer;border-bottom:1px solid #e8e8e8;display:flex;flex-direction:column;align-items:center;gap:5px;transition:background .15s;${i === 0 ? 'background:var(--orange-light);border-left:3px solid var(--orange);' : ''}">
+        <img src="${p.thumb}" style="width:88px;height:auto;border:1px solid #ddd;border-radius:3px;box-shadow:0 1px 4px rgba(0,0,0,0.08);display:block;" />
+        <span style="font-size:11px;color:var(--grey);font-weight:600;">${p.num}</span>
+      </div>
+    `).join('');
+    
+    // Render continuous scroll view
+    viewer.innerHTML = `
+      <div style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#fff;border-bottom:1px solid #e5e5e5;flex-shrink:0;">
+        <button onclick="adjustFloatingZoom(-25)" style="width:30px;height:30px;border:1.5px solid #e5e5e5;border-radius:6px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;" title="Zoom out">
+          <i class="fa fa-minus"></i>
+        </button>
+        <span id="floating-zoom-level" style="font-size:12px;font-weight:600;color:var(--grey);min-width:40px;text-align:center;">100%</span>
+        <button onclick="adjustFloatingZoom(25)" style="width:30px;height:30px;border:1.5px solid #e5e5e5;border-radius:6px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;" title="Zoom in">
+          <i class="fa fa-plus"></i>
+        </button>
+        <button onclick="adjustFloatingZoom(0)" style="width:30px;height:30px;border:1.5px solid #e5e5e5;border-radius:6px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;" title="Reset">
+          <i class="fa fa-compress-arrows-alt"></i>
+        </button>
+        <span style="font-size:11px;color:var(--grey);margin-left:6px;display:flex;align-items:center;gap:5px;"><i class="fa fa-mouse"></i>Scroll</span>
+        <span id="floating-current-page" style="font-size:12px;color:var(--grey);font-weight:600;margin-left:auto;">Page 1 of ${data.pages.length}</span>
+      </div>
+      <div id="floating-viewer-scroll" style="flex:1;overflow:auto;padding:16px;box-sizing:border-box;scroll-behavior:smooth;">
+        <div id="floating-page-stack" style="width:100%;margin:0 auto;display:flex;flex-direction:column;gap:18px;transition:width .2s;">
+          ${data.pages.map((p, i) => `
+            <figure id="floating-page-${i}" style="width:100%;margin:0;display:flex;flex-direction:column;align-items:center;">
+              <img src="${p.full}" style="width:100%;height:auto;display:block;border:1px solid #e5e5e5;border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,0.12);background:#fff;" />
+              <figcaption style="margin-top:7px;color:#777;font-size:11px;font-weight:600;">Page ${p.num}</figcaption>
+            </figure>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    
+    window._floatingPages = data.pages;
+    window._floatingZoom = 100;
+    
+    // Add scroll listener
+    const scrollEl = document.getElementById('floating-viewer-scroll');
+    scrollEl.addEventListener('scroll', syncFloatingPage, { passive: true });
+    
+  } catch(e) {
+    strip.innerHTML = '<div style="padding:20px 10px;text-align:center;color:#dc2626;font-size:12px;"><i class="fa fa-exclamation-triangle" style="display:block;margin-bottom:8px;"></i>Failed to load</div>';
+  }
+}
+
+function closeFloatingPdf() {
+  const floatingPreview = document.getElementById('floating-pdf-preview');
+  if (floatingPreview) {
+    floatingPreview.style.display = 'none';
+  }
+}
+
+function selectFloatingPage(idx) {
+  const pages = window._floatingPages || [];
+  if (!pages[idx]) return;
+  
+  const scroll = document.getElementById('floating-viewer-scroll');
+  const page = document.getElementById('floating-page-' + idx);
+  const first = document.getElementById('floating-page-0');
+  
+  if (scroll && page && first) {
+    scroll.scrollTo({ top: page.offsetTop - first.offsetTop, behavior: 'smooth' });
+  }
+  
+  // Update active thumbnail
+  document.querySelectorAll('.floating-thumb').forEach((el, i) => {
+    if (i === idx) {
+      el.style.background = 'var(--orange-light)';
+      el.style.borderLeft = '3px solid var(--orange)';
+    } else {
+      el.style.background = '';
+      el.style.borderLeft = '';
+    }
+  });
+  
+  const label = document.getElementById('floating-current-page');
+  if (label && pages[idx]) {
+    label.textContent = `Page ${pages[idx].num} of ${pages.length}`;
+  }
+}
+
+function syncFloatingPage() {
+  const scroll = document.getElementById('floating-viewer-scroll');
+  const sheets = [...document.querySelectorAll('#floating-page-stack figure')];
+  if (!scroll || !sheets.length) return;
+  
+  const firstOffset = sheets[0].offsetTop;
+  const marker = scroll.scrollTop + 120;
+  let activeIdx = 0;
+  
+  sheets.forEach((sheet, idx) => {
+    if (sheet.offsetTop - firstOffset <= marker) activeIdx = idx;
+  });
+  
+  // Update thumbnail highlight
+  document.querySelectorAll('.floating-thumb').forEach((el, i) => {
+    if (i === activeIdx) {
+      el.style.background = 'var(--orange-light)';
+      el.style.borderLeft = '3px solid var(--orange)';
+    } else {
+      el.style.background = '';
+      el.style.borderLeft = '';
+    }
+  });
+  
+  const pages = window._floatingPages || [];
+  const label = document.getElementById('floating-current-page');
+  if (label && pages[activeIdx]) {
+    label.textContent = `Page ${pages[activeIdx].num} of ${pages.length}`;
+  }
+}
+
+function adjustFloatingZoom(delta) {
+  const stack = document.getElementById('floating-page-stack');
+  const label = document.getElementById('floating-zoom-level');
+  if (!stack) return;
+  
+  if (delta === 0) {
+    window._floatingZoom = 100;
+  } else {
+    window._floatingZoom = Math.min(300, Math.max(25, window._floatingZoom + delta));
+  }
+  
+  stack.style.width = window._floatingZoom + '%';
+  if (label) label.textContent = window._floatingZoom + '%';
 }
 
 // ── Product Families ────────────────────────────────────────────────────────
@@ -2652,6 +2937,8 @@ async function loadIndexPanel() {
       const statsRes = await fetch('/admin-panel/api/stats/');
       const statsData = await statsRes.json();
       const currentStage = (statsData.pdf_progress || {})[selectedPdf];
+      
+      // Only auto-update to indexed if currently at chunked stage
       if (currentStage === 'chunked') {
         const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
         const lookupPdf = splitRe2.test(selectedPdf)
@@ -2665,9 +2952,16 @@ async function loadIndexPanel() {
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
             body: JSON.stringify({ filename: selectedPdf, stage: 'indexed' })
           });
-          await refreshStats();
         }
       }
+      
+      // Now update the progress bar with the correct stage from server
+      if (currentStage && !_trackedPdf) {
+        const displayPdf = selectedPdf.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || selectedPdf;
+        setTrackedPdf(displayPdf, currentStage);
+      }
+      
+      await refreshStats();
     } catch (e) {}
   }
 
@@ -3041,7 +3335,7 @@ async function disapproveTesting() {
     _trackedSetAt = Date.now();
     _userSelectedPdf = null;
     _renderProgress(_display, 'indexed');
-    showToast(`"${pdfName}" testing disapproved. Progress reverted to 85%.`, 'info');
+    showToast(`"${pdfName}" testing disapproved. Progress reverted to 80%.`, 'info');
 
     // Re-render buttons: show clickable Approve button, hide Disapprove
     showMarkAsTestedButton();
