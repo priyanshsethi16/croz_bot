@@ -26,14 +26,32 @@ def _clean_parsing_instructions(value) -> str:
 
 def _resolve_catalog_document(pdf_name: str):
     from .models import CatalogDocument
+    import re
 
     pdf_name = Path(str(pdf_name or '')).name
     if not pdf_name:
         return None
     pdf_stem = Path(pdf_name).stem
+    
+    # Try direct match first
     doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
     if not doc:
         doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+    
+    # If still not found and this looks like a parent stem, try finding any split part
+    if not doc:
+        split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+        # Check if this is a parent stem (no split pattern)
+        if not split_re.search(pdf_stem):
+            # Try to find any split part belonging to this parent
+            splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+            if splits_dir.exists():
+                # Get first split part and find its document
+                split_parts = sorted(splits_dir.glob('*.pdf'))
+                if split_parts:
+                    first_part_stem = split_parts[0].stem
+                    doc = CatalogDocument.objects.filter(original_filename=first_part_stem).order_by('-version').first()
+    
     return doc
 
 
@@ -947,6 +965,51 @@ def catalog_stats(request):
         if tracked_percent is not None:
             stats['tracked_percent']   = round(tracked_percent, 2)
             stats['total_split_parts'] = total_parts
+        # NEW: Compute families stage progress (40% → 60% based on approved families)
+        elif tracked_stage == 'chunked':
+            # Check if families exist for this PDF - compute proportional progress
+            try:
+                from .models import CatalogDocument, ProductFamily
+                import re as _re3
+                split_re3 = _re3.compile(r'_(custom_)?p\d{4}-\d{4}$', _re3.I)
+                docs_for_families = []
+                
+                # Try to find document(s) for this PDF
+                doc_lookup = CatalogDocument.objects.filter(
+                    original_filename__in=[tracked_pdf, tracked_pdf.replace('.pdf', '')]
+                ).first()
+                
+                if not doc_lookup:
+                    # Check if this is a parent stem with splits
+                    splits_dir_check = splits_dir / tracked_pdf
+                    if splits_dir_check.exists():
+                        split_part_files_check = sorted(splits_dir_check.glob('*.pdf'))
+                        if split_part_files_check:
+                            split_stems_check = [p.stem for p in split_part_files_check]
+                            docs_for_families = list(CatalogDocument.objects.filter(
+                                original_filename__in=split_stems_check
+                            ))
+                else:
+                    docs_for_families = [doc_lookup]
+                
+                if docs_for_families:
+                    total_fam = 0
+                    approved_fam = 0
+                    for doc_fam in docs_for_families:
+                        all_fam = ProductFamily.objects.filter(document=doc_fam)
+                        total_fam += all_fam.count()
+                        approved_fam += all_fam.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
+                    
+                    if total_fam > 0:
+                        # Proportional progress: 40% + (approved/total * 20%)
+                        families_percent = 40 + (approved_fam / total_fam) * 20
+                        stats['tracked_percent'] = round(families_percent, 2)
+                        stats['families_progress'] = {
+                            'total': total_fam,
+                            'approved': approved_fam,
+                        }
+            except Exception:
+                pass
         import logging
         logging.warning(f'[STATS] tracked_pdf={tracked_pdf} tracked_stage={tracked_stage} tracked_percent={tracked_percent} total_parts={total_parts}')
 
@@ -1557,39 +1620,79 @@ def list_product_families(request):
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
 
+    from django.db.models import Prefetch
+    from .models import DocumentChunk, ProductFamily, CatalogDocument
+    import re
+
     doc = _resolve_catalog_document(pdf_name)
     if not doc:
-        return JsonResponse({'error': 'PDF not found.'}, status=404)
+        import logging
+        logging.error(f"list_product_families: PDF not found for name '{pdf_name}'. Checked stems and splits.")
+        return JsonResponse({'error': f'PDF document not found for "{pdf_name}". Please ensure chunks have been created for this PDF.'}, status=404)
 
-    from django.db.models import Prefetch
-    from .models import DocumentChunk, ProductFamily
+    # Check if this is a parent stem with multiple split parts
+    pdf_stem = Path(pdf_name).stem
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+    docs_to_query = [doc]
+    
+    # If the resolved doc is a split part OR if pdf_stem looks like a parent, gather ALL split parts
+    if split_re.search(doc.original_filename) or not split_re.search(pdf_stem):
+        # Check for splits directory
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+        if splits_dir.exists():
+            split_part_files = sorted(splits_dir.glob('*.pdf'))
+            if len(split_part_files) > 1:  # Multiple parts exist
+                # Find all documents for these split parts
+                split_stems = [p.stem for p in split_part_files]
+                docs_to_query = list(CatalogDocument.objects.filter(
+                    original_filename__in=split_stems
+                ).order_by('original_filename'))
+                if not docs_to_query:
+                    docs_to_query = [doc]  # Fallback to original
 
-    chunks = [
-        _serialize_family_editor_chunk(chunk)
-        for chunk in DocumentChunk.objects.filter(document=doc).select_related(
+    # Aggregate chunks from all documents
+    all_chunks = []
+    ordinal_offset = 0
+    for current_doc in docs_to_query:
+        doc_chunks = DocumentChunk.objects.filter(document=current_doc).select_related(
             'family',
             'family__normalized_category',
             'variant',
             'variant__family',
         ).order_by('ordinal')
-    ]
-    families = [
-        _serialize_family_editor_family(family)
-        for family in ProductFamily.objects.filter(document=doc).select_related(
+        
+        for chunk in doc_chunks:
+            serialized = _serialize_family_editor_chunk(chunk)
+            serialized['ordinal'] = ordinal_offset + chunk.ordinal
+            serialized['filename'] = f'chunk_{ordinal_offset + chunk.ordinal:04d}.md'
+            all_chunks.append(serialized)
+        
+        ordinal_offset += doc_chunks.count()
+
+    # Aggregate families from all documents
+    all_families = []
+    seen_family_ids = set()
+    for current_doc in docs_to_query:
+        doc_families = ProductFamily.objects.filter(document=current_doc).select_related(
             'normalized_category',
         ).prefetch_related(
             Prefetch('chunks', queryset=DocumentChunk.objects.select_related('family').order_by('ordinal')),
         ).order_by('product_name', 'product_code', 'id')
-    ]
+        
+        for family in doc_families:
+            if family.id not in seen_family_ids:
+                all_families.append(_serialize_family_editor_family(family))
+                seen_family_ids.add(family.id)
+
     return JsonResponse({
         'document_id': str(doc.id),
-        'pdf': doc.original_filename,
+        'pdf': pdf_stem if len(docs_to_query) > 1 else doc.original_filename,
         'status': doc.status,
         'is_active': doc.is_active,
-        'chunk_count': len(chunks),
-        'family_count': len(families),
-        'chunks': chunks,
-        'families': families,
+        'chunk_count': len(all_chunks),
+        'family_count': len(all_families),
+        'chunks': all_chunks,
+        'families': all_families,
     })
 
 
@@ -1631,6 +1734,7 @@ def save_product_family(request):
     from django.db.models import Prefetch
     from django.utils import timezone
     from .services.taxonomy import resolve_category
+    import re
 
     with transaction.atomic():
         if family_id:
@@ -1717,6 +1821,60 @@ def save_product_family(request):
             from .services.indexing import refresh_chunk_payloads
             refresh_chunk_payloads(indexed_chunks)
 
+    # Calculate progress based on approved families
+    # For split PDFs, aggregate families from ALL split parts
+    pdf_stem = Path(pdf_name).stem
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+    docs_to_query = [doc]
+    
+    if split_re.search(doc.original_filename) or not split_re.search(pdf_stem):
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+        if splits_dir.exists():
+            split_part_files = sorted(splits_dir.glob('*.pdf'))
+            if len(split_part_files) > 1:
+                split_stems = [p.stem for p in split_part_files]
+                from .models import CatalogDocument
+                docs_to_query = list(CatalogDocument.objects.filter(
+                    original_filename__in=split_stems
+                ).order_by('original_filename'))
+                if not docs_to_query:
+                    docs_to_query = [doc]
+    
+    # Count total and approved families across all documents
+    total_families = 0
+    approved_families = 0
+    for current_doc in docs_to_query:
+        all_families = ProductFamily.objects.filter(document=current_doc)
+        total_families += all_families.count()
+        approved_families += all_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
+    
+    # Update progress: 40% (chunked) → 60% (families approved)
+    # Progress = 40% + (approved/total * 20%)
+    if total_families > 0:
+        families_progress_percent = 40 + (approved_families / total_families) * 20
+        
+        # Update stage to 'families' with custom percent, or advance to 'families' if all approved
+        from .models import ApiKey
+        import json as _j
+        
+        tracked_pdf = pdf_stem if len(docs_to_query) > 1 else pdf_name
+        new_stage = 'families' if approved_families == total_families else 'chunked'
+        
+        # Update DB stage map
+        try:
+            _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            _stage_map = {}
+        
+        _stage_map[tracked_pdf] = new_stage
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+        
+        # Update session
+        pdf_progress = request.session.get('pdf_progress', {})
+        pdf_progress[tracked_pdf] = new_stage
+        request.session['pdf_progress'] = pdf_progress
+        request.session.modified = True
+
     families = [
         _serialize_family_editor_family(item)
         for item in ProductFamily.objects.filter(document=doc).select_related(
@@ -1740,6 +1898,11 @@ def save_product_family(request):
         'chunks': chunks,
         'families': families,
         'document_id': str(doc.id),
+        'progress_info': {
+            'total_families': total_families,
+            'approved_families': approved_families,
+            'progress_percent': round(families_progress_percent, 1) if total_families > 0 else 40,
+        }
     })
 
 

@@ -156,7 +156,7 @@ async function previewParentGroup(parentStem, parts) {
       const doneCount = approveData.done_count !== undefined ? approveData.done_count : null;
       const totalCount = parts.length;
       if (doneCount !== null && doneCount < totalCount) {
-        const percent = 25 + (doneCount / totalCount) * 25;
+        const percent = 20 + (doneCount / totalCount) * 20;
         _trackedPdf   = parentStem;
         _trackedStage = 'uploaded';
         _renderProgress(parentStem, 'uploaded', percent);
@@ -1614,6 +1614,11 @@ function updateWorkflowProgress(data = {}) {
           sub = `${indexedParts} of ${totalParts} parts indexed. Continue embedding remaining parts.`;
         }
         document.getElementById('workflow-progress-sub').textContent = sub;
+      } else if (data.families_progress && data.tracked_stage === 'chunked') {
+        // Show families approval progress
+        const { total, approved } = data.families_progress;
+        const sub = `${approved} of ${total} product families approved. Approve all families to advance to 60%.`;
+        document.getElementById('workflow-progress-sub').textContent = sub;
       }
     } else {
       _renderProgress(data.tracked_pdf, data.tracked_stage);
@@ -2004,7 +2009,7 @@ async function runSingleSplit(idx) {
           return el && el.textContent === '✓ Done';
         }).length;
         const totalParts = _splitParts.length;
-        const percent = 25 + (doneParts / totalParts) * 25;
+        const percent = 20 + (doneParts / totalParts) * 20;
         const sub = doneParts < totalParts
           ? `${doneParts} of ${totalParts} parts chunked. Continue processing remaining parts.`
           : 'All parts chunked. Now index & embed for semantic search.';
@@ -2690,14 +2695,38 @@ async function loadFamilyPanel(force = false) {
       }
     }
 
-    let pdfName = selectedPdf;
+    // Use the PDF shown in progress bar (parent stem for split PDFs)
+    let pdfName = _trackedPdf || selectedPdf;
+    
+    // If pdfName doesn't have .pdf extension, add it for lookup
+    if (pdfName && !pdfName.toLowerCase().endsWith('.pdf')) {
+      pdfName = pdfName + '.pdf';
+    }
+    
     let detail = _findPdfDetail(pdfName);
+    
+    // If not found, check if it's a parent stem of split PDFs
     if (!detail || !detail.chunks_count) {
-      detail = _defaultChunkedPdf();
-      if (detail) {
-        pdfName = detail.name;
-        selectedPdf = pdfName;
-        _highlightPdfRow(pdfName);
+      const stem = pdfName.replace(/\.pdf$/i, '');
+      const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+      
+      // Find any split part of this parent
+      const splitPart = _pdfDetails.find(d => {
+        return splitRe.test(d.name) && d.name.replace(splitRe, '') === stem;
+      });
+      
+      if (splitPart && splitPart.chunks_count > 0) {
+        // Use the first split part, but keep parent stem for display
+        pdfName = splitPart.name;
+        detail = splitPart;
+      } else {
+        // Fall back to default chunked PDF
+        detail = _defaultChunkedPdf();
+        if (detail) {
+          pdfName = detail.name;
+          selectedPdf = pdfName;
+          _highlightPdfRow(pdfName);
+        }
       }
     }
 
@@ -2716,7 +2745,9 @@ async function loadFamilyPanel(force = false) {
       return;
     }
 
-    const res = await fetch(`/admin-panel/api/families/?pdf=${encodeURIComponent(pdfName)}`);
+    // Backend expects the stem (without .pdf) to resolve the document
+    const apiPdfParam = pdfName.replace(/\.pdf$/i, '');
+    const res = await fetch(`/admin-panel/api/families/?pdf=${encodeURIComponent(apiPdfParam)}`);
     const data = await res.json();
     if (!res.ok || data.error) {
       throw new Error(data.error || 'Could not load product families.');
@@ -2844,7 +2875,38 @@ async function saveProductFamily() {
     renderFamilyWorkspace();
     document.getElementById('next-to-index-families').style.display = 'flex';
     markStepDone('families');
-    advanceTrackedStage('families', pdfName);
+    
+    // Update progress based on approval ratio
+    if (data.progress_info) {
+      const { total_families, approved_families, progress_percent } = data.progress_info;
+      const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
+      
+      // Update local state
+      _trackedPdf = displayPdf;
+      _trackedPercent = progress_percent;
+      _trackedSetAt = Date.now();
+      
+      // Determine stage: stay at 'chunked' until all families approved
+      if (approved_families === total_families && total_families > 0) {
+        _trackedStage = 'families';
+        _trackedPercent = null; // Use stage default of 60%
+        _renderProgress(displayPdf, 'families');
+        // Update DB stage to families (60%)
+        fetch('/admin-panel/api/update-pdf-stage/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+          body: JSON.stringify({ filename: pdfName, stage: 'families' })
+        }).catch(() => {});
+      } else {
+        _trackedStage = 'chunked';
+        _renderProgress(displayPdf, 'chunked', progress_percent);
+        const sub = `${approved_families} of ${total_families} product families approved. Approve all families to advance to 60%.`;
+        document.getElementById('workflow-progress-sub').textContent = sub;
+      }
+    } else {
+      advanceTrackedStage('families', pdfName);
+    }
+    
     refreshStats();
     loadPdfList();
     showToast(data.message || 'Product family saved.', 'success');
