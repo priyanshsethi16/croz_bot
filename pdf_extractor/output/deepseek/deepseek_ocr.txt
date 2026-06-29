@@ -1,0 +1,63 @@
+title[[70, 190, 248, 217]]
+# PROFESSIONAL
+
+text[[71, 229, 210, 241]]
+**7,500 PSI (517 BAR)**
+
+image[[73, 251, 104, 267]]
+
+title[[80, 253, 108, 263]]
+# G32
+
+text[[71, 273, 220, 386], [72, 480, 218, 598]]
+· **Patented Feather** Touch Design: max output with minimal effort ·Single piece die cast head & fixed handle for added strength ·Variable Stroke ·Delivers: Upto 0.68 gms/ stroke ·Capacity:14 oz (400 gms)/500cc -Ideal for use in cold weather conditions ·Venturi Mechanism and large grease inlet helps retain prime ·Delivers:Upto 0.68 gm/stroke ·Capacity:16 oz (400 gms)/500cc
+
+image[[231, 289, 334, 398]]
+
+title[[71, 423, 235, 448]]
+# ALL WEATHER
+
+text[[70, 453, 210, 465]]
+**7,000 PSI (483 BAR)**
+
+image[[73, 476, 104, 492]]
+
+title[[80, 480, 108, 490]]
+# G70
+
+text[[71, 499, 206, 595], [372, 247, 914, 275]]
+·Ideal for use in cold weather conditions ·Venturi Mechanism and large grease inlet helps retain prime ·Delivers:Upto 0.68 gm/stroke ·Capacity:16 oz (400 gms)/500cc -Aluminium die cast head with drop resistant pistol assembly ·Adjustable Stroke Mechanism-easy switch between high Pressure and High Volume modes ·Delivers: Upto 0.84 gm/stroke **G55** **G65**
+
+image[[372, 285, 524, 398]]
+
+title[[373, 423, 710, 448]]
+# ALL WEATHER - ADJUSTABLE
+
+text[[371, 453, 914, 510], [375, 660, 505, 670]]
+**6,000 PSI (413 BAR)** · Ideal for use in cold weather conditions ·Venturi Mechanism and large grease inlet helps retain prime ·Adjustable Mechanism-easy switch between high pressure and high volume modes ·Delivers: Upto 0.90 gm/stroke **G80**
+
+image[[372, 520, 524, 634]]
+
+title[[72, 663, 198, 688]]
+# STANDARD
+
+text[[71, 696, 210, 708], [232, 662, 505, 684]]
+**5,000 PSI (345 BAR)** -Aluminium die cast head with block nut ·Delivers: Upto 0.50 gm/stroke **G4PST**
+
+image[[372, 696, 524, 821]]
+
+title[[72, 727, 104, 737]]
+# G5
+
+text[[71, 747, 162, 755]]
+1x2 (400 gms)/500cc
+
+image[[733, 520, 914, 635]]
+
+title[[682, 727, 732, 737]]
+# G5PRO
+
+text[[680, 747, 808, 783]]
+1x oz (400 gms)/500cc Professional model: Head fitted with black leader and air release valve. Grip on movable handle
+
+image[[830, 702, 934, 821]]

@@ -1,4 +1,4 @@
-"""Gemini key rotation for the admin-selected LangChain vision model."""
+"""Multi-provider key rotation for vision models (Gemini, OpenAI, Groq)."""
 
 from __future__ import annotations
 
@@ -8,32 +8,91 @@ from typing import Any
 
 
 class KeyRotator:
-    """Rotate configured Gemini keys while preserving one selected VLM model."""
+    """Rotate API keys across providers while preserving selected VLM model."""
 
     def __init__(self, cfg: dict):
-        self._gemini_cfg = dict(cfg.get("gemini", {}))
+        self.provider = cfg.get("provider", "gemini").lower()
+        
+        if self.provider == "openai":
+            self._init_openai(cfg)
+        elif self.provider == "groq":
+            self._init_groq(cfg)
+        else:
+            self._init_gemini(cfg)
+
+    def _init_openai(self, cfg: dict):
+        self._cfg = dict(cfg.get("openai", {}))
         if cfg.get("parsing_instructions"):
-            self._gemini_cfg["parsing_instructions"] = cfg["parsing_instructions"]
+            self._cfg["parsing_instructions"] = cfg["parsing_instructions"]
+        self._model = (
+            os.getenv("OPENAI_VISION_MODEL", "").strip()
+            or self._cfg.get("openai_model")
+            or "gpt-4o"
+        )
+        self._cfg["openai_model"] = self._model
+        self._keys: list[str] = []
+        for name in ["OPENAI_API_KEY", *[f"OPENAI_API_KEY_{i}" for i in range(1, 20)]]:
+            key = os.getenv(name, "").strip()
+            if key and key not in self._keys:
+                self._keys.append(key)
+        if not self._keys:
+            raise ValueError("OPENAI_API_KEY is required for OpenAI provider.")
+        self._active_idx = 0
+
+    def _init_groq(self, cfg: dict):
+        self._cfg = dict(cfg.get("groq", {}))
+        if cfg.get("parsing_instructions"):
+            self._cfg["parsing_instructions"] = cfg["parsing_instructions"]
+        self._model = (
+            os.getenv("GROQ_VISION_MODEL", "").strip()
+            or self._cfg.get("vision_model")
+            or "meta-llama/llama-4-scout-17b-16e-instruct"
+        )
+        self._cfg["vision_model"] = self._model
+        self._keys: list[str] = []
+        for name in ["GROQ_API_KEY", *[f"GROQ_API_KEY_{i}" for i in range(1, 20)]]:
+            key = os.getenv(name, "").strip()
+            if key and key not in self._keys:
+                self._keys.append(key)
+        if not self._keys:
+            raise ValueError("GROQ_API_KEY is required for Groq provider.")
+        self._active_idx = 0
+
+    def _init_gemini(self, cfg: dict):
+        self._cfg = dict(cfg.get("gemini", {}))
+        if cfg.get("parsing_instructions"):
+            self._cfg["parsing_instructions"] = cfg["parsing_instructions"]
         self._model = (
             os.getenv("GEMINI_VISION_MODEL", "").strip()
-            or self._gemini_cfg.get("gemini_model")
+            or self._cfg.get("gemini_model")
             or "gemini-2.5-flash"
         )
-        self._gemini_cfg["gemini_model"] = self._model
+        self._cfg["gemini_model"] = self._model
         self._keys: list[str] = []
         for name in ["GEMINI_API_KEY", *[f"GEMINI_API_KEY_{i}" for i in range(1, 20)]]:
             key = os.getenv(name, "").strip()
             if key and key not in self._keys:
                 self._keys.append(key)
         if not self._keys:
-            raise ValueError("GEMINI_API_KEY is required for PDF chunk extraction.")
+            raise ValueError("GEMINI_API_KEY is required for Gemini provider.")
         self._active_idx = 0
 
     def _extractor(self, key: str):
-        from vision_pipeline.gemini_extractor import GeminiExtractor
-        return GeminiExtractor(key, self._gemini_cfg)
+        if self.provider == "openai":
+            from vision_pipeline.openai_extractor import OpenAIExtractor
+            return OpenAIExtractor(key, self._cfg)
+        elif self.provider == "groq":
+            from vision_pipeline.vision_extractor import VisionExtractor
+            return VisionExtractor(key, self._cfg)
+        else:
+            from vision_pipeline.gemini_extractor import GeminiExtractor
+            return GeminiExtractor(key, self._cfg)
 
     def describe(self) -> str:
+        if self.provider == "openai":
+            return f"OpenAI / {self._model} — {len(self._keys)} key(s)"
+        elif self.provider == "groq":
+            return f"Groq / {self._model} — {len(self._keys)} key(s)"
         return f"Gemini / {self._model} via LangChain — {len(self._keys)} key(s)"
 
     def active_provider(self) -> str:
@@ -50,9 +109,9 @@ class KeyRotator:
             except Exception as exc:
                 last_error = exc
                 message = str(exc).lower()
-                if "429" in message or "quota" in message or "resource_exhausted" in message:
-                    print(f"  [page {page_num}] Gemini key {idx + 1} quota exhausted; rotating")
+                if "429" in message or "quota" in message or "resource_exhausted" in message or "rate" in message:
+                    print(f"  [page {page_num}] {self.provider.title()} key {idx + 1} quota exhausted; rotating")
                     continue
                 raise
-        print(f"  [page {page_num}] All Gemini keys failed: {last_error}")
+        print(f"  [page {page_num}] All {self.provider.title()} keys failed: {last_error}")
         return None

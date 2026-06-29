@@ -56,6 +56,8 @@ flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, t
 - ★ on row → "bestseller": true; □ on row → "made_to_order": true
 - Safety warnings, warranty, country of origin → dedicated fields
 - Unclassified text → raw_text_blocks
+- Pay special attention to tiny text, measurement annotations, symbols, and labels near product images. Zoom in mentally and OCR these regions before concluding that no text is present.
+-  also extract text of the label dimension of equipment or tool or product
 
 ## JSON SCHEMA
 Return JSON array only. Each element = one product family.

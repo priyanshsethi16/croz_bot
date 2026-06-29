@@ -1,0 +1,14 @@
+python-dotenv
+pymupdf
+docling
+mistralai
+google-generativeai
+openai
+
+# Phase 2 & 3: Indexing + RAG
+langchain-core
+langchain-huggingface
+langchain-qdrant
+qdrant-client
+sentence-transformers
+streamlit

@@ -1,8 +1,9 @@
 # Vision Pipeline Configuration
-# Gemini is the chunk-extraction provider. The admin UI overrides model/key settings.
-# CLI runs load GEMINI_API_KEY from .env and may set GEMINI_VISION_MODEL.
+# Supports multiple providers: gemini, openai, groq
+# The admin UI overrides model/key settings.
+# CLI runs load API keys from .env and may set vision model via env vars.
 
-provider: "gemini"
+provider: "openai"  # Options: "gemini", "openai", "groq"
 
 groq:
   vision_model: "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -18,6 +19,46 @@ gemini:
   max_retries: 2        # 1 attempt per key — rotation handles failures
   retry_delay: 1.0
   request_delay: 1.0   # minimal delay — 11 keys means no need to throttle hard
+
+openai:
+  openai_model: "gpt-4o"  # Choose from models below
+  temperature: 0
+  max_tokens: 16384
+  max_retries: 3
+  retry_delay: 2.0
+  request_delay: 1.0   # OpenAI has generous rate limits
+
+# Available OpenAI Vision Models (GPT-4/5 series):
+# 
+# GPT-5 Series (Latest - when available):
+#   - gpt-5: Next generation flagship model
+#   - gpt-5-turbo: Faster GPT-5 variant
+#   - gpt-5.3: GPT-5 version 5.3
+#   - gpt-5.4: GPT-5 version 5.4 (most advanced)
+#   - gpt-5.4-mini: Lightweight GPT-5.4
+#   - gpt-5-preview: Early access GPT-5
+#
+# GPT-4o Series (Current Recommended):
+#   - gpt-4o: Latest multimodal model, best balance of speed/quality (128K context)
+#   - gpt-4o-mini: Faster and cheaper, good for simple catalogs (128K context)
+#   - gpt-4-turbo: Previous generation flagship, very capable (128K context)
+#   - gpt-4-turbo-2024-04-09: Specific turbo version
+#   - gpt-4-vision-preview: Original GPT-4 Vision (128K context)
+#
+# Reasoning Models (o-series with vision):
+#   - o1: Advanced reasoning with vision capabilities (200K context)
+#   - o1-preview: Preview of o1 reasoning model
+#   - o1-mini: Faster reasoning model (128K context)
+#   - o3-mini: Latest reasoning model (when available)
+#
+# Legacy:
+#   - gpt-4: Base GPT-4 without vision
+#   - gpt-4-32k: Extended context GPT-4
+#
+# Recommended for catalog extraction:
+#   - Best quality: gpt-5.4, gpt-5, gpt-4o, or o1
+#   - Best value: gpt-5.4-mini, gpt-4o-mini
+#   - Best reasoning: o1 or o1-mini
 
 pdf:
   dpi: 150                  # PNG rasterisation DPI (200 saves tokens vs 300, good for most catalogs)

@@ -1,0 +1,8 @@
+# Cordless Drill (line 2)
+  ## Features (line 4)
+  ## Specifications (line 8)
+    ### Technical Details (line 10)
+    ### Battery Information (line 14)
+# Accessories (line 18)
+  ## Included Items (line 20)
+  ## Optional Accessories (line 24)

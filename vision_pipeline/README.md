@@ -1,11 +1,11 @@
 # Vision Pipeline
 
-A layout-aware product catalog parser that extracts structured product data directly from PDF page images using an admin-selected Gemini vision-language model via LangChain — no OCR step needed.
+A layout-aware product catalog parser that extracts structured product data directly from PDF page images using vision-language models (Gemini, OpenAI GPT-4/5, or Groq) — no OCR step needed.
 
 ## How It Works
 
 ```
-PDF → PNG pages → Gemini VLM (LangChain) → product JSON → markdown chunks
+PDF → PNG pages → Vision Model → product JSON → markdown chunks
 ```
 
 Each page image is sent directly to the vision model, which reads columns, tables, badges, and layout visually. This avoids the column-layout confusion that OCR-based pipelines suffer from.
@@ -15,7 +15,10 @@ Each page image is sent directly to the vision model, which reads columns, table
 ```
 vision_pipeline/
 ├── main.py               # Entry point
-├── gemini_extractor.py   # Sends page PNG to Gemini through LangChain
+├── gemini_extractor.py   # Gemini vision provider (LangChain)
+├── openai_extractor.py   # OpenAI GPT-4/5 vision provider
+├── vision_extractor.py   # Groq Llama vision provider
+├── key_rotator.py        # Multi-provider key rotation
 ├── chunk_writer.py       # Converts product JSON to markdown files
 ├── pdf_to_images.py      # Rasterizes PDF pages to PNG
 ├── config.yaml           # Model, DPI, rate limits, output paths
@@ -30,25 +33,31 @@ vision_pipeline/
 
 **1. Install dependencies** (from project root):
 ```bash
-pip install pdf2image pyyaml python-dotenv pypdf tqdm pillow langchain-google-genai
+pip install pdf2image pyyaml python-dotenv pypdf tqdm pillow langchain-google-genai openai groq
 sudo apt-get install -y poppler-utils   # Linux / WSL
 ```
 
 **2. Set your API key(s)** in `.env` (project root):
 ```
+# Choose one or more providers:
 GEMINI_API_KEY=your_gemini_key
+OPENAI_API_KEY=your_openai_key
+GROQ_API_KEY=your_groq_key
 ```
 
-- Gemini key: [aistudio.google.com](https://aistudio.google.com) — no credit card
+- Gemini key: [aistudio.google.com](https://aistudio.google.com)
+- OpenAI key: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+- Groq key: [console.groq.com](https://console.groq.com)
 
-When using the Django UI, configure the encrypted key and VLM from **Admin → Models & Keys** instead of editing `.env`.
-
-**3. Select the Gemini model** in **Admin → Models & Keys**. CLI runs may set `GEMINI_VISION_MODEL`.
+**3. Select provider in config.yaml**:
+```yaml
+provider: "openai"  # Options: "gemini", "openai", "groq"
+```
 
 ## Usage
 
 ```bash
-# Process full PDF
+# Process full PDF with OpenAI GPT-4o
 python -m vision_pipeline.main --pdf /path/to/catalog.pdf
 
 # Process specific page range (useful for testing)
@@ -77,26 +86,32 @@ Each file contains:
 - Description, features, utility, specifications
 - **Variants section** — every child variant (size/model) as its own sub-section with its own sizes table and ordering information table
 
-## Rate Limits (Free Tier)
-
-| Limit | Value |
-|---|---|
-| Tokens per minute | 30,000 |
-| Tokens per day | 500,000 |
-| Approx. pages per day | ~35–50 pages |
-
-The pipeline adds a 5-second delay between calls to stay under the per-minute limit. If the daily limit is hit, the checkpoint is saved — just re-run the next day and it resumes from where it stopped.
-
-The pipeline can rotate `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, etc. for CLI batch jobs. The admin UI uses the single encrypted Gemini key configured by the administrator.
-
 ## Models
 
-| Provider | Example model | Vision | Selection |
+| Provider | Example models | Vision | Configuration |
 |---|---|---|---|
-| Gemini | `gemini-2.5-flash` | ✅ | Admin → Models & Keys |
+| Gemini | `gemini-2.5-flash` | ✅ | config.yaml → gemini.gemini_model |
+| OpenAI | `gpt-5.4`, `gpt-5.4-mini`, `gpt-5`, `gpt-4o`, `gpt-4o-mini`, `o1` | ✅ | config.yaml → openai.openai_model |
+| Groq | `llama-4-scout-17b-16e-instruct` | ✅ | config.yaml → groq.vision_model |
+
+See [OPENAI_MODELS.md](OPENAI_MODELS.md) for complete list of OpenAI GPT-4/5 series models.
+
+## Rate Limits
+
+| Provider | Free Tier | Paid Tier |
+|---|---|---|
+| Gemini | ~35-50 pages/day (500k tokens) | Higher limits with billing |
+| OpenAI | No free tier | Generous limits, pay-per-use |
+| Groq | ~15 RPM free | Higher with subscription |
+
+The pipeline adds delays between calls to respect rate limits. Use multiple API keys for key rotation:
+```
+OPENAI_API_KEY=key1
+OPENAI_API_KEY_1=key2
+OPENAI_API_KEY_2=key3
+```
 
 ## Known Limitations
 
-- Dense pages with 6+ products may have some data dropped due to output token limits — increase `max_tokens` in `config.yaml` if needed (max 8192)
-- Pages processed at 300 DPI by default — increase `dpi` in `config.yaml` for higher quality at the cost of larger image size and more tokens
-- Free tier daily limit of 500k tokens is the main throughput constraint
+- Dense pages with 6+ products may have some data dropped due to output token limits — increase `max_tokens` in `config.yaml` if needed
+- Pages processed at 150 DPI by default — increase `dpi` in `config.yaml` for higher quality at the cost of larger image size and more tokens

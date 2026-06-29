@@ -1,0 +1,32 @@
+[
+  {
+    "product_name": "Club Hammers",
+    "start_line": 8,
+    "end_line": 28,
+    "char_count": 369
+  },
+  {
+    "product_name": "Sledge Hammers",
+    "start_line": 28,
+    "end_line": 45,
+    "char_count": 294
+  },
+  {
+    "product_name": "Precision Screwdriver Set",
+    "start_line": 45,
+    "end_line": 63,
+    "char_count": 340
+  },
+  {
+    "product_name": "Digital Caliper",
+    "start_line": 63,
+    "end_line": 77,
+    "char_count": 226
+  },
+  {
+    "product_name": "Vernier Caliper",
+    "start_line": 77,
+    "end_line": 88,
+    "char_count": 175
+  }
+]
