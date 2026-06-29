@@ -55,25 +55,93 @@ Return ONLY a JSON array of products with this exact format:
   }}
 ]
 
-Return ONLY the JSON array, no other text."""
+IMPORTANT: Return ONLY the JSON array, no other text. Ensure the JSON is complete and valid."""
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a product catalog analyzer. Return only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1
-        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a product catalog analyzer. Return only valid JSON arrays."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=4096
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Remove markdown code blocks if present
+            if result.startswith("```"):
+                result = result.split("```")[1]
+                if result.startswith("json"):
+                    result = result[4:]
+                result = result.strip()
+            
+            # Try to parse JSON
+            try:
+                products = json.loads(result)
+            except json.JSONDecodeError as e:
+                print(f"⚠️  JSON decode error: {e}")
+                print(f"   Raw LLM output (first 500 chars):\n{result[:500]}")
+                print(f"   Raw LLM output (last 500 chars):\n{result[-500:]}")
+                
+                # Attempt to repair truncated JSON
+                print("🔧 Attempting to repair JSON...")
+                repaired = self._repair_json(result)
+                products = json.loads(repaired)
+                print("✅ JSON repaired successfully")
+            
+            if not isinstance(products, list):
+                raise ValueError(f"Expected JSON array, got {type(products).__name__}")
+            
+            return products
+            
+        except Exception as e:
+            print(f"❌ Error identifying products: {e}")
+            # Fallback: return empty list or basic extraction
+            print("⚠️  Falling back to basic heading extraction...")
+            return self._fallback_extraction(headings)
+    
+    def _repair_json(self, broken_json: str) -> str:
+        """Attempt to repair common JSON errors like unterminated strings/arrays."""
+        # Count opening/closing brackets
+        open_brackets = broken_json.count('[')
+        close_brackets = broken_json.count(']')
         
-        result = response.choices[0].message.content.strip()
-        # Remove markdown code blocks if present
-        if result.startswith("```"):
-            result = result.split("```")[1]
-            if result.startswith("json"):
-                result = result[4:]
+        # Add missing closing brackets
+        if open_brackets > close_brackets:
+            # Find the last complete object
+            last_brace = broken_json.rfind('}')
+            if last_brace != -1:
+                broken_json = broken_json[:last_brace + 1]
+                # Add missing closing brackets
+                broken_json += ']' * (open_brackets - close_brackets)
         
-        products = json.loads(result)
+        # Remove trailing incomplete content
+        if broken_json.rstrip().endswith(','):
+            broken_json = broken_json.rstrip()[:-1]
+        
+        return broken_json
+    
+    def _fallback_extraction(self, headings: List[Dict[str, str]]) -> List[Dict]:
+        """Fallback: Extract level 1 and 2 headings as potential products."""
+        products = []
+        for h in headings:
+            if h['level'] <= 2:
+                # Skip common non-product sections
+                text_lower = h['text'].lower()
+                skip_terms = ['feature', 'specification', 'content', 'index', 'introduction', 
+                             'table', 'warranty', 'safety', 'instruction']
+                if any(term in text_lower for term in skip_terms):
+                    continue
+                
+                products.append({
+                    'product_name': h['text'],
+                    'start_line': h['line_number'],
+                    'end_line': h['line_number'] + 50,  # Estimate
+                    'heading_level': h['level']
+                })
+        
         return products
     
     def split_text_by_products(

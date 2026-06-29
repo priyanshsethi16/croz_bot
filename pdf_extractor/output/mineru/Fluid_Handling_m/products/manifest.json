@@ -1,0 +1,50 @@
+[
+  {
+    "product_name": "HC21",
+    "start_line": 10,
+    "end_line": 16,
+    "char_count": 98
+  },
+  {
+    "product_name": "HC21L",
+    "start_line": 16,
+    "end_line": 22,
+    "char_count": 102
+  },
+  {
+    "product_name": "HC21-90",
+    "start_line": 22,
+    "end_line": 49,
+    "char_count": 508
+  },
+  {
+    "product_name": "HC23",
+    "start_line": 49,
+    "end_line": 125,
+    "char_count": 1350
+  },
+  {
+    "product_name": "HC24",
+    "start_line": 125,
+    "end_line": 141,
+    "char_count": 359
+  },
+  {
+    "product_name": "HCSW11",
+    "start_line": 141,
+    "end_line": 137,
+    "char_count": 0
+  },
+  {
+    "product_name": "360° SWIVEL COUPLER",
+    "start_line": 137,
+    "end_line": 98,
+    "char_count": 0
+  },
+  {
+    "product_name": "Grease gun swivel",
+    "start_line": 98,
+    "end_line": 146,
+    "char_count": 1158
+  }
+]

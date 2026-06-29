@@ -75,6 +75,8 @@ def main():
     writer = OutputWriter(output_dir=f"output/{args.ocr}/{pdf_name}")
     files  = writer.save(result)
     print(f"   Markdown : {files['markdown']}")
+    if 'html' in files:
+        print(f"   HTML     : {files['html']}")
     print(f"   JSON     : {files['json']}")
     print(f"   ⏱  OCR took {time.time() - t0:.1f}s")
 

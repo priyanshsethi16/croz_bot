@@ -1,0 +1,548 @@
+[
+  {
+    "product_name": "Machinist's Squares",
+    "start_line": 190,
+    "end_line": 237,
+    "char_count": 1829
+  },
+  {
+    "product_name": "Engineer's Precision Squares",
+    "start_line": 237,
+    "end_line": 321,
+    "char_count": 3390
+  },
+  {
+    "product_name": "Straight & Knife Edges",
+    "start_line": 321,
+    "end_line": 388,
+    "char_count": 2580
+  },
+  {
+    "product_name": "Jenny Caliper",
+    "start_line": 388,
+    "end_line": 421,
+    "char_count": 608
+  },
+  {
+    "product_name": "Spring Calipers & Dividers",
+    "start_line": 421,
+    "end_line": 505,
+    "char_count": 2274
+  },
+  {
+    "product_name": "Feeler Gauges",
+    "start_line": 505,
+    "end_line": 586,
+    "char_count": 2809
+  },
+  {
+    "product_name": "Radius Gauges",
+    "start_line": 586,
+    "end_line": 636,
+    "char_count": 1165
+  },
+  {
+    "product_name": "Degree",
+    "start_line": 636,
+    "end_line": 671,
+    "char_count": 666
+  },
+  {
+    "product_name": "Depth Gauge",
+    "start_line": 671,
+    "end_line": 718,
+    "char_count": 803
+  },
+  {
+    "product_name": "Multi-Use Rule And Gauge",
+    "start_line": 718,
+    "end_line": 764,
+    "char_count": 956
+  },
+  {
+    "product_name": "Depth and Angle Gauge",
+    "start_line": 764,
+    "end_line": 796,
+    "char_count": 630
+  },
+  {
+    "product_name": "Bore Gauge (Taper Gauge)",
+    "start_line": 796,
+    "end_line": 819,
+    "char_count": 669
+  },
+  {
+    "product_name": "Center Square",
+    "start_line": 819,
+    "end_line": 851,
+    "char_count": 586
+  },
+  {
+    "product_name": "Sheet Metal & Wire Gauges",
+    "start_line": 851,
+    "end_line": 892,
+    "char_count": 676
+  },
+  {
+    "product_name": "Screw Cutting Gauge",
+    "start_line": 892,
+    "end_line": 922,
+    "char_count": 723
+  },
+  {
+    "product_name": "Outside Micrometers",
+    "start_line": 922,
+    "end_line": 986,
+    "char_count": 1635
+  },
+  {
+    "product_name": "Digital Outside Micrometers",
+    "start_line": 986,
+    "end_line": 1086,
+    "char_count": 2422
+  },
+  {
+    "product_name": "Digital Calipers",
+    "start_line": 1086,
+    "end_line": 1174,
+    "char_count": 1778
+  },
+  {
+    "product_name": "Vernier Calipers",
+    "start_line": 1174,
+    "end_line": 1229,
+    "char_count": 1528
+  },
+  {
+    "product_name": "Dial Calipers",
+    "start_line": 1229,
+    "end_line": 1276,
+    "char_count": 1281
+  },
+  {
+    "product_name": "Digital Indicators",
+    "start_line": 1276,
+    "end_line": 1315,
+    "char_count": 850
+  },
+  {
+    "product_name": "Dial Indicators",
+    "start_line": 1315,
+    "end_line": 1361,
+    "char_count": 1149
+  },
+  {
+    "product_name": "Dial Test Indicators",
+    "start_line": 1361,
+    "end_line": 1412,
+    "char_count": 1251
+  },
+  {
+    "product_name": "Digital Height Gauge",
+    "start_line": 1412,
+    "end_line": 1466,
+    "char_count": 994
+  },
+  {
+    "product_name": "Digital Depth Gauges",
+    "start_line": 1466,
+    "end_line": 1511,
+    "char_count": 1383
+  },
+  {
+    "product_name": "Vernier Depth Gauges",
+    "start_line": 1511,
+    "end_line": 1554,
+    "char_count": 1092
+  },
+  {
+    "product_name": "Combination Square Set",
+    "start_line": 1554,
+    "end_line": 1608,
+    "char_count": 1361
+  },
+  {
+    "product_name": "Center Gauges",
+    "start_line": 1608,
+    "end_line": 1631,
+    "char_count": 592
+  },
+  {
+    "product_name": "Electronic Edge Finder",
+    "start_line": 1631,
+    "end_line": 1665,
+    "char_count": 808
+  },
+  {
+    "product_name": "Electronic & Audible Edge Finders",
+    "start_line": 1665,
+    "end_line": 1723,
+    "char_count": 1268
+  },
+  {
+    "product_name": "Wiggler or Center Finder",
+    "start_line": 1723,
+    "end_line": 1773,
+    "char_count": 1319
+  },
+  {
+    "product_name": "Edge & Center Finders",
+    "start_line": 1773,
+    "end_line": 1822,
+    "char_count": 1675
+  },
+  {
+    "product_name": "Edge Finder",
+    "start_line": 1822,
+    "end_line": 1884,
+    "char_count": 1454
+  },
+  {
+    "product_name": "Electronic Height Offset Gauge",
+    "start_line": 1884,
+    "end_line": 1929,
+    "char_count": 935
+  },
+  {
+    "product_name": "Magnetic Compass",
+    "start_line": 1929,
+    "end_line": 1987,
+    "char_count": 1455
+  },
+  {
+    "product_name": "Universal Surface Gauge",
+    "start_line": 1987,
+    "end_line": 2030,
+    "char_count": 1450
+  },
+  {
+    "product_name": "Dial Comparator Stands",
+    "start_line": 2030,
+    "end_line": 2071,
+    "char_count": 1336
+  },
+  {
+    "product_name": "Granite Comparator Stands",
+    "start_line": 2071,
+    "end_line": 2109,
+    "char_count": 914
+  },
+  {
+    "product_name": "Eye Loupes",
+    "start_line": 2109,
+    "end_line": 2139,
+    "char_count": 741
+  },
+  {
+    "product_name": "Engineer's Tool Sets",
+    "start_line": 2139,
+    "end_line": 2172,
+    "char_count": 1008
+  },
+  {
+    "product_name": "Scribers",
+    "start_line": 2172,
+    "end_line": 2206,
+    "char_count": 1175
+  },
+  {
+    "product_name": "Aluminium Body Scribers",
+    "start_line": 2206,
+    "end_line": 2210,
+    "char_count": 36
+  },
+  {
+    "product_name": "Double Ended Scriber",
+    "start_line": 2210,
+    "end_line": 2216,
+    "char_count": 144
+  },
+  {
+    "product_name": "Three Point Scriber",
+    "start_line": 2216,
+    "end_line": 2222,
+    "char_count": 168
+  },
+  {
+    "product_name": "Two Point Scriber",
+    "start_line": 2222,
+    "end_line": 2226,
+    "char_count": 130
+  },
+  {
+    "product_name": "Steel Body Scribers",
+    "start_line": 2226,
+    "end_line": 2230,
+    "char_count": 32
+  },
+  {
+    "product_name": "Steel Body Scriber With 3 Threaded Points",
+    "start_line": 2230,
+    "end_line": 2236,
+    "char_count": 205
+  },
+  {
+    "product_name": "Single Ended Light Duty Scriber",
+    "start_line": 2236,
+    "end_line": 2344,
+    "char_count": 1571
+  },
+  {
+    "product_name": "Tool Maker's Vee Block & Clamp Sets",
+    "start_line": 2344,
+    "end_line": 2393,
+    "char_count": 1905
+  },
+  {
+    "product_name": "Multi-Purpose Vee Block & Clamp Set",
+    "start_line": 2393,
+    "end_line": 2425,
+    "char_count": 1065
+  },
+  {
+    "product_name": "Ultimate Vee Block & Clamp Set",
+    "start_line": 2425,
+    "end_line": 2458,
+    "char_count": 1152
+  },
+  {
+    "product_name": "Adjustable Angle Block 0-60°",
+    "start_line": 2458,
+    "end_line": 2493,
+    "char_count": 1148
+  },
+  {
+    "product_name": "Vee Blocks Cast Iron",
+    "start_line": 2493,
+    "end_line": 2535,
+    "char_count": 1418
+  },
+  {
+    "product_name": "Magnetic Vee Blocks",
+    "start_line": 2535,
+    "end_line": 2583,
+    "char_count": 1772
+  },
+  {
+    "product_name": "Adjustable Vee Block Set",
+    "start_line": 2583,
+    "end_line": 2636,
+    "char_count": 1501
+  },
+  {
+    "product_name": "Ball Bearing Vee Block & Clamp Sets",
+    "start_line": 2636,
+    "end_line": 2681,
+    "char_count": 1491
+  },
+  {
+    "product_name": "4 Way Vee Blocks – Cast Iron",
+    "start_line": 2681,
+    "end_line": 2713,
+    "char_count": 1201
+  },
+  {
+    "product_name": "Pot Magnets",
+    "start_line": 2713,
+    "end_line": 2747,
+    "char_count": 1031
+  },
+  {
+    "product_name": "Magnetic Bases Articulating Arm",
+    "start_line": 2747,
+    "end_line": 2794,
+    "char_count": 1067
+  },
+  {
+    "product_name": "Magnetic Bases High Power",
+    "start_line": 2794,
+    "end_line": 2839,
+    "char_count": 1279
+  },
+  {
+    "product_name": "Stepped Angle Plates",
+    "start_line": 2839,
+    "end_line": 2884,
+    "char_count": 1433
+  },
+  {
+    "product_name": "Sine Bars",
+    "start_line": 2884,
+    "end_line": 2907,
+    "char_count": 750
+  },
+  {
+    "product_name": "Machinist's Jack",
+    "start_line": 2907,
+    "end_line": 2934,
+    "char_count": 503
+  },
+  {
+    "product_name": "Hand Scrapers",
+    "start_line": 2934,
+    "end_line": 3009,
+    "char_count": 1632
+  },
+  {
+    "product_name": "Tool Bits & Cut Off Blades",
+    "start_line": 3009,
+    "end_line": 3177,
+    "char_count": 7360
+  },
+  {
+    "product_name": "Tweezers",
+    "start_line": 3177,
+    "end_line": 3211,
+    "char_count": 1172
+  },
+  {
+    "product_name": "Utility Tweezers",
+    "start_line": 3211,
+    "end_line": 3215,
+    "char_count": 67
+  },
+  {
+    "product_name": "Swiss Pattern Tweezers",
+    "start_line": 3215,
+    "end_line": 3219,
+    "char_count": 131
+  },
+  {
+    "product_name": "Boley Pattern Tweezers",
+    "start_line": 3219,
+    "end_line": 3248,
+    "char_count": 1163
+  },
+  {
+    "product_name": "Pin Vices",
+    "start_line": 3248,
+    "end_line": 3311,
+    "char_count": 2563
+  },
+  {
+    "product_name": "Drill Chuck Arbors",
+    "start_line": 3311,
+    "end_line": 3326,
+    "char_count": 742
+  },
+  {
+    "product_name": "JACOBS TAPER ARBORS",
+    "start_line": 3326,
+    "end_line": 3362,
+    "char_count": 1117
+  },
+  {
+    "product_name": "TAPER SHANK ARBORS - DIN 238",
+    "start_line": 3362,
+    "end_line": 3395,
+    "char_count": 923
+  },
+  {
+    "product_name": "Reduction Sleeves (Drill Sleeves)",
+    "start_line": 3395,
+    "end_line": 3467,
+    "char_count": 2124
+  },
+  {
+    "product_name": "Tap Wrenches T Handle",
+    "start_line": 3467,
+    "end_line": 3512,
+    "char_count": 1899
+  },
+  {
+    "product_name": "Adjustable Hand Reamers",
+    "start_line": 3512,
+    "end_line": 3575,
+    "char_count": 2580
+  },
+  {
+    "product_name": "Adjustable Tap & Reamer Wrenches",
+    "start_line": 3575,
+    "end_line": 3617,
+    "char_count": 1273
+  },
+  {
+    "product_name": "Die Stock Holders Round Dies",
+    "start_line": 3617,
+    "end_line": 3647,
+    "char_count": 902
+  },
+  {
+    "product_name": "Knurling Tool Holder Quick Action",
+    "start_line": 3647,
+    "end_line": 3680,
+    "char_count": 1165
+  },
+  {
+    "product_name": "Knurling Tool Holders",
+    "start_line": 3680,
+    "end_line": 3744,
+    "char_count": 2636
+  },
+  {
+    "product_name": "Knurls",
+    "start_line": 3744,
+    "end_line": 3813,
+    "char_count": 2790
+  },
+  {
+    "product_name": "Wheel Dresser & Cutters",
+    "start_line": 3813,
+    "end_line": 3864,
+    "char_count": 1364
+  },
+  {
+    "product_name": "Toolmakers Steel Vice Super Precision",
+    "start_line": 3864,
+    "end_line": 3918,
+    "char_count": 2139
+  },
+  {
+    "product_name": "Sine Vices",
+    "start_line": 3918,
+    "end_line": 4013,
+    "char_count": 2675
+  },
+  {
+    "product_name": "Milling Machine Vices Super Precision",
+    "start_line": 4013,
+    "end_line": 4062,
+    "char_count": 1749
+  },
+  {
+    "product_name": "Angular Machine Vices Super Precision",
+    "start_line": 4062,
+    "end_line": 4121,
+    "char_count": 1948
+  },
+  {
+    "product_name": "Universal Vices Super Precision",
+    "start_line": 4121,
+    "end_line": 4179,
+    "char_count": 1820
+  },
+  {
+    "product_name": "Three Way Tilting Vices",
+    "start_line": 4179,
+    "end_line": 4240,
+    "char_count": 1985
+  },
+  {
+    "product_name": "Self Centering Vices",
+    "start_line": 4240,
+    "end_line": 4291,
+    "char_count": 1657
+  },
+  {
+    "product_name": "Drill Press Vices",
+    "start_line": 4291,
+    "end_line": 4320,
+    "char_count": 994
+  },
+  {
+    "product_name": "Rapid Action Drill Press Vice",
+    "start_line": 4320,
+    "end_line": 4785,
+    "char_count": 20732
+  }
+]

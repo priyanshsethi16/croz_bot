@@ -1,0 +1,25 @@
+# Headings extracted from: input/Fluid_Handling_m.pdf
+# Extraction method: MinerU Cloud API (VLM)
+# Total headings: 18
+# Date: 2026-06-30T10:29:30.842061
+
+================================================================================
+
+Line    1:   ## QUICK LOCK
+Line   10:   ## HC21
+Line   16:   ## HC21L
+Line   22:   ## HC21-90
+Line   32:   ## Heavy duty
+Line   45:   ## Super grip quick connect
+Line   49:   ## HC23
+Line   53:   ## Standard
+Line   67:   ## Professional
+Line   81:   ## Slim line
+Line   98:   ## Grease gun swivel
+Line  102:   ## SWV
+Line  114:   ## Also available in 54 pcs Set
+Line  119:   ## Machined jaw
+Line  121:   ## 6,000 PSI (413 BAR)
+Line  125:   ## HC24
+Line  137:   ## 360° SWIVEL COUPLER
+Line  141:   ## HCSW11

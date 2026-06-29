@@ -1,0 +1,252 @@
+GROZ
+
+INSTRUCTION MANUAL
+
+S2960, Rev A
+
+# Continuous Duty Electric Fuel Pump
+
+## CDP/220/EU/ST
+
+![img-0.jpeg](img-0.jpeg)
+
+![img-1.jpeg](img-1.jpeg)
+
+Congratulations on purchase of this World Class Continuous Duty Electric Fuel Pump !
+
+- Diesel Transfer pump, ideal for stationary tanks, fixed fuel transferring systems, dispensers & other Industrial applications
+- Light weight yet strong Non-corroding Aluminum Die Cast construction
+- Self priming vane pump design
+- Continuous Duty cycle with thermal overload protection
+- Base Plate Style
+- Pump inlet & outlet threaded 1" (F)
+- Supplied with 2m long Power Cable, inlet adaptor and strainer
+- Integrated ON/OFF Rocker Switch
+- IP 54 Protection
+- Internal Bypass valve included
+
+![img-2.jpeg](img-2.jpeg)
+
+### SPECIFICATIONS
+
+|   | **220V AC**  |
+| --- | --- |
+|  Flow rate (at pump outlet) | Upto 15 GPM (56 LPM)  |
+|  Motor | 1/2 HP 220V AC, 50/60 Hz  |
+|  RPM | 2800  |
+|  Internal Bypass Valve | YES  |
+|  Inlet / Outlet | 1" BSP (F)  |
+|  Power Cable Length | 2 Meter  |
+|  Duty Cycle | Continuous Duty  |
+
+1
+
+## PUMP WORKING
+
+This is a Vane Type Pump driven by an electric motor. A slotted rotor (carrying five vanes) is eccentrically supported in a cycloidal housing forming a crescent – shaped cavity.
+
+When the motor starts, the rotor, being attached to the armature shaft with a key, starts rotating. As the shaft reaches 2800 RPM, centrifugal force and hydraulic pressure push the vanes to the walls of the housing. It generates sufficient suction to draw fluid into the pumping chamber through inlet port. Fluid enters the pockets created by vanes, rotor and cover plate.
+
+As the rotor continues to rotate, the vanes sweep the fluid to the opposite side of the crescent where it is squeezed through outlet port into the delivery hose.
+
+![img-3.jpeg](img-3.jpeg)
+
+## PUMP INSTALLATION
+
+(Refer to EXPLODED VIEW - Page 3)
+
+### 1. Preliminary Inspection.
+
+- Check the pump has not suffered any damage during transport or storage.
+- Clean the inlet and outlet opening, removing any dust or residual packing material.
+- Make sure that the motor shaft turns freely.
+- Check that the electrical specifications correspond to those required to operate this pump.
+
+### 2. Positioning the pump
+
+- The pump can be installed in any position (pump axis vertical or horizontal)
+- Attach the pump using screws of adequate diameter
+
+### 3. Connecting the Tubing
+
+- Before connection make sure that the tubing and the suction tank are free of dirt and the thread residue that could damage the pump and its accessories.
+- Connect the inlet adaptor at the IN port of the pump.
+- Thread tighten the strainer to the inlet adaptor and attach the other end of the strainer to the suction hose (not provide with the kit)
+- Before connecting the delivery tube (not provide with the kit) partially fill the pump body with diesel fuel to facilitate priming
+
+## PUMP OPERATION
+
+1. After making the electrical connections, switch ON the pump using Rocker Switch located on the side of pump base.
+2. Ensure that the open end of the suction hose / tube is properly dipped in fuel.
+3. The pump will now prime. When discharge is not needed, switch OFF the motor & disconnect from the power supply.
+
+## CAUTION
+
+- The suction height (from the pump to the lowest fuel level) should not be greater than 1 metre.
+- The tank must be vented or the pump may not prime, or it may lose its prime due to a vacuum in the tank.
+- A filter should be installed at the suction line to ensure a clean supply of fuel to the pump.
+
+2
+
+# EXPLODED VIEW FOR ELECTRIC FUEL PUMP - 220V AC
+
+## PUMP ASSEMBLY
+
+FIG. 2
+
+![img-4.jpeg](img-4.jpeg)
+
+## PARTS LIST FOR Continuous Duty Electric Fuel Pump
+
+### PUMP ASSEMBLY
+
+|  REFERENCE NUMBER | DESCRIPTION | QUANTITY  |
+| --- | --- | --- |
+|  1 | Pump Body | 1  |
+|  2 | Relief Poppet Valve | 1  |
+|  3 | Spring Retainer | 1  |
+|  4 | Relief Valve Spring | 1  |
+|  5 | Plug | 2  |
+|  6 | O-Ring | 1  |
+|  7 | O-Ring | 1  |
+|  8 | Dowel Pin | 1  |
+|  9 | Motor | 1  |
+|  10 | Rotor | 1  |
+|  11 | Vane | 5  |
+|  12 | Allen Bolt | 3  |
+|  13 | Spring Washer | 3  |
+|  14 | Inlet Adaptor | 1  |
+|  15 | Strainer | 1  |
+
+3
+
+# TROUBLESHOOTING
+
+|  PROBLEM | POSSIBLE CAUSE | SOLUTION  |
+| --- | --- | --- |
+|  The motor is not running | Lack of electric power | Check the electrical connections and the safety systems  |
+|   |  Rotor jammed | Check for possible damage or obstruction of the rotating components  |
+|  The motor turns slowly when starting | Low voltage in the electric power line | Bring the voltage back within the anticipated limits  |
+|  Low or no flow rate | Low level in the suction tank | Refill the tank  |
+|   |  Foot valve blocked | Clean and/or replace the valve at suction tube end  |
+|   |  Filter clogged | Clean the filter  |
+|   |  Excessive suction pressure | Lower the pump with respect to the level of the tank or increase the cross-section of the tubing  |
+|   |  High loss of head in the circuit (working with the by-pass open) | Use shorter tubing or of greater diameter  |
+|   |  By-pass valve blocked | Dismantle the valve, clean and/or replace it  |
+|   |  Air entering the pump or the suction tubing | Check the seals of the connections  |
+|   |  A narrowing in the suction tubing | Use tubing suitable for working under suction pressure  |
+|   |  Low rotation speed | Check the voltage at the pump. Adjust the voltage and/or use cables of greater cross-section  |
+|   |  The suction tubing is resting on the bottom of the tank | Raise the tubing  |
+|  Increased pump noise | Irregular functioning of the by-pass | Dispense until the air is purged from the circuit  |
+|   |  Air present in the diesel fuel | Verify the suction connections  |
+|  Leakage from the pump body | Seal damaged | Check and replace the mechanical seal  |
+
+# WARNING
+
+- Always wear protection gear like safety goggles, gloves, apron, and ear plugs while operating the pump.
+- Never smoke near the pump. Do not use the pump near a source of spark / open flames.
+- DO NOT under any circumstances put your fingers inside the pump with the electric power connected. Serious injury can occur.
+- Always switch off the motor after use, so that media cannot leak in case any of the pump component fails.
+- Before switching on the motor, check hoses for sign of wear, leak or loose fittings
+- When changing the working fluid, at least 1 litre of new fluid should be discarded to avoid mixing of fluids.
+- Use only genuine factory parts for repair.
+
+# WETTED COMPONENTS
+
+Aluminum, NBR, Steel, Nylon & Brass
+
+# RECOMMENDED USE
+
+Diesel & Kerosene
+
+# DO NOT USE WITH
+
+Fluids with a flash point below 100°F (38°C), such as Gasoline & Alcohol, Sparking could result in explosion causing fatal injury.
+
+4
+
+# MAINTENANCE & REPAIR
+
+# General Precautions
+
+- Switch off the pump motor and disconnect from the power supply before carrying out any maintenance.
+- Before dismantling the pump, disconnect it from all the accessories.
+- Be careful when fitting O-rings and seals. Replace them with new ones when they are removed from the pump. Always lubricate them with oil or grease before fitting. They must never be threaded over sharp edges when being fitted.
+
+# RECOMMENDED TOOLS
+
+1. Combination Wrench (Size 8 mm, Size 22 mm)
+2. Allen Key (5 mm)
+3. Slotted Screwdriver
+
+# VANE REPLACEMENT
+
+1. Remove 3 Allen Bolts using Allen Key (size 5 mm), Remove Suction body, Rubber Washer, Vanes, Rotor & Key from Housing. Replace vanes if damaged or worn.
+
+![img-5.jpeg](img-5.jpeg)
+
+Rotor
+
+![img-6.jpeg](img-6.jpeg)
+
+2. Use a wrench and remove the Hex Plug. Remove the Valve Spring & Bypass Valve. Clean or replace if required.
+
+3. Replace Vane kit by repeating steps 1-2 in reverse order ensuring :
+
+- Correct orientation of vanes as shown
+- Smooth movement of Bypass valve against the force of Valve Spring. Do not over tighten Hex Plug.
+- Ensure all mating surfaces are clean before reassembly. Apply minor grease on all O-rings & Seals before reassembly.
+- Always loosen / tighten the bolts in an even & diagonal pattern. First tighten all bolts by hand & finally tighten each bolt by 1 FULL turn using a tool of correct size.
+
+![img-7.jpeg](img-7.jpeg)
+
+![img-8.jpeg](img-8.jpeg)
+
+# MOTOR KIT REPLACEMENT
+
+1. Loosen the two Screws with a slotted head screw driver.
+
+![img-9.jpeg](img-9.jpeg)
+
+![img-10.jpeg](img-10.jpeg)
+
+![img-11.jpeg](img-11.jpeg)
+
+2. Remove Switch Cover and disconnect the couplers attached to it.
+3. Grab the Locking clips of the Rocker switch & press from inside to remove the switch.
+4. Remove three Allen Key (Size 5). Remove the suction body, Vanes, Rotor, & key from the housing.
+
+![img-12.jpeg](img-12.jpeg)
+
+![img-13.jpeg](img-13.jpeg)
+
+# SERVICE PARTS
+
+1. Vanes
+2. Valve Spring
+3. Rocker Switch
+
+5
+
+### **Groz Warranty Policy**
+
+Groz makes all efforts to ensure that its products meet the highest standards of quality and durability and warrants to the original purchaser its range of products for a period of 12 months from Groz Invoice date, against defects in materials and workmanship. If the Groz product is part of a set, only the portion that is defective is subject to this warranty.
+
+This warranty does not apply to damage due directly or indirectly, to misuse, abuse, wear and tear, negligence or accident, repairs or alterations outside Groz plants, or to lack of maintenance. Groz shall in no event be liable for death, injuries to persons or property or for incidental, contingent, special or consequential damages arising from the use of its products. It is upto the user to determine suitability and safety of the product for their intended use, and the user assumes all risks and liability herewith.
+
+In no event, shall Groz's liability exceed the invoiced cost of the product In case of identification of defect covered under this warranty, the same must be notified in writing to Groz /Groz designated authorized service location. Proof of purchase date must accompany the complaint. Groz reserves the right to call back the faulty unit, all charges including transportation prepaid. On verification of the defect, the unit will be repaired or replaced with a new or reconditioned product or part of equal utility or a full refund given at Groz's discretion. The repaired / replaced units will be returned to the user freight prepaid, using most economical freight carrier. However if determined that the defect resulted from causes not within the scope of the warranty, then the cost of returning the product would be to buyer's account.
+
+Groz Engineering Tools (P) Ltd.
+Groz Net Industries
+
+Village Kherki Daula, National Highway-8,
+Gurugram-122001, Haryana, INDIA
+
+Tel +91.124.282.7734/40, 2827777
+Fax +91.124.2827980, 2827986
+E-Mail info@groz-tools.com
+Url www.groz-tools.com
+
+The GROZ name, GROZ logo and the mark are trademarks of Groz Engineering Tools (P) Ltd., India
+
+6

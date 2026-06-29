@@ -7,6 +7,7 @@ class ExtractionResult(BaseModel):
     engine: str
     text: str = ""
     markdown: str = ""
+    html: str = ""
     json_data: Optional[Any] = None
     success: bool = True
     error: Optional[str] = None

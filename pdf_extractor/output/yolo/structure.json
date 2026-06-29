@@ -1,0 +1,117 @@
+{
+  "detections": [
+    {
+      "page": 0,
+      "type": "Section_Title",
+      "confidence": 0.7054038047790527,
+      "bbox": [
+        42.93378694108036,
+        38.291559764647594,
+        302.03132137479633,
+        57.475074509034485
+      ],
+      "text": "GREASE GUN COUPLERS & ACCESSORIES"
+    },
+    {
+      "page": 0,
+      "type": "Image",
+      "confidence": 0.521979808807373,
+      "bbox": [
+        29.275620455789827,
+        199.98734976503331,
+        585.4163345102099,
+        503.3407640647878
+      ],
+      "text": "HC21\nHC21L\nHC21-90\nRegular\n90\u00b0 Angled\nExtra long\n1-3/16\" (30 mm)\n17 mm\nStandard\nStandard\nProfessional\nProfessional\nSlim line\nSlim line\nMachined jaw\nMachined jaw\n3,000 PSI (207 BAR)\n6,000 PSI (413 BAR)\n\u2022\t Right-angled design enables greasing in \ntight, hard to reach & confined spaces.\n\u2022\t Perfect for pivot joints, hydraulic linkages, \nand compact machinery\nFor hand operated grease guns only\nFor hand operated grease guns only\nHC10\nHC14\nHC11\nHC18\nWithout Ball Check\nWith Ball Check\nWith Ball Check\nWithout Ball Check\nAlso available \nin 54 pcs Set\nAlso available \nin 54 pcs Set\n0.59\"\n(15 mm)\n0.59\"\n(15 mm)\n17 mm\n2-5/32\" (80 mm)\nNEW!"
+    },
+    {
+      "page": 0,
+      "type": "Image",
+      "confidence": 0.7694533467292786,
+      "bbox": [
+        44.94898858732187,
+        211.6229509682126,
+        190.6641662027514,
+        296.99399236393424
+      ],
+      "text": "gular\n1-3/16\" (30 mm)\n17 mm"
+    },
+    {
+      "page": 0,
+      "type": "Paragraph_Title",
+      "confidence": 0.6264851093292236,
+      "bbox": [
+        33.27279010631673,
+        451.4046744042487,
+        66.46306632418322,
+        460.4666660990536
+      ],
+      "text": "90\u00b0 Angled"
+    },
+    {
+      "page": 0,
+      "type": "Paragraph",
+      "confidence": 0.7411067485809326,
+      "bbox": [
+        37.74602549975751,
+        463.67136641130054,
+        195.8205922828512,
+        502.64815201459953
+      ],
+      "text": "Right-angled design enables greasing in \ntight, hard to reach & confined spaces.\n\t Perfect for pivot joints, hydraulic linkages, \nand compact machinery"
+    },
+    {
+      "page": 0,
+      "type": "Image",
+      "confidence": 0.8092609643936157,
+      "bbox": [
+        55.484248956300526,
+        513.8460149023269,
+        176.91564924287934,
+        625.1780261849918
+      ],
+      "text": "1-3/16\" \n(30 mm)\n17 mm"
+    },
+    {
+      "page": 0,
+      "type": "Image",
+      "confidence": 0.7506164908409119,
+      "bbox": [
+        416.06274742085645,
+        753.0714983841746,
+        551.7832957522998,
+        805.6979443158704
+      ],
+      "text": "360\u00ba"
+    }
+  ],
+  "headings": [
+    {
+      "page": 0,
+      "level": 1,
+      "text": "GREASE GUN COUPLERS & ACCESSORIES",
+      "type": "Section_Title",
+      "confidence": 0.7054038047790527,
+      "bbox": [
+        42.93378694108036,
+        38.291559764647594,
+        302.03132137479633,
+        57.475074509034485
+      ]
+    },
+    {
+      "page": 0,
+      "level": 2,
+      "text": "90\u00b0 Angled",
+      "type": "Paragraph_Title",
+      "confidence": 0.6264851093292236,
+      "bbox": [
+        33.27279010631673,
+        451.4046744042487,
+        66.46306632418322,
+        460.4666660990536
+      ]
+    }
+  ],
+  "total_detections": 7
+}

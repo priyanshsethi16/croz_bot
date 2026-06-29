@@ -1,0 +1,608 @@
+[
+  {
+    "product_name": "LEVER GREASE GUNS",
+    "start_line": 103,
+    "end_line": 109,
+    "char_count": 58
+  },
+  {
+    "product_name": "Q1HD",
+    "start_line": 109,
+    "end_line": 115,
+    "char_count": 60
+  },
+  {
+    "product_name": "Q4HD",
+    "start_line": 115,
+    "end_line": 126,
+    "char_count": 182
+  },
+  {
+    "product_name": "Q10HD",
+    "start_line": 126,
+    "end_line": 133,
+    "char_count": 58
+  },
+  {
+    "product_name": "Q18HD",
+    "start_line": 133,
+    "end_line": 144,
+    "char_count": 100
+  },
+  {
+    "product_name": "Q1HD-AL",
+    "start_line": 144,
+    "end_line": 161,
+    "char_count": 269
+  },
+  {
+    "product_name": "Q1",
+    "start_line": 161,
+    "end_line": 167,
+    "char_count": 61
+  },
+  {
+    "product_name": "Q4",
+    "start_line": 167,
+    "end_line": 178,
+    "char_count": 162
+  },
+  {
+    "product_name": "Q10",
+    "start_line": 178,
+    "end_line": 185,
+    "char_count": 58
+  },
+  {
+    "product_name": "Q11",
+    "start_line": 185,
+    "end_line": 197,
+    "char_count": 116
+  },
+  {
+    "product_name": "Q8",
+    "start_line": 197,
+    "end_line": 209,
+    "char_count": 185
+  },
+  {
+    "product_name": "Q1STD",
+    "start_line": 209,
+    "end_line": 215,
+    "char_count": 51
+  },
+  {
+    "product_name": "Q1DC",
+    "start_line": 215,
+    "end_line": 225,
+    "char_count": 128
+  },
+  {
+    "product_name": "Q25",
+    "start_line": 225,
+    "end_line": 237,
+    "char_count": 111
+  },
+  {
+    "product_name": "V1",
+    "start_line": 237,
+    "end_line": 247,
+    "char_count": 170
+  },
+  {
+    "product_name": "DUAL PISTON - HIGH VOLUME",
+    "start_line": 247,
+    "end_line": 263,
+    "char_count": 287
+  },
+  {
+    "product_name": "DUAL GREASE GUN",
+    "start_line": 263,
+    "end_line": 286,
+    "char_count": 297
+  },
+  {
+    "product_name": "PISTOL MODE",
+    "start_line": 286,
+    "end_line": 293,
+    "char_count": 76
+  },
+  {
+    "product_name": "LEVER MODE",
+    "start_line": 293,
+    "end_line": 310,
+    "char_count": 209
+  },
+  {
+    "product_name": "JAPANESE STYLE",
+    "start_line": 310,
+    "end_line": 323,
+    "char_count": 203
+  },
+  {
+    "product_name": "CLEAR TUBE",
+    "start_line": 323,
+    "end_line": 345,
+    "char_count": 367
+  },
+  {
+    "product_name": "LEVER OIL GUN",
+    "start_line": 345,
+    "end_line": 357,
+    "char_count": 247
+  },
+  {
+    "product_name": "HIGH PRESSURE",
+    "start_line": 357,
+    "end_line": 358,
+    "char_count": 15
+  },
+  {
+    "product_name": "HIGH VOLUME",
+    "start_line": 358,
+    "end_line": 393,
+    "char_count": 551
+  },
+  {
+    "product_name": "PISTOL GREASE GUNS",
+    "start_line": 393,
+    "end_line": 395,
+    "char_count": 18
+  },
+  {
+    "product_name": "PROFESSIONAL",
+    "start_line": 395,
+    "end_line": 409,
+    "char_count": 282
+  },
+  {
+    "product_name": "VARIO",
+    "start_line": 409,
+    "end_line": 432,
+    "char_count": 344
+  },
+  {
+    "product_name": "ALL WEATHER",
+    "start_line": 432,
+    "end_line": 445,
+    "char_count": 240
+  },
+  {
+    "product_name": "ALL WEATHER - ADJUSTABLE",
+    "start_line": 445,
+    "end_line": 469,
+    "char_count": 401
+  },
+  {
+    "product_name": "STANDARD",
+    "start_line": 469,
+    "end_line": 502,
+    "char_count": 399
+  },
+  {
+    "product_name": "DUAL DISCHARGE",
+    "start_line": 502,
+    "end_line": 506,
+    "char_count": 37
+  },
+  {
+    "product_name": "G31",
+    "start_line": 506,
+    "end_line": 515,
+    "char_count": 230
+  },
+  {
+    "product_name": "SUPA-LITE",
+    "start_line": 515,
+    "end_line": 519,
+    "char_count": 32
+  },
+  {
+    "product_name": "G31-AL",
+    "start_line": 519,
+    "end_line": 540,
+    "char_count": 581
+  },
+  {
+    "product_name": "G5-CL",
+    "start_line": 540,
+    "end_line": 548,
+    "char_count": 63
+  },
+  {
+    "product_name": "G4PST-CL",
+    "start_line": 548,
+    "end_line": 556,
+    "char_count": 86
+  },
+  {
+    "product_name": "G500",
+    "start_line": 556,
+    "end_line": 586,
+    "char_count": 534
+  },
+  {
+    "product_name": "V SERIES",
+    "start_line": 586,
+    "end_line": 590,
+    "char_count": 33
+  },
+  {
+    "product_name": "V5",
+    "start_line": 590,
+    "end_line": 598,
+    "char_count": 167
+  },
+  {
+    "product_name": "DOUBLE LEVER",
+    "start_line": 598,
+    "end_line": 602,
+    "char_count": 35
+  },
+  {
+    "product_name": "G83F",
+    "start_line": 602,
+    "end_line": 608,
+    "char_count": 93
+  },
+  {
+    "product_name": "G83F-MTO",
+    "start_line": 608,
+    "end_line": 614,
+    "char_count": 125
+  },
+  {
+    "product_name": "THREADED CARTRIDGE ADAPTOR",
+    "start_line": 614,
+    "end_line": 616,
+    "char_count": 28
+  },
+  {
+    "product_name": "ADP-CTO",
+    "start_line": 616,
+    "end_line": 625,
+    "char_count": 221
+  },
+  {
+    "product_name": "SPIN-ON GREASE GUNS",
+    "start_line": 625,
+    "end_line": 638,
+    "char_count": 336
+  },
+  {
+    "product_name": "LEVER MODEL",
+    "start_line": 638,
+    "end_line": 650,
+    "char_count": 146
+  },
+  {
+    "product_name": "PISTOL MODEL",
+    "start_line": 650,
+    "end_line": 658,
+    "char_count": 81
+  },
+  {
+    "product_name": "MINI GREASE GUNS",
+    "start_line": 658,
+    "end_line": 660,
+    "char_count": 19
+  },
+  {
+    "product_name": "MINI PUSH TYPE",
+    "start_line": 660,
+    "end_line": 686,
+    "char_count": 554
+  },
+  {
+    "product_name": "PUSH TYPE",
+    "start_line": 686,
+    "end_line": 700,
+    "char_count": 224
+  },
+  {
+    "product_name": "MINI PISTOL - POPULAR",
+    "start_line": 700,
+    "end_line": 712,
+    "char_count": 231
+  },
+  {
+    "product_name": "MINI PISTOL - DELUXE",
+    "start_line": 712,
+    "end_line": 728,
+    "char_count": 176
+  },
+  {
+    "product_name": "MINI LEVER",
+    "start_line": 728,
+    "end_line": 756,
+    "char_count": 540
+  },
+  {
+    "product_name": "QUICK GREASE FILLER GUN",
+    "start_line": 756,
+    "end_line": 784,
+    "char_count": 348
+  },
+  {
+    "product_name": "GREASE TUBE DISPENSER",
+    "start_line": 784,
+    "end_line": 811,
+    "char_count": 614
+  },
+  {
+    "product_name": "AIR OPERATED GREASE GUNS",
+    "start_line": 811,
+    "end_line": 813,
+    "char_count": 27
+  },
+  {
+    "product_name": "DUAL MODE",
+    "start_line": 813,
+    "end_line": 835,
+    "char_count": 534
+  },
+  {
+    "product_name": "STANDARD",
+    "start_line": 835,
+    "end_line": 839,
+    "char_count": 33
+  },
+  {
+    "product_name": "INTERMITTENT MODEL",
+    "start_line": 839,
+    "end_line": 857,
+    "char_count": 288
+  },
+  {
+    "product_name": "HIGH POWER",
+    "start_line": 857,
+    "end_line": 889,
+    "char_count": 533
+  },
+  {
+    "product_name": "BATTERY OPERATED GREASE GUNS",
+    "start_line": 889,
+    "end_line": 891,
+    "char_count": 30
+  },
+  {
+    "product_name": "BATTERY POWERED",
+    "start_line": 891,
+    "end_line": 895,
+    "char_count": 39
+  },
+  {
+    "product_name": "BGG",
+    "start_line": 895,
+    "end_line": 918,
+    "char_count": 258
+  },
+  {
+    "product_name": "PRE SET GREASE DISCHARGE",
+    "start_line": 918,
+    "end_line": 978,
+    "char_count": 1034
+  },
+  {
+    "product_name": "BATTERY ADAPTORS",
+    "start_line": 978,
+    "end_line": 988,
+    "char_count": 129
+  },
+  {
+    "product_name": "20V BATTERY",
+    "start_line": 988,
+    "end_line": 993,
+    "char_count": 39
+  },
+  {
+    "product_name": "18V BATTERY",
+    "start_line": 993,
+    "end_line": 1005,
+    "char_count": 114
+  },
+  {
+    "product_name": "USB RECHARGEABLE",
+    "start_line": 1005,
+    "end_line": 1009,
+    "char_count": 39
+  },
+  {
+    "product_name": "BGG",
+    "start_line": 1009,
+    "end_line": 1050,
+    "char_count": 450
+  },
+  {
+    "product_name": "GREASE GUN COUPLERS & ACCESSORIES",
+    "start_line": 1050,
+    "end_line": 1052,
+    "char_count": 33
+  },
+  {
+    "product_name": "QUICK LOCK",
+    "start_line": 1052,
+    "end_line": 1085,
+    "char_count": 438
+  },
+  {
+    "product_name": "HEAVY DUTY",
+    "start_line": 1085,
+    "end_line": 1097,
+    "char_count": 123
+  },
+  {
+    "product_name": "SUPER GRIP QUICK CONNECT",
+    "start_line": 1097,
+    "end_line": 1107,
+    "char_count": 179
+  },
+  {
+    "product_name": "STANDARD",
+    "start_line": 1107,
+    "end_line": 1129,
+    "char_count": 234
+  },
+  {
+    "product_name": "PROFESSIONAL",
+    "start_line": 1129,
+    "end_line": 1147,
+    "char_count": 179
+  },
+  {
+    "product_name": "SLIM LINE",
+    "start_line": 1147,
+    "end_line": 1159,
+    "char_count": 123
+  },
+  {
+    "product_name": "MACHINED JAW",
+    "start_line": 1159,
+    "end_line": 1173,
+    "char_count": 150
+  },
+  {
+    "product_name": "GREASE GUN SWIVEL",
+    "start_line": 1173,
+    "end_line": 1181,
+    "char_count": 88
+  },
+  {
+    "product_name": "360° SWIVEL COUPLER",
+    "start_line": 1181,
+    "end_line": 1193,
+    "char_count": 144
+  },
+  {
+    "product_name": "SPECIALITY COUPLERS",
+    "start_line": 1193,
+    "end_line": 1224,
+    "char_count": 316
+  },
+  {
+    "product_name": "BUTTON HEAD COUPLERS",
+    "start_line": 1224,
+    "end_line": 1230,
+    "char_count": 50
+  },
+  {
+    "product_name": "SWIVELLING",
+    "start_line": 1230,
+    "end_line": 1270,
+    "char_count": 465
+  },
+  {
+    "product_name": "HEAVY DUTY",
+    "start_line": 1270,
+    "end_line": 1271,
+    "char_count": 12
+  },
+  {
+    "product_name": "GREASE GUN HOLDER",
+    "start_line": 1271,
+    "end_line": 1281,
+    "char_count": 108
+  },
+  {
+    "product_name": "GREASE GUN",
+    "start_line": 1281,
+    "end_line": 1291,
+    "char_count": 97
+  },
+  {
+    "product_name": "GREASE GUN HOSES",
+    "start_line": 1291,
+    "end_line": 1316,
+    "char_count": 366
+  },
+  {
+    "product_name": "HEAVY DUTY",
+    "start_line": 1316,
+    "end_line": 1339,
+    "char_count": 440
+  },
+  {
+    "product_name": "MAGNETIC",
+    "start_line": 1339,
+    "end_line": 1340,
+    "char_count": 10
+  },
+  {
+    "product_name": "GREASE GUN HOLDER",
+    "start_line": 1340,
+    "end_line": 1362,
+    "char_count": 436
+  },
+  {
+    "product_name": "MULTI-PURPOSE EP GREASE",
+    "start_line": 1362,
+    "end_line": 1375,
+    "char_count": 238
+  },
+  {
+    "product_name": "MARINE EP GREASE",
+    "start_line": 1375,
+    "end_line": 1388,
+    "char_count": 268
+  },
+  {
+    "product_name": "HEAVY DUTY EP GREASE",
+    "start_line": 1388,
+    "end_line": 1402,
+    "char_count": 367
+  },
+  {
+    "product_name": "FLEXIBLE/RIGID GREASE GUN EXTENSIONS",
+    "start_line": 1402,
+    "end_line": 1413,
+    "char_count": 192
+  },
+  {
+    "product_name": "GREASE GUN EXTENSIONS",
+    "start_line": 1413,
+    "end_line": 1429,
+    "char_count": 127
+  },
+  {
+    "product_name": "GREASE INJECTOR NEEDLES",
+    "start_line": 1429,
+    "end_line": 1453,
+    "char_count": 200
+  },
+  {
+    "product_name": "SEAL OFF DISPENSER",
+    "start_line": 1453,
+    "end_line": 1461,
+    "char_count": 103
+  },
+  {
+    "product_name": "EASY OUT TOOLS",
+    "start_line": 1461,
+    "end_line": 1478,
+    "char_count": 279
+  },
+  {
+    "product_name": "BULK LOADERS",
+    "start_line": 1478,
+    "end_line": 1496,
+    "char_count": 170
+  },
+  {
+    "product_name": "AIR BLEEDER VALVES",
+    "start_line": 1496,
+    "end_line": 1510,
+    "char_count": 114
+  },
+  {
+    "product_name": "NEEDLE NOSE DISPENSERS",
+    "start_line": 1510,
+    "end_line": 1552,
+    "char_count": 417
+  },
+  {
+    "product_name": "BEARING PACKERS",
+    "start_line": 1552,
+    "end_line": 7199,
+    "char_count": 106564
+  }
+]

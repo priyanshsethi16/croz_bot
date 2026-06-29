@@ -1,9 +1,13 @@
 python-dotenv
 pymupdf
 docling
-mistralai
-google-generativeai
+mistralai==1.12.4
+google-genai
 openai
+groq
+markdown
+requests
+llama-parse
 
 # Phase 2 & 3: Indexing + RAG
 langchain-core

@@ -1,0 +1,602 @@
+[
+  {
+    "product_name": "Club Hammer",
+    "start_line": 189,
+    "end_line": 200,
+    "char_count": 356
+  },
+  {
+    "product_name": "Club Hammer",
+    "start_line": 200,
+    "end_line": 200,
+    "char_count": 0
+  },
+  {
+    "product_name": "CHID",
+    "start_line": 200,
+    "end_line": 217,
+    "char_count": 258
+  },
+  {
+    "product_name": "CHID-SF",
+    "start_line": 217,
+    "end_line": 234,
+    "char_count": 340
+  },
+  {
+    "product_name": "Sledge Hammer",
+    "start_line": 234,
+    "end_line": 245,
+    "char_count": 339
+  },
+  {
+    "product_name": "SHID",
+    "start_line": 245,
+    "end_line": 274,
+    "char_count": 684
+  },
+  {
+    "product_name": "SHID-SF",
+    "start_line": 274,
+    "end_line": 290,
+    "char_count": 318
+  },
+  {
+    "product_name": "Sledge Hammer DIN 6475 Indestructible Handle",
+    "start_line": 290,
+    "end_line": 294,
+    "char_count": 67
+  },
+  {
+    "product_name": "SHID-DIN",
+    "start_line": 294,
+    "end_line": 308,
+    "char_count": 329
+  },
+  {
+    "product_name": "Sledge Hammer Copper Head Indestructible Handle",
+    "start_line": 308,
+    "end_line": 316,
+    "char_count": 309
+  },
+  {
+    "product_name": "CHID-CU",
+    "start_line": 316,
+    "end_line": 329,
+    "char_count": 193
+  },
+  {
+    "product_name": "SHID-CU",
+    "start_line": 329,
+    "end_line": 342,
+    "char_count": 194
+  },
+  {
+    "product_name": "Sledge Hammer Brass Head Indestructible Handle",
+    "start_line": 342,
+    "end_line": 344,
+    "char_count": 49
+  },
+  {
+    "product_name": "SHID-BR",
+    "start_line": 344,
+    "end_line": 370,
+    "char_count": 749
+  },
+  {
+    "product_name": "Machinist Hammer DIN 1041 Indestructible Handle",
+    "start_line": 370,
+    "end_line": 374,
+    "char_count": 70
+  },
+  {
+    "product_name": "MHID-DIN",
+    "start_line": 374,
+    "end_line": 391,
+    "char_count": 458
+  },
+  {
+    "product_name": "Drilling Hammer Indestructible Handle",
+    "start_line": 391,
+    "end_line": 395,
+    "char_count": 45
+  },
+  {
+    "product_name": "DHID",
+    "start_line": 395,
+    "end_line": 408,
+    "char_count": 398
+  },
+  {
+    "product_name": "Ball Pein Hammers - Indestructible Handle",
+    "start_line": 408,
+    "end_line": 418,
+    "char_count": 344
+  },
+  {
+    "product_name": "BPID",
+    "start_line": 418,
+    "end_line": 435,
+    "char_count": 296
+  },
+  {
+    "product_name": "BPID-SF",
+    "start_line": 435,
+    "end_line": 447,
+    "char_count": 168
+  },
+  {
+    "product_name": "Blacksmith's / Cross Pein Hammer Indestructible Handle",
+    "start_line": 447,
+    "end_line": 451,
+    "char_count": 63
+  },
+  {
+    "product_name": "CPID",
+    "start_line": 451,
+    "end_line": 469,
+    "char_count": 423
+  },
+  {
+    "product_name": "Claw Hammer Indestructible Handle",
+    "start_line": 469,
+    "end_line": 475,
+    "char_count": 82
+  },
+  {
+    "product_name": "CLID",
+    "start_line": 475,
+    "end_line": 492,
+    "char_count": 379
+  },
+  {
+    "product_name": "Tire Bead Breaker Hammers",
+    "start_line": 492,
+    "end_line": 495,
+    "char_count": 50
+  },
+  {
+    "product_name": "TBID",
+    "start_line": 495,
+    "end_line": 529,
+    "char_count": 785
+  },
+  {
+    "product_name": "Hammer Kits",
+    "start_line": 529,
+    "end_line": 532,
+    "char_count": 36
+  },
+  {
+    "product_name": "KIT-HMID",
+    "start_line": 532,
+    "end_line": 549,
+    "char_count": 691
+  },
+  {
+    "product_name": "Sledge Hammer Fibreglass Handle",
+    "start_line": 549,
+    "end_line": 553,
+    "char_count": 43
+  },
+  {
+    "product_name": "SHFG-DIN",
+    "start_line": 553,
+    "end_line": 603,
+    "char_count": 1264
+  },
+  {
+    "product_name": "Sledge Hammers Fibreglass Handle",
+    "start_line": 603,
+    "end_line": 604,
+    "char_count": 8
+  },
+  {
+    "product_name": "SHFO",
+    "start_line": 604,
+    "end_line": 630,
+    "char_count": 755
+  },
+  {
+    "product_name": "Sledge Hammers DIN 1042 Fibreglass Handle",
+    "start_line": 630,
+    "end_line": 632,
+    "char_count": 44
+  },
+  {
+    "product_name": "STFO",
+    "start_line": 632,
+    "end_line": 650,
+    "char_count": 420
+  },
+  {
+    "product_name": "Machinist Hammers DIN 1041 Fibreglass Handle",
+    "start_line": 650,
+    "end_line": 654,
+    "char_count": 66
+  },
+  {
+    "product_name": "MHFO",
+    "start_line": 654,
+    "end_line": 676,
+    "char_count": 541
+  },
+  {
+    "product_name": "Drilling Hammers Fibreglass Handle",
+    "start_line": 676,
+    "end_line": 684,
+    "char_count": 98
+  },
+  {
+    "product_name": "DHFO",
+    "start_line": 684,
+    "end_line": 700,
+    "char_count": 402
+  },
+  {
+    "product_name": "Blacksmith's/ Cross Pein Hammers Fibreglass Handle",
+    "start_line": 700,
+    "end_line": 708,
+    "char_count": 114
+  },
+  {
+    "product_name": "BHFO",
+    "start_line": 708,
+    "end_line": 724,
+    "char_count": 393
+  },
+  {
+    "product_name": "Ball Pein Hammers Fibreglass Handle",
+    "start_line": 724,
+    "end_line": 730,
+    "char_count": 84
+  },
+  {
+    "product_name": "BPFO",
+    "start_line": 730,
+    "end_line": 752,
+    "char_count": 638
+  },
+  {
+    "product_name": "Engineer's Hammers Fibreglass Handle",
+    "start_line": 752,
+    "end_line": 760,
+    "char_count": 100
+  },
+  {
+    "product_name": "EHFO",
+    "start_line": 760,
+    "end_line": 776,
+    "char_count": 384
+  },
+  {
+    "product_name": "Claw Hammer Fibreglass Handle",
+    "start_line": 776,
+    "end_line": 782,
+    "char_count": 78
+  },
+  {
+    "product_name": "CLFO",
+    "start_line": 782,
+    "end_line": 899,
+    "char_count": 2157
+  },
+  {
+    "product_name": "Sledge Hammer Hickory Wood Handle",
+    "start_line": 899,
+    "end_line": 899,
+    "char_count": 0
+  },
+  {
+    "product_name": "SHHW",
+    "start_line": 899,
+    "end_line": 931,
+    "char_count": 680
+  },
+  {
+    "product_name": "Sledge Hammer Hickory Wood",
+    "start_line": 931,
+    "end_line": 931,
+    "char_count": 0
+  },
+  {
+    "product_name": "SHHW-DIN",
+    "start_line": 931,
+    "end_line": 977,
+    "char_count": 909
+  },
+  {
+    "product_name": "Machinist Hammer Hickory Wood Handle",
+    "start_line": 977,
+    "end_line": 981,
+    "char_count": 48
+  },
+  {
+    "product_name": "MHHW",
+    "start_line": 981,
+    "end_line": 1002,
+    "char_count": 440
+  },
+  {
+    "product_name": "Ball Pein Hammer Hickory Wood Handle",
+    "start_line": 1002,
+    "end_line": 1010,
+    "char_count": 85
+  },
+  {
+    "product_name": "BPHW",
+    "start_line": 1010,
+    "end_line": 1031,
+    "char_count": 516
+  },
+  {
+    "product_name": "Drilling Hammer Hickory Wood Handle",
+    "start_line": 1031,
+    "end_line": 1041,
+    "char_count": 99
+  },
+  {
+    "product_name": "DHHW",
+    "start_line": 1041,
+    "end_line": 1253,
+    "char_count": 4387
+  },
+  {
+    "product_name": "Rubber Mallets",
+    "start_line": 1253,
+    "end_line": 1257,
+    "char_count": 124
+  },
+  {
+    "product_name": "MLTR-FO",
+    "start_line": 1257,
+    "end_line": 1274,
+    "char_count": 266
+  },
+  {
+    "product_name": "MLTR-HW",
+    "start_line": 1274,
+    "end_line": 1286,
+    "char_count": 131
+  },
+  {
+    "product_name": "MLTR-BW",
+    "start_line": 1286,
+    "end_line": 1298,
+    "char_count": 128
+  },
+  {
+    "product_name": "Dead Blow Hammer Fibreglass Handle",
+    "start_line": 1298,
+    "end_line": 1300,
+    "char_count": 37
+  },
+  {
+    "product_name": "DBFO",
+    "start_line": 1300,
+    "end_line": 1329,
+    "char_count": 664
+  },
+  {
+    "product_name": "Interchangeable Face Mallets",
+    "start_line": 1329,
+    "end_line": 1339,
+    "char_count": 186
+  },
+  {
+    "product_name": "HMR-SF",
+    "start_line": 1339,
+    "end_line": 1345,
+    "char_count": 76
+  },
+  {
+    "product_name": "HMR-ST",
+    "start_line": 1345,
+    "end_line": 1359,
+    "char_count": 174
+  },
+  {
+    "product_name": "Centre Punches",
+    "start_line": 1359,
+    "end_line": 1364,
+    "char_count": 127
+  },
+  {
+    "product_name": "CP-HD",
+    "start_line": 1364,
+    "end_line": 1398,
+    "char_count": 428
+  },
+  {
+    "product_name": "Drift Punches Heavy Duty",
+    "start_line": 1398,
+    "end_line": 1400,
+    "char_count": 27
+  },
+  {
+    "product_name": "DFP-HD",
+    "start_line": 1400,
+    "end_line": 1420,
+    "char_count": 392
+  },
+  {
+    "product_name": "Pin Punches - Heavy Duty",
+    "start_line": 1420,
+    "end_line": 1425,
+    "char_count": 98
+  },
+  {
+    "product_name": "PP-HD",
+    "start_line": 1425,
+    "end_line": 1458,
+    "char_count": 369
+  },
+  {
+    "product_name": "Drift Punches Brass",
+    "start_line": 1458,
+    "end_line": 1458,
+    "char_count": 0
+  },
+  {
+    "product_name": "DFP-BR",
+    "start_line": 1458,
+    "end_line": 1476,
+    "char_count": 348
+  },
+  {
+    "product_name": "Pin Punches - Round Shank",
+    "start_line": 1476,
+    "end_line": 1480,
+    "char_count": 77
+  },
+  {
+    "product_name": "PP",
+    "start_line": 1480,
+    "end_line": 1632,
+    "char_count": 2636
+  },
+  {
+    "product_name": "Automatic Centre Punches",
+    "start_line": 1632,
+    "end_line": 1632,
+    "char_count": 0
+  },
+  {
+    "product_name": "ACP/IB",
+    "start_line": 1632,
+    "end_line": 1665,
+    "char_count": 574
+  },
+  {
+    "product_name": "Steel Stamps",
+    "start_line": 1665,
+    "end_line": 1665,
+    "char_count": 0
+  },
+  {
+    "product_name": "LP",
+    "start_line": 1665,
+    "end_line": 1689,
+    "char_count": 200
+  },
+  {
+    "product_name": "Cold Chisels",
+    "start_line": 1689,
+    "end_line": 1691,
+    "char_count": 15
+  },
+  {
+    "product_name": "CHS",
+    "start_line": 1691,
+    "end_line": 1703,
+    "char_count": 249
+  },
+  {
+    "product_name": "Concrete Point",
+    "start_line": 1703,
+    "end_line": 1703,
+    "char_count": 0
+  },
+  {
+    "product_name": "CRP",
+    "start_line": 1703,
+    "end_line": 1709,
+    "char_count": 88
+  },
+  {
+    "product_name": "Punch & Chisel Sets",
+    "start_line": 1709,
+    "end_line": 1753,
+    "char_count": 347
+  },
+  {
+    "product_name": "Bolsters",
+    "start_line": 1753,
+    "end_line": 1763,
+    "char_count": 92
+  },
+  {
+    "product_name": "BRC",
+    "start_line": 1763,
+    "end_line": 1801,
+    "char_count": 570
+  },
+  {
+    "product_name": "Wrecking & Demolition Bars",
+    "start_line": 1801,
+    "end_line": 1801,
+    "char_count": 0
+  },
+  {
+    "product_name": "WB",
+    "start_line": 1801,
+    "end_line": 1835,
+    "char_count": 969
+  },
+  {
+    "product_name": "G-Bar Heavy Duty Wrecking Bars",
+    "start_line": 1835,
+    "end_line": 1837,
+    "char_count": 33
+  },
+  {
+    "product_name": "GBR",
+    "start_line": 1837,
+    "end_line": 1862,
+    "char_count": 561
+  },
+  {
+    "product_name": "Post Hole Digging Bar",
+    "start_line": 1862,
+    "end_line": 1864,
+    "char_count": 24
+  },
+  {
+    "product_name": "PHD",
+    "start_line": 1864,
+    "end_line": 1876,
+    "char_count": 262
+  },
+  {
+    "product_name": "San-Angelo Bar",
+    "start_line": 1876,
+    "end_line": 1878,
+    "char_count": 17
+  },
+  {
+    "product_name": "SAB",
+    "start_line": 1878,
+    "end_line": 1906,
+    "char_count": 512
+  },
+  {
+    "product_name": "Hacksaw Frames",
+    "start_line": 1906,
+    "end_line": 1908,
+    "char_count": 17
+  },
+  {
+    "product_name": "SUPER CUT HI-TENSION HACKSAW",
+    "start_line": 1908,
+    "end_line": 1923,
+    "char_count": 393
+  },
+  {
+    "product_name": "Hacksaw Frame - Professional",
+    "start_line": 1923,
+    "end_line": 1942,
+    "char_count": 314
+  },
+  {
+    "product_name": "Handyman's Hacksaw",
+    "start_line": 1942,
+    "end_line": 1955,
+    "char_count": 239
+  },
+  {
+    "product_name": "Junior Saw Baby Bite",
+    "start_line": 1955,
+    "end_line": 5338,
+    "char_count": 56454
+  }
+]

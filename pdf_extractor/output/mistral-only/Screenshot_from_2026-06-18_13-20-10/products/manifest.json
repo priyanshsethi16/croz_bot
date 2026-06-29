@@ -1,0 +1,86 @@
+[
+  {
+    "product_name": "PISTOL GREASE GUNS",
+    "start_line": 1,
+    "end_line": 7,
+    "char_count": 57
+  },
+  {
+    "product_name": "Q32",
+    "start_line": 7,
+    "end_line": 15,
+    "char_count": 218
+  },
+  {
+    "product_name": "VARIO",
+    "start_line": 15,
+    "end_line": 29,
+    "char_count": 291
+  },
+  {
+    "product_name": "Q55",
+    "start_line": 29,
+    "end_line": 33,
+    "char_count": 27
+  },
+  {
+    "product_name": "Q65",
+    "start_line": 33,
+    "end_line": 38,
+    "char_count": 49
+  },
+  {
+    "product_name": "ALL WEATHER",
+    "start_line": 38,
+    "end_line": 42,
+    "char_count": 34
+  },
+  {
+    "product_name": "Q70",
+    "start_line": 42,
+    "end_line": 49,
+    "char_count": 177
+  },
+  {
+    "product_name": "ALL WEATHER - ADJUSTABLE",
+    "start_line": 49,
+    "end_line": 64,
+    "char_count": 347
+  },
+  {
+    "product_name": "Q80",
+    "start_line": 64,
+    "end_line": 68,
+    "char_count": 28
+  },
+  {
+    "product_name": "Q85",
+    "start_line": 68,
+    "end_line": 73,
+    "char_count": 49
+  },
+  {
+    "product_name": "STANDARD",
+    "start_line": 73,
+    "end_line": 83,
+    "char_count": 112
+  },
+  {
+    "product_name": "Q5",
+    "start_line": 83,
+    "end_line": 90,
+    "char_count": 101
+  },
+  {
+    "product_name": "Q4PST",
+    "start_line": 90,
+    "end_line": 95,
+    "char_count": 51
+  },
+  {
+    "product_name": "Q5PRO",
+    "start_line": 95,
+    "end_line": 102,
+    "char_count": 129
+  }
+]

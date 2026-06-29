@@ -1,0 +1,566 @@
+[
+  {
+    "product_name": "Club Hammers Indestructible Handle",
+    "start_line": 610,
+    "end_line": 731,
+    "char_count": 2384
+  },
+  {
+    "product_name": "Sledge Hammer Indestructible Handle",
+    "start_line": 731,
+    "end_line": 887,
+    "char_count": 3589
+  },
+  {
+    "product_name": "Sledge Hammers - DIN 6475 Indestructible Handle",
+    "start_line": 887,
+    "end_line": 968,
+    "char_count": 1490
+  },
+  {
+    "product_name": "Copper Head Sledge Hammers Indestructible Handle",
+    "start_line": 968,
+    "end_line": 1061,
+    "char_count": 1703
+  },
+  {
+    "product_name": "Brass Head Sledge Hammers Indestructible Handle",
+    "start_line": 1061,
+    "end_line": 1156,
+    "char_count": 1781
+  },
+  {
+    "product_name": "Machinist Hammers - DIN 1041 Indestructible Handle",
+    "start_line": 1156,
+    "end_line": 1231,
+    "char_count": 1705
+  },
+  {
+    "product_name": "Ball Pein Hammers Indestructible Handle",
+    "start_line": 1231,
+    "end_line": 1342,
+    "char_count": 2417
+  },
+  {
+    "product_name": "Blacksmith's/ Cross Pein Hammers Indestructible Handle",
+    "start_line": 1342,
+    "end_line": 1420,
+    "char_count": 1395
+  },
+  {
+    "product_name": "Claw Hammer Indestructible Handle",
+    "start_line": 1420,
+    "end_line": 1510,
+    "char_count": 1583
+  },
+  {
+    "product_name": "Tire Bead Breaker Hammers Indestructible Handle",
+    "start_line": 1510,
+    "end_line": 1596,
+    "char_count": 1561
+  },
+  {
+    "product_name": "Hammer Kits Indestructible Handle",
+    "start_line": 1596,
+    "end_line": 1704,
+    "char_count": 1974
+  },
+  {
+    "product_name": "Sledge Hammer Fibreglass Handle",
+    "start_line": 1704,
+    "end_line": 1780,
+    "char_count": 1868
+  },
+  {
+    "product_name": "Sledge Hammers - DIN 6475 Fibreglass Handle",
+    "start_line": 1780,
+    "end_line": 1844,
+    "char_count": 1826
+  },
+  {
+    "product_name": "Sledge Hammer - DIN 1042 Fibreglass Handle",
+    "start_line": 1844,
+    "end_line": 1916,
+    "char_count": 1430
+  },
+  {
+    "product_name": "Machinist Hammers - DIN 1041 Fibreglass Handle",
+    "start_line": 1916,
+    "end_line": 1981,
+    "char_count": 1843
+  },
+  {
+    "product_name": "Ball Pein Hammers Fibreglass Handle",
+    "start_line": 1981,
+    "end_line": 2071,
+    "char_count": 1982
+  },
+  {
+    "product_name": "Drilling Hammers Fibreglass Handle",
+    "start_line": 2071,
+    "end_line": 2136,
+    "char_count": 1546
+  },
+  {
+    "product_name": "Engineer's Hammers Fibreglass Handle",
+    "start_line": 2136,
+    "end_line": 2213,
+    "char_count": 1362
+  },
+  {
+    "product_name": "Blacksmith's/ Cross Pein Hammers Fibreglass Handle",
+    "start_line": 2213,
+    "end_line": 2295,
+    "char_count": 1441
+  },
+  {
+    "product_name": "Claw Hammer Fibreglass Handle",
+    "start_line": 2295,
+    "end_line": 2358,
+    "char_count": 1594
+  },
+  {
+    "product_name": "Axes Fibreglass Handle",
+    "start_line": 2358,
+    "end_line": 2425,
+    "char_count": 1118
+  },
+  {
+    "product_name": "Mauls Fibreglass Handle",
+    "start_line": 2425,
+    "end_line": 2490,
+    "char_count": 1407
+  },
+  {
+    "product_name": "Sledge Hammers Hickory Wood Handle",
+    "start_line": 2490,
+    "end_line": 2565,
+    "char_count": 1949
+  },
+  {
+    "product_name": "Sledge Hammers - DIN 6475 Hickory Wood Handle",
+    "start_line": 2565,
+    "end_line": 2631,
+    "char_count": 1843
+  },
+  {
+    "product_name": "Sledge Hammers - DIN 1042 Hickory Wood Handle",
+    "start_line": 2631,
+    "end_line": 2702,
+    "char_count": 1359
+  },
+  {
+    "product_name": "Machinist Hammers - DIN 1041 Hickory Wood Handle",
+    "start_line": 2702,
+    "end_line": 2767,
+    "char_count": 1831
+  },
+  {
+    "product_name": "Ball Pein Hammers Hickory Wood Handle",
+    "start_line": 2767,
+    "end_line": 2852,
+    "char_count": 1782
+  },
+  {
+    "product_name": "Drilling Hammers Hickory Wood Handle",
+    "start_line": 2852,
+    "end_line": 2934,
+    "char_count": 1409
+  },
+  {
+    "product_name": "Engineer's Hammers Hickory Wood Handle",
+    "start_line": 2934,
+    "end_line": 2995,
+    "char_count": 1285
+  },
+  {
+    "product_name": "Blacksmith's / Cross Pein Hammers Hickory Wood Handle",
+    "start_line": 2995,
+    "end_line": 3075,
+    "char_count": 1363
+  },
+  {
+    "product_name": "Axes Hickory Wood Handle",
+    "start_line": 3075,
+    "end_line": 3148,
+    "char_count": 1238
+  },
+  {
+    "product_name": "Mauls Hickory Wood Handle",
+    "start_line": 3148,
+    "end_line": 3200,
+    "char_count": 1279
+  },
+  {
+    "product_name": "Rubber Mallets",
+    "start_line": 3200,
+    "end_line": 3284,
+    "char_count": 2345
+  },
+  {
+    "product_name": "Interchangeable Face Mallet",
+    "start_line": 3284,
+    "end_line": 3368,
+    "char_count": 1950
+  },
+  {
+    "product_name": "Centre Punches Heavy Duty",
+    "start_line": 3368,
+    "end_line": 3481,
+    "char_count": 3951
+  },
+  {
+    "product_name": "Starting Punches Heavy Duty",
+    "start_line": 3481,
+    "end_line": 3529,
+    "char_count": 1430
+  },
+  {
+    "product_name": "Pin Punches Heavy Duty",
+    "start_line": 3529,
+    "end_line": 3597,
+    "char_count": 2652
+  },
+  {
+    "product_name": "Pin Punches Round Shank",
+    "start_line": 3597,
+    "end_line": 3730,
+    "char_count": 4840
+  },
+  {
+    "product_name": "Drift Punches Heavy Duty",
+    "start_line": 3730,
+    "end_line": 3788,
+    "char_count": 2182
+  },
+  {
+    "product_name": "Drift Punches Brass",
+    "start_line": 3788,
+    "end_line": 3828,
+    "char_count": 1156
+  },
+  {
+    "product_name": "Roll Pin Punches Heavy Duty",
+    "start_line": 3828,
+    "end_line": 3887,
+    "char_count": 1597
+  },
+  {
+    "product_name": "Hinge Centering Punch",
+    "start_line": 3887,
+    "end_line": 3912,
+    "char_count": 751
+  },
+  {
+    "product_name": "Prick Punches Heavy Duty",
+    "start_line": 3912,
+    "end_line": 3945,
+    "char_count": 788
+  },
+  {
+    "product_name": "Nail Punches",
+    "start_line": 3945,
+    "end_line": 3995,
+    "char_count": 1562
+  },
+  {
+    "product_name": "Automatic Centre Punches",
+    "start_line": 3995,
+    "end_line": 4072,
+    "char_count": 1966
+  },
+  {
+    "product_name": "Hollow & Arch Punches",
+    "start_line": 4072,
+    "end_line": 4252,
+    "char_count": 7089
+  },
+  {
+    "product_name": "Steel Stamps",
+    "start_line": 4252,
+    "end_line": 4353,
+    "char_count": 2728
+  },
+  {
+    "product_name": "Cold Chisels",
+    "start_line": 4353,
+    "end_line": 4477,
+    "char_count": 4716
+  },
+  {
+    "product_name": "Punch & Chisel Sets",
+    "start_line": 4477,
+    "end_line": 4812,
+    "char_count": 11953
+  },
+  {
+    "product_name": "Wrecking Bars",
+    "start_line": 4812,
+    "end_line": 4857,
+    "char_count": 955
+  },
+  {
+    "product_name": "G-Bar® Heavy Duty Wrecking Bar",
+    "start_line": 4857,
+    "end_line": 4957,
+    "char_count": 2337
+  },
+  {
+    "product_name": "San-Angelo Bar",
+    "start_line": 4957,
+    "end_line": 5020,
+    "char_count": 1142
+  },
+  {
+    "product_name": "Post Hole Digging Bar",
+    "start_line": 5020,
+    "end_line": 5060,
+    "char_count": 823
+  },
+  {
+    "product_name": "Utility Bar",
+    "start_line": 5060,
+    "end_line": 5110,
+    "char_count": 1021
+  },
+  {
+    "product_name": "Super Cut Hi-Tension Hacksaw",
+    "start_line": 5110,
+    "end_line": 5165,
+    "char_count": 1021
+  },
+  {
+    "product_name": "Hacksaw Frame Professional",
+    "start_line": 5165,
+    "end_line": 5216,
+    "char_count": 1244
+  },
+  {
+    "product_name": "Handyman's Hacksaw",
+    "start_line": 5216,
+    "end_line": 5262,
+    "char_count": 1064
+  },
+  {
+    "product_name": "Junior Saw Baby Bite",
+    "start_line": 5262,
+    "end_line": 5314,
+    "char_count": 1015
+  },
+  {
+    "product_name": "Junior Saw Frames",
+    "start_line": 5314,
+    "end_line": 5356,
+    "char_count": 1154
+  },
+  {
+    "product_name": "Fret Saw Frames",
+    "start_line": 5356,
+    "end_line": 5397,
+    "char_count": 1010
+  },
+  {
+    "product_name": "Coping Saw Frames",
+    "start_line": 5397,
+    "end_line": 5444,
+    "char_count": 1027
+  },
+  {
+    "product_name": "Piercing Saw Frames",
+    "start_line": 5444,
+    "end_line": 5480,
+    "char_count": 1015
+  },
+  {
+    "product_name": "Bi-Metal Hacksaw Blades",
+    "start_line": 5480,
+    "end_line": 5552,
+    "char_count": 1870
+  },
+  {
+    "product_name": "Hacksaw Blades",
+    "start_line": 5552,
+    "end_line": 5581,
+    "char_count": 649
+  },
+  {
+    "product_name": "Mini Saw Blades",
+    "start_line": 5581,
+    "end_line": 5609,
+    "char_count": 488
+  },
+  {
+    "product_name": "Coping Saw Blades",
+    "start_line": 5609,
+    "end_line": 5628,
+    "char_count": 582
+  },
+  {
+    "product_name": "Fret Saw Blades",
+    "start_line": 5628,
+    "end_line": 5668,
+    "char_count": 859
+  },
+  {
+    "product_name": "Multi Purpose Vice",
+    "start_line": 5668,
+    "end_line": 5719,
+    "char_count": 1477
+  },
+  {
+    "product_name": "Engineer's Steel Bench Vices",
+    "start_line": 5719,
+    "end_line": 5760,
+    "char_count": 1141
+  },
+  {
+    "product_name": "Mechanic's Vices Bench Vices",
+    "start_line": 5760,
+    "end_line": 5886,
+    "char_count": 4107
+  },
+  {
+    "product_name": "Drill Press Vices Unigrip",
+    "start_line": 5886,
+    "end_line": 5903,
+    "char_count": 658
+  },
+  {
+    "product_name": "3 Way Drill Press Vice",
+    "start_line": 5903,
+    "end_line": 5983,
+    "char_count": 2157
+  },
+  {
+    "product_name": "Hobbyist Vices",
+    "start_line": 5983,
+    "end_line": 6060,
+    "char_count": 2535
+  },
+  {
+    "product_name": "G Clamps General Purpose",
+    "start_line": 6060,
+    "end_line": 6114,
+    "char_count": 1273
+  },
+  {
+    "product_name": "G Clamps Junior",
+    "start_line": 6114,
+    "end_line": 6153,
+    "char_count": 964
+  },
+  {
+    "product_name": "Bench Planes",
+    "start_line": 6153,
+    "end_line": 6209,
+    "char_count": 2219
+  },
+  {
+    "product_name": "Duplex Rabbet Plane",
+    "start_line": 6209,
+    "end_line": 6279,
+    "char_count": 1256
+  },
+  {
+    "product_name": "Woodworking Vice Plain Screw",
+    "start_line": 6279,
+    "end_line": 6338,
+    "char_count": 1904
+  },
+  {
+    "product_name": "Woodworking Vice Portable",
+    "start_line": 6338,
+    "end_line": 6382,
+    "char_count": 1173
+  },
+  {
+    "product_name": "Woodworking Vice Quick Release",
+    "start_line": 6382,
+    "end_line": 6425,
+    "char_count": 1553
+  },
+  {
+    "product_name": "Woodworking Vice Rapid Action",
+    "start_line": 6425,
+    "end_line": 6467,
+    "char_count": 1169
+  },
+  {
+    "product_name": "Woodworking Front Vice",
+    "start_line": 6467,
+    "end_line": 6496,
+    "char_count": 598
+  },
+  {
+    "product_name": "Quick Woodworking Clamps",
+    "start_line": 6496,
+    "end_line": 6555,
+    "char_count": 1426
+  },
+  {
+    "product_name": "Sash Bar Clamp",
+    "start_line": 6555,
+    "end_line": 6603,
+    "char_count": 1346
+  },
+  {
+    "product_name": "Duo Bar Clamps",
+    "start_line": 6603,
+    "end_line": 6655,
+    "char_count": 1302
+  },
+  {
+    "product_name": "T Bar Clamps",
+    "start_line": 6655,
+    "end_line": 6701,
+    "char_count": 1158
+  },
+  {
+    "product_name": "Cramp Head Set",
+    "start_line": 6701,
+    "end_line": 6748,
+    "char_count": 704
+  },
+  {
+    "product_name": "Tyre Levers",
+    "start_line": 6748,
+    "end_line": 6778,
+    "char_count": 540
+  },
+  {
+    "product_name": "Roll Head/Lady Foot Pry Bars",
+    "start_line": 6778,
+    "end_line": 6817,
+    "char_count": 948
+  },
+  {
+    "product_name": "Handled Pry Bars",
+    "start_line": 6817,
+    "end_line": 6874,
+    "char_count": 1685
+  },
+  {
+    "product_name": "Cat/Aligning Bars",
+    "start_line": 6874,
+    "end_line": 6916,
+    "char_count": 1339
+  },
+  {
+    "product_name": "Indexing Pry Bars",
+    "start_line": 6916,
+    "end_line": 6971,
+    "char_count": 1331
+  },
+  {
+    "product_name": "Extended Reach Pin Punches",
+    "start_line": 6971,
+    "end_line": 7025,
+    "char_count": 1279
+  },
+  {
+    "product_name": "Hook & Pick Sets",
+    "start_line": 7025,
+    "end_line": 15668,
+    "char_count": 243851
+  }
+]

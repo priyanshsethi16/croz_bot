@@ -1,0 +1,607 @@
+GROZ
+
+INSTRUCTION MANUAL
+S3120, REV A
+
+# Electric Oil
+Drum Pump
+
+EDR-OLM
+
+Electric oil transfer
+pump for use in
+workshops.
+
+Compact &
+lightweight
+construction.
+
+On/Off Switch with
+LED Indicator.
+
+Built-in fuse for
+overload protection.
+
+Silenced motor makes
+almost no noise.
+
+Duty Cycle:
+15 minutes On / 30
+Minutes Off.
+
+Self-priming design:
+Allows for high
+suction lift even at dry
+start-up.
+
+Stainless steel filter
+built into the suction
+tube inlet prevents
+contaminants from
+entering & hence
+avoiding resultant
+damage.
+
+Discharge spout with
+
+a. Aluminum die
+cast non-drip
+attachment
+b. Welded steel
+holder that
+prevents entry of
+contaminants.
+
+Comes with Digital
+Oil Meter
+
+a. High pressure
+positive
+displacement
+meter suitable for
+in-line applications.
+
+b. Oval gear
+mechanism for
+optimum accuracy.
+c. 6 Digit non-
+resettable totaliser.
+d. Electronic display
+using one 3V
+lithium Ion battery
+with life up to 2
+years.
+e. Robust aluminum
+die cast
+construction with
+protective shroud
+on meter.
+f. Easy user re-
+calibration
+g. Meter measures in
+Litres, US Gallons,
+Quarts, Pints
+
+Built-in 2" bung
+adaptor fits 205
+litre (55 gal.) drums.
+Bung adapter can
+be adjusted by 0.6"
+(15 mm) to adjust to
+drums with varying
+heights.
+
+Includes an additional
+bung thread converter
+for converting 2"
+standard bung
+threads to 2.5" x 5
+mm buttress for using
+the same pumps with
+IBC's/Totes
+
+Telescopic suction
+tube extends from 33-
+1/2" (850 mm) to 49"
+(1245 mm)
+
+Suitable for use with
+205 litres (55 gal.)
+drums or 1000 - 1250
+litres (275-330 gal.)
+IBC's/Totes
+
+![img-0.jpeg](img-0.jpeg)
+
+|  CAT NR. | DESCRIPTION | PLUG TYPE  |
+| --- | --- | --- |
+|  EDR/OLM/AC/AU | With oil meter, non-drip attachment & AC power adaptor with AU plug | Australian  |
+|  EDR/OLM/AC/EU | With oil meter, non-drip attachment & AC power adaptor with EU plug | European  |
+|  EDR/OLM/AC/UK | With oil meter, non-drip attachment & AC power adaptor with UK plug | UK  |
+|  EDR/OLM/AC/US | With oil meter, non-drip attachment & AC power adaptor with US plug | US  |
+
+1
+
+GROZ
+
+# SPECIFICATIONS
+
+|  **MOTOR TYPE** | DC Brush Motor (5 Pole)  |
+| --- | --- |
+|  **AC POWER ADAPTER** | Input: 100 - 240 V AC, 50 / 60 Hz, Output: 20 V DC Constant Voltage, 6A max  |
+|  **METER TYPE** | Digital  |
+|  **METER MECHANISM** | Oval gear  |
+|  **ACCURACY*** | ± 0.50%  |
+|  **REPEATABILITY*** | ± 0.25%  |
+|  **WATER RESISTANCE** | IP55  |
+|  **PARTIAL TOTAL** | 0.001 to 99999 units  |
+|  **MAX RESETTABLE TOTAL** | 9,99,999 (six digits with × 100 indicator) units  |
+|  **MAX NON-RESETTABLE TOTAL** | 9,99,999 (six digits with × 100 indicator) units  |
+|  **UNITS OF MEASURE** | Pints, Quarts, Liters, Gallons  |
+|  **LEAST COUNT/ RESOLUTION** | Upto 0.001 units  |
+|  **WETTED COMPONENTS** | Viton, POM, Stainless Steel, PE, NBR, PP, Steel, Aluminum  |
+|  **MAX. VISCOSITY OF MEDIA** | 100 cSt / 465 SSU  |
+|  **RECOMMENDED USE** | Motor oil, Hydraulic oil and Lubricants  |
+|  **DO NOT USE WITH** | Gasoline, Corrosive chemicals, Lacquer thinners, any material that is not compatible with the pump construction  |
+
+* Tested in laboratory condition
+
+# SAFETY INFORMATION
+
+- Keep the work area clean and dry. Damp or wet work areas can result in injury.
+- Store idle equipment. When not in use, tools and equipment should be stored in a dry location to inhibit rust
+- Use the right tool for the job. Do not attempt to force small equipment to do the work of larger industrial equipment. Do not modify this equipment, and do not use this equipment for a purpose for which it was not intended.
+- Check for damaged parts. Before using this product, carefully check that it will operate properly and perform its intended function. Replace damaged or worn parts immediately.
+
+# WARNING!
+
+- Read and understand all instructions. Failure to follow all instructions listed above may result in electric shock, fire and/or serious injury.
+
+# PACKAGING CONTENT
+
+|  DESCRIPTION | QUANTITY  |
+| --- | --- |
+|  Pump with telescope tube | 1  |
+|  Adaptor | 1  |
+|  Digital oil meter | 1  |
+|  Bend pipe assembly & outlet adaptor | 1  |
+|  Power adaptor | 1  |
+|  Power cord | 1  |
+|  O.I.P.M. | 1  |
+
+# TOOLS NEEDED
+
+- Phillips screwdriver
+- Allen key (4 mm or 5/32")
+
+# BEFORE INSTALLATION
+
+- **Eyes protection:** Wear a protective mask or protective eyewear.
+- **Skin protection:** Avoid repeated and prolonged contact of fluids with the skin by wearing impermeable protective gloves.
+- Check that the product has not suffered any damage during transport or storage. Clean the inlet and outlet openings, removing any dust or residual packing material.
+- Keep the pump away from heat and sharp edges. Check the pump for wear and make certain that all connections are secure.
+
+Make sure the meter model meets the specific need. Refer to the Specifications section and confirm the following:
+
+1. Flow rate should be within the limits of the model.
+2. The liquid should be compatible with the meter's material.
+3. The system's pressure should not exceed the meter's maximum pressure rating.
+
+# Know the digital oil meter
+
+# Major components
+
+**LCD display** - Powered by one lithium battery of 3V. Includes three numerical Totals and other keys as given in the figures:
+
+2
+
+www.groz-tools.com
+
+GROZ
+
+![img-1.jpeg](img-1.jpeg)
+
+![img-2.jpeg](img-2.jpeg)
+
+1. **Resettable Batch Total** (5 figures with moving comma) indicates volume dispensed after RESET button was last pressed.
+2. Indication of battery charge.
+3. Indication of calibration mode.
+4. **Batch Totalizer** (6 figures with moving comma in multiple of 10 & 100) - indicates two types of Total:
+   - Non-Resettable General Total (TOTAL)
+   - Resettable total (Reset TOTAL)
+5. Indication of total multiplication factor (x10 or x100).
+6. Indication of type of total, (TOTAL / Reset TOTAL).
+7. Indication of unit of measurement of Totalizer:
+   - L=Litres
+   - Gal=Gallons
+8. Indication of unit of measurement of Resettable Batch Total:
+   - Qts=Quarts
+   - Pts=Pints
+   - L=Litres
+   - Gal=Gallons
+9. Indication of flow rate when the meter dispense in flow rate mode.
+
+**User Buttons** - The meter features two buttons (RESET and MODE) which individually perform two main functions and together, other secondary functions.
+
+**RESET Key** - is used to reset the Batch Total and Reset Total
+
+**MODE Key**- is used to change the unit of measurement
+
+**Combination of RESET + MODE keys**- is used to enter calibration mode
+
+**Oval Gear Assembly:** It has two female threaded ports. It contains two oval gear which turns when media passes through it with sufficient pressure. This action generates electrical pulses which are processed by a microprocessor and the result is displayed on the Totals of LCD.
+
+**Standby Mode** When the media is not flowing through the meter, the meter shows only the word TOTAL on the display. This mode is called standby and majority of adjustments are carried out in this mode.
+
+![img-3.jpeg](img-3.jpeg)
+
+# **INSTALLATION (Refer "EXPLODED VIEW")**
+
+1. Rotate the joint nut (6) counter clockwise and then pull the filter (8) side of the telescopic suction tube (7) away from the bung adaptor (3).
+2. After extending the telescopic suction tube (7), rotate the joint nut (6) clockwise to fix the telescopic suction tube (7) in the extended position.
+3. Insert the telescopic suction tube (7) of the pump into the drum through the drum hole.
+4. Screw the bung adaptor (3) with the drum hole. (Buttress thread adaptor can be used with 2.5" x 5mm thread IBC's/Totes.)
+5. Hand tighten the outlet adaptor (10) to the pump outlet (5). Always use Teflon tape for threaded connections.
+6. Hand tighten the adaptor (11) to the outlet adaptor (10).
+7. Screw the digital oil meter (12) to other end of the adaptor (11).
+8. Thread tighten the bend pipe assembly (13) to the outlet of digital oil meter (12).
+
+# **OPERATING INSTRUCTIONS (Refer "EXPLODED VIEW")**
+
+1. Connect the power cord (15) with the power adaptor (14) and connect the power adaptor (14) with the pump socket (2).
+2. Plug the power cord (15) into the AC supply socket and switch it 'ON'.
+3. Turn the toggle switch (4) to 'ON' (Up) position to start dispensing.
+4. After dispensing switch 'OFF' (Down) the toggle switch (4)
+
+3
+
+GROZ
+
+# For digital oil meter settings
+
+# A. Measurement units configuration
+
+The user can select the main measurement unit, Quarts (Qts), Pints (Pts), Litres (L), Gallons (Gal); according to the following predefined combinations:
+
+|  REF. NO. | UNIT OF MEASUREMENT BATCH TOTAL | UNIT OF MEASUREMENT TOTAL REGISTER  |
+| --- | --- | --- |
+|  1 | Litres (L) | Litres (L)  |
+|  2 | Litres (L) | Gallon (Gal)  |
+|  3 | Gallon (Gal) | Litres (L)  |
+|  4 | Gallon (Gal) | Gallon (Gal)  |
+|  5 | Quarts (Qts) | Litres (L)  |
+|  6 | Quarts (Qts) | Gallon (Gal)  |
+|  7 | Pints (Pts) | Litres (L)  |
+|  8 | Pints (Pts) | Gallon (Gal)  |
+
+# Sequence of setting the unit of measurement
+
+In order to set the units for batch total and total register, perform the following steps:
+
+1. Enable the display by pressing any button.
+2. Wait for the display to enter Standby mode (i.e. when the display shows TOTAL).
+
+![img-4.jpeg](img-4.jpeg)
+
+3. Press the MODE button.
+4. The display will go blank except for the batch total units which will toggle between Qts, Pts, L, and Gal with each being displayed for 2 seconds before toggling to the next.
+
+![img-5.jpeg](img-5.jpeg)
+
+5. Press the MODE button again while the desired unit option is displayed. This will stop the units from toggling and will set the units for the batch total.
+6. The units for total register will then start toggling back and forth between GAL and L with each being displayed for 2 seconds before toggling back to the other.
+
+![img-6.jpeg](img-6.jpeg)
+
+7. Press the MODE button again while the desired unit option is displayed. This will stop the units from toggling and will set the units for the total register.
+8. Both unit options are now set and the display will go back into regular operation mode.
+
+![img-7.jpeg](img-7.jpeg)
+
+# B. Normal dispensing mode
+
+While the media is flowing through the meter, Batch Total and RESET TOTAL are displayed at the same time.
+
+![img-8.jpeg](img-8.jpeg)
+
+A few seconds after dispensing has ended, on the lower side of the display, the display switches from RESET TOTAL to General TOTAL. The word RESET above the word TOTAL disappears, and the RESET TOTAL is replaced by the General TOTAL.
+
+![img-9.jpeg](img-9.jpeg)
+
+# C. Resetting the batch total
+
+1. While in standby (i.e. when the display shows TOTAL), press the RESET button.
+
+![img-10.jpeg](img-10.jpeg)
+
+2. During reset, the display screen first of all shows all the lit-up digits and then all the digits will disappear.
+
+![img-11.jpeg](img-11.jpeg)
+
+3. At the end of the process, the display shows the reset batch total and the RESET TOTAL.
+
+4
+
+www.groz-tools.com
+
+GROZ
+
+![img-12.jpeg](img-12.jpeg)
+
+4. After a few moments, the RESET TOTAL is replaced by TOTAL
+
+![img-13.jpeg](img-13.jpeg)
+
+# D. Resetting the reset total
+
+The RESET TOTAL can only be reset immediately after resetting the batch total. The RESET TOTAL is reset by pressing the RESET button while the display screen shows RESET TOTAL.
+
+Perform the following steps:
+
+1. Enable the display by pressing any button.
+2. Wait for the display to enter Standby mode (i.e. when the display shows TOTAL).
+
+![img-14.jpeg](img-14.jpeg)
+
+3. Press the RESET button quickly. The meter will reset the batch total.
+
+![img-15.jpeg](img-15.jpeg)
+
+4. While the display is showing RESET TOTAL, press the RESET button again.
+5. The display screen shows all the segments of the display followed by all the switched-off segments and finally shows the display page where the new RESET TOTAL is shown.
+
+![img-16.jpeg](img-16.jpeg)
+
+6. After a few moments, the RESET TOTAL is replaced by TOTAL.
+
+![img-17.jpeg](img-17.jpeg)
+
+# E. Dispensing with flow rate mode display
+
+In order to enter Flow Rate mode, perform the following steps:
+
+1. Enable the display by pressing any button.
+2. Wait for the display to enter Standby mode (i.e. when the display shows TOTAL).
+
+![img-18.jpeg](img-18.jpeg)
+
+3. Press the MODE button which will cause the units of measurement for batch total to start toggling.
+
+![img-19.jpeg](img-19.jpeg)
+
+4. Press the RESET button.
+5. At this point the FLOW RATE segment will be lit. The display will start showing "FLOW RATE", in place of TOTAL.
+
+![img-20.jpeg](img-20.jpeg)
+
+6. Start dispensing fluid immediately after entering FLOW RATE mode. The batch total will increment according to how much fluid is being metered and the flow rate will also be shown in the display.
+
+![img-21.jpeg](img-21.jpeg)
+
+The current units are used in Flow Rate mode. In order to change units, see the "Sequence of setting the unit of measurement" section in this manual. The Flow Rate is shown in either Litres or Gallons per minute.
+
+# F. Calibration
+
+The meter has been calibrated at the factory under the following operating conditions:
+
+|  **Fluid:** | **SAE 32**  |
+| --- | --- |
+|  **Temperature:** | **20°C (68°F)**  |
+|  **Flow rate:** | **5-25 LPM (1.3-6.6 GPM)**  |
+|  (With change of media, recalibration is needed)  |   |
+
+# G. Calibration procedure
+
+(As an example here the meter is being calibrated for 2 units of fluid.)
+
+5
+
+GROZ
+
+To enter Calibration Mode, perform the following steps:
+
+1. Enable the display by pressing any button
+2. Wait for the display to enter Stand-by mode (i.e. when the display shows TOTAL)
+
+![img-22.jpeg](img-22.jpeg)
+
+3. Press the RESET button, which will reset the batch total and display the RESET TOTAL.
+4. While the RESET TOTAL is displayed, press the MODE button.
+5. At this point the meter is in Calibration mode and the "Cal" segment will be lit in the lower left hand corner of the display.
+
+![img-23.jpeg](img-23.jpeg)
+
+6. The options for the volume that can be used during calibration will now be shown in the lower part of the display.
+7. They will toggle between 2, 4, 8, 20, 100, and 250 units. The current units are used in Calibration mode. In order to change units, see the "Sequence of setting the unit of measurement" section in this manual.
+
+![img-24.jpeg](img-24.jpeg)
+
+8. Pressing the MODE button while the desired volume is displayed (2, 4, 8, 20, 100, 250) will select that volume.
+9. Once the desired volume (2 units in this case) is selected, that volume will remain displayed in the bottom right part of the display.
+
+![img-25.jpeg](img-25.jpeg)
+
+10. Now begin dispensing the fluid into the graduated sample container without pressing any key. Continue dispensing until the level of the fluid in the sample container has reached the desired graduated level (2 units in this case). The batch total will increment accordingly. Once the dispensing is complete, press the MODE button again.
+
+![img-26.jpeg](img-26.jpeg)
+
+- If the dispensed volume shown in batch total is within +/- 8% of the default calibration value (2 units in this case), the meter will automatically calibrate itself with the exact volume that was dispensed (2 units in this case) as the "Cal" segment blinks 5 times before turning the display off. The meter is now calibrated.
+
+![img-27.jpeg](img-27.jpeg)
+
+- If the dispensed volume shown in batch total is outside the range of +8% (greater than 2.16 units in this case) of the default calibration value, the meter will display the up arrow beside the "Cal" segment prior to turning itself off. In this case, the meter does not update its calibration settings. Contact the seller if this error occurs.
+
+![img-28.jpeg](img-28.jpeg)
+
+- If the dispensed volume shown in batch total is outside the range of -8% (less than 1.84 units in this case) of the default calibration value, the meter will display the down arrow beside the "Cal" segment prior to turning itself off. In this case, the meter does not update its calibration settings. Contact the seller if this error occurs.
+
+![img-29.jpeg](img-29.jpeg)
+
+The meter can be calibrated as many times as desired. Calibration is needed to make the meter suitable for actual conditions.
+
+6
+
+www.groz-tools.com
+
+GROZ
+
+# MAINTENANCE (Refer "EXPLODED VIEW")
+
+The Meter has been designed to require a minimum amount of maintenance. The only maintenance jobs required are:
+
+- Cleaning the Stainless Steel filter of pump
+- Replacement of fuse
+- Battery change of digital oil meter
+- Cleaning the measurement chamber of digital oil meter
+
+# Cleaning the Stainless Steel filter of pump
+
+1. Open the end cap (9) of the pump by turning it counter clockwise.
+2. Take out the stainless steel mesh and clean it.
+3. Place the mesh back in place and hand tighten the end cap (9) again.
+
+# Replacement of fuse
+
+1. Unscrew all the bolts near the pump socket (2) using a Phillips screwdriver
+2. Open the pump head (1)
+3. Replace the older fuse with a new one of the same rating (8 Amp / 250V glass fuse).
+4. Pump head (1) must be perfectly seated while assembling the pump again.
+5. Screw all the bolts to assemble the pump head (1).
+
+# Battery change of digital oil meter
+
+The meter is capable of operating with one CR2450 coin battery. It features 2 low-battery alarm levels:
+
+1. When the battery voltage falls below the first level, the fixed battery symbol appears. In this condition, the meter continues to operate correctly but the fixed battery icon warns the user that it is advisable to change the batteries.
+2. If the meter operation continues without changing the batteries, the second battery alarm level will be reached which with prevent operation. In this condition the battery icon will flash and is the only segment visible on the LCD.
+
+![img-30.jpeg](img-30.jpeg)
+
+# WARNING!
+
+- Allow the meter to turn itself off by letting it sit idle for 30 seconds before changing the batteries. If the batteries are pulled from the unit while the LCD is still active, the unit will not be damaged but any metered volume from the previous session will be lost.
+
+Battery replacement procedure:
+
+1. Remove the four screws (i) and separate the electronic assembly (j) and meter face plate (h) from the housing (a).
+
+2. Remove the two screws (l) from the back side of the electronic assembly (j), this will separate the electronic assembly (j) from the meter face plate (h).
+3. Remove the old battery (m) from the back side of the display using a scriber.
+4. Place the new battery in the same position as the old ones, making sure the positive pole is positioned as indicated.
+5. Re-tighten the meter face plate (h) with the electronic assembly (j).
+6. Re-tighten the electronic assembly (j) and meter face plate (h) to the housing (a).
+
+# Cleaning the measurement chamber of digital oil meter
+
+1. Loosen and remove the four Allen bolt (k) with the help of Allen key.
+2. Remove the cover (b) and the O-Ring (f).
+3. Remove the oval gears (c).
+4. Clean the meter body with a soft brush or cloth. Be careful not to damage the meter body or the gears.
+5. Assemble in the reverse order taking care of the following:
+- Position the oval gears (c) at 90° to each other & turn them with fingers to ensure they rotate freely. If the gears, sit higher than the sealing face, turn them over and refit them (The magnets must be facing the electronic module).
+- Tighten all the four Allen bolt (k) evenly.
+
+# WARNING!
+
+- Always make sure the liquid has been drained from the meter and the line pressure is released before cleaning.
+
+7
+
+GROZ
+
+# EXPLODED VIEW
+
+![img-31.jpeg](img-31.jpeg)
+
+# PART LIST
+
+|  PART NUMBER | PART DESCRIPTION | QUANTITY  |
+| --- | --- | --- |
+|  1 | Pump head | 1  |
+|  2 | Pump socket | 1  |
+|  3 | Bung adaptor | 1  |
+|  4 | Toggle switch | 1  |
+|  5 | Pump outlet | 1  |
+|  6 | Joint nut | 1  |
+|  7 | Telescopic suction tube | 1  |
+|  8 | Filter | 1  |
+|  9 | End cap | 1  |
+|  10 | Outlet adaptor | 1  |
+|  11 | Adaptor | 1  |
+|  12 | Digital oil meter | 1  |
+|  a. | Housing | 1  |
+|  b. | Cover | 1  |
+
+|  c. | Oval gear | 2  |
+| --- | --- | --- |
+|  d. | Magnet | 4  |
+|  e. | Shaft | 2  |
+|  f. | O-Ring | 1  |
+|  g. | Shroud (Meter) | 1  |
+|  h. | Meter face plate | 1  |
+|  i. | Screw | 4  |
+|  j. | Electronic assembly | 1  |
+|  k. | Allen bolt | 4  |
+|  l. | Screw | 2  |
+|  m. | Battery | 1  |
+|  n. | Sticker | 1  |
+|  13 | Bend pipe assembly | 1  |
+|  14 | Power adaptor | 1  |
+|  15 | Power cord | 1  |
+
+8
+
+www.groz-tools.com
+
+![img-32.jpeg](img-32.jpeg)
+
+## TROUBLESHOOTING
+
+|  PROBLEM | POSSIBLE CAUSE | CORRECTIVE ACTION  |
+| --- | --- | --- |
+|  Pump not creating suction | Filter clogged | Clean the filter  |
+|  Pump not working | Wire damaged inside the pump. | Send the pump to the service centre  |
+|   |  Electricity supply problem | Check the electricity supply.  |
+|   |  Power adaptor not working | Replace the power adaptor.  |
+|   |  Motor not working | Send the pump to the service centre  |
+|  Fluid not coming out of the bend pipe assembly | Bend pipe assembly may be blocked | Clean or replace the bend pipe assembly  |
+|  No indication on digital oil meter display | Bad battery contact | Check battery contacts  |
+|  Inaccurate measurement by digital oil meter | Wrong Calibration | Follow calibration procedure for digital oil meter  |
+|   |  The meter works below minimum acceptable flow rate. | Increase the flow rate until an acceptable flow rate range has been achieved  |
+|  Reduced or zero flow rate is displayed in digital oil meter | Oval gear blocked | Clean the measurement chamber of digital oil meter  |
+|  The meter does not count, but the flow rate is correct | Incorrect installation of the electronic assembly | Reinstall the electronic assembly  |
+|   |  Possible electronic assembly problems | Contact your dealer  |
+|  Meter body cracks. | Excess line pressure. | Install pressure relief valve to allow high pressure to bleed back to the tank. Replace meter.  |
+
+## DISPOSAL
+
+The components or the used product must be given to companies that specialize in the disposal and recycling of industrial waste.
+
+9
+
+10
+
+11
+
+GROZ
+
+# GROZ WARRANTY POLICY
+
+Groz makes all efforts to ensure that its products meet the highest standards of quality and durability and warrants to the original purchaser its range of products for a period of 12 months from Groz Invoice date, against defects in materials and workmanship. If the Groz product is part of a set, only the portion that is defective is subject to this warranty.
+
+This warranty does not apply to damage due directly or indirectly, to misuse, abuse, wear and tear, negligence or accident, repairs or alterations outside Groz plants, or to lack of maintenance. Groz shall in no event be liable for death, injuries to persons or property or for incidental, contingent, special or consequential damages arising from the use of its products. It is upto the user to determine suitability and safety of the product for their intended use, and the user assumes all risks and liability herewith.
+
+In no event, shall Groz's liability exceed the invoiced cost of the product In case of identification of defect covered under this warranty, the same must be notified in writing to Groz /Groz designated authorized service location. Proof of purchase date must accompany the complaint. Groz reserves the right to call back the faulty unit, all charges including transportation prepaid. On verification of the defect, the unit will be repaired or replaced with a new or reconditioned product or part of equal utility or a full refund given at Groz's discretion. The repaired /replaced units will be returned to the user freight prepaid, using most economical freight carrier. However if determined that the defect resulted from causes not within the scope of the warranty, then the cost of returning the product would be to buyer's account.
+
+GROZ ENGINEERING TOOLS (P) LTD.
+GROZ NET INDUSTRIES
+
+Village Kherki Daula, National Highway-8,
+Gurugram-122001, Haryana, INDIA
+
+Tel +91.124.282.7734/40, 2827777
+Fax +91.124.2827980, 2827986
+E-Mail info@groz-tools.com
+Url www.groz-tools.com
+
+The GROZ name, GROZ logo and the mark are trademarks of Groz Engineering Tools (P) Ltd., India

@@ -1,0 +1,590 @@
+[
+  {
+    "product_name": "Ezee Lube Kit",
+    "start_line": 3,
+    "end_line": 42,
+    "char_count": 495
+  },
+  {
+    "product_name": "Accessory Kit",
+    "start_line": 42,
+    "end_line": 146,
+    "char_count": 1172
+  },
+  {
+    "product_name": "Air Operated Grease Ratio Pump 50:1",
+    "start_line": 146,
+    "end_line": 182,
+    "char_count": 479
+  },
+  {
+    "product_name": "Air Operated Grease Ratio Pump 60:1",
+    "start_line": 182,
+    "end_line": 208,
+    "char_count": 392
+  },
+  {
+    "product_name": "Grease Control Valve",
+    "start_line": 208,
+    "end_line": 227,
+    "char_count": 184
+  },
+  {
+    "product_name": "High Volume Grease Ratio Pump 50:1",
+    "start_line": 227,
+    "end_line": 253,
+    "char_count": 334
+  },
+  {
+    "product_name": "Booster Grease Control Valve",
+    "start_line": 253,
+    "end_line": 260,
+    "char_count": 126
+  },
+  {
+    "product_name": "Grease Control Valve - Metered Grease Swivels",
+    "start_line": 260,
+    "end_line": 308,
+    "char_count": 540
+  },
+  {
+    "product_name": "Portable Greasing System",
+    "start_line": 308,
+    "end_line": 329,
+    "char_count": 284
+  },
+  {
+    "product_name": "Foot Operated Bucket Grease Pump",
+    "start_line": 329,
+    "end_line": 144,
+    "char_count": 0
+  },
+  {
+    "product_name": "Grease Pumps & Accessories",
+    "start_line": 144,
+    "end_line": 585,
+    "char_count": 5836
+  },
+  {
+    "product_name": "Lever Action Oil Pumps",
+    "start_line": 585,
+    "end_line": 620,
+    "char_count": 670
+  },
+  {
+    "product_name": "Lever Action Antifreeze Pumps",
+    "start_line": 620,
+    "end_line": 649,
+    "char_count": 612
+  },
+  {
+    "product_name": "Vertical Lift Pump",
+    "start_line": 649,
+    "end_line": 662,
+    "char_count": 286
+  },
+  {
+    "product_name": "Steel Safety Pumps",
+    "start_line": 662,
+    "end_line": 687,
+    "char_count": 487
+  },
+  {
+    "product_name": "Front Action Rotary Drum Pump",
+    "start_line": 687,
+    "end_line": 712,
+    "char_count": 607
+  },
+  {
+    "product_name": "Professional Rotary Drum Pump",
+    "start_line": 712,
+    "end_line": 725,
+    "char_count": 339
+  },
+  {
+    "product_name": "Quart/Litre Stroke Pump",
+    "start_line": 725,
+    "end_line": 742,
+    "char_count": 456
+  },
+  {
+    "product_name": "Ezee Flow Pump",
+    "start_line": 742,
+    "end_line": 757,
+    "char_count": 481
+  },
+  {
+    "product_name": "Ezee Flow Pump Premium",
+    "start_line": 757,
+    "end_line": 774,
+    "char_count": 456
+  },
+  {
+    "product_name": "Mounting Bracket Valve",
+    "start_line": 774,
+    "end_line": 787,
+    "char_count": 235
+  },
+  {
+    "product_name": "Bung Nut",
+    "start_line": 787,
+    "end_line": 797,
+    "char_count": 114
+  },
+  {
+    "product_name": "Hydraulic Hoses",
+    "start_line": 797,
+    "end_line": 807,
+    "char_count": 240
+  },
+  {
+    "product_name": "Electric Oil Drum Pump",
+    "start_line": 807,
+    "end_line": 828,
+    "char_count": 434
+  },
+  {
+    "product_name": "Electric Oil Pumps",
+    "start_line": 828,
+    "end_line": 864,
+    "char_count": 437
+  },
+  {
+    "product_name": "Drain Pans",
+    "start_line": 864,
+    "end_line": 870,
+    "char_count": 83
+  },
+  {
+    "product_name": "Waste Oil Evacuation Kits",
+    "start_line": 870,
+    "end_line": 876,
+    "char_count": 74
+  },
+  {
+    "product_name": "Hose Reels",
+    "start_line": 876,
+    "end_line": 916,
+    "char_count": 884
+  },
+  {
+    "product_name": "Hose Reel - Air/Water E-Series",
+    "start_line": 916,
+    "end_line": 937,
+    "char_count": 408
+  },
+  {
+    "product_name": "Industrial Rotary Drum Pumps",
+    "start_line": 937,
+    "end_line": 976,
+    "char_count": 779
+  },
+  {
+    "product_name": "Rotary Booster Pump 3:1",
+    "start_line": 976,
+    "end_line": 999,
+    "char_count": 408
+  },
+  {
+    "product_name": "Fuel Pump",
+    "start_line": 999,
+    "end_line": 1045,
+    "char_count": 1059
+  },
+  {
+    "product_name": "Mini Bowser",
+    "start_line": 1045,
+    "end_line": 1103,
+    "char_count": 1107
+  },
+  {
+    "product_name": "Open Bowser",
+    "start_line": 1103,
+    "end_line": 1125,
+    "char_count": 460
+  },
+  {
+    "product_name": "Def & Specialty Pumps",
+    "start_line": 1125,
+    "end_line": 1188,
+    "char_count": 965
+  },
+  {
+    "product_name": "Electric Def",
+    "start_line": 1188,
+    "end_line": 1189,
+    "char_count": 14
+  },
+  {
+    "product_name": "Transfer Pump",
+    "start_line": 1189,
+    "end_line": 1193,
+    "char_count": 37
+  },
+  {
+    "product_name": "Eop-Def",
+    "start_line": 1193,
+    "end_line": 1289,
+    "char_count": 1747
+  },
+  {
+    "product_name": "Battery Transfer Pump Dry Cell Def Pump",
+    "start_line": 1289,
+    "end_line": 1346,
+    "char_count": 1287
+  },
+  {
+    "product_name": "Rechargeable Battery Fuel Pump",
+    "start_line": 1346,
+    "end_line": 1348,
+    "char_count": 63
+  },
+  {
+    "product_name": "Submersible Diesel Pump",
+    "start_line": 1348,
+    "end_line": 1387,
+    "char_count": 1118
+  },
+  {
+    "product_name": "Nylon Chemical Pumps",
+    "start_line": 1387,
+    "end_line": 1413,
+    "char_count": 458
+  },
+  {
+    "product_name": "316 SS Vertical Lift Pump",
+    "start_line": 1413,
+    "end_line": 1427,
+    "char_count": 389
+  },
+  {
+    "product_name": "Polypropylene Chemical Pumps",
+    "start_line": 1427,
+    "end_line": 1453,
+    "char_count": 679
+  },
+  {
+    "product_name": "Plastic Rotary Pumps",
+    "start_line": 1453,
+    "end_line": 1497,
+    "char_count": 822
+  },
+  {
+    "product_name": "Siphon Pumps",
+    "start_line": 1497,
+    "end_line": 1542,
+    "char_count": 659
+  },
+  {
+    "product_name": "Tire Sealant Pump",
+    "start_line": 1542,
+    "end_line": 1571,
+    "char_count": 530
+  },
+  {
+    "product_name": "Quart/Gallon Fluid Pump",
+    "start_line": 1571,
+    "end_line": 1588,
+    "char_count": 280
+  },
+  {
+    "product_name": "Mechanical Fuel Meter",
+    "start_line": 1588,
+    "end_line": 1608,
+    "char_count": 411
+  },
+  {
+    "product_name": "Mechanical Diesel Meter",
+    "start_line": 1608,
+    "end_line": 1661,
+    "char_count": 1276
+  },
+  {
+    "product_name": "Professional Digital Fuel Meter",
+    "start_line": 1661,
+    "end_line": 1680,
+    "char_count": 367
+  },
+  {
+    "product_name": "Digital Fuel Meter",
+    "start_line": 1680,
+    "end_line": 1695,
+    "char_count": 342
+  },
+  {
+    "product_name": "Digital Flow In-Line",
+    "start_line": 1695,
+    "end_line": 1729,
+    "char_count": 846
+  },
+  {
+    "product_name": "Manual Fuel Control Nozzles",
+    "start_line": 1729,
+    "end_line": 1783,
+    "char_count": 1262
+  },
+  {
+    "product_name": "Dual Plane Fuel Nozzle Swively Dispensing",
+    "start_line": 1783,
+    "end_line": 1803,
+    "char_count": 521
+  },
+  {
+    "product_name": "Stainless Steel Fuel Hose Nozzle Swively Anti-Static",
+    "start_line": 1803,
+    "end_line": 1823,
+    "char_count": 459
+  },
+  {
+    "product_name": "Fuel Hose Non-Grounded",
+    "start_line": 1823,
+    "end_line": 1831,
+    "char_count": 104
+  },
+  {
+    "product_name": "Auto Shut Off Manual Def Safety Fuel Nozzle Control Nozzle",
+    "start_line": 1831,
+    "end_line": 1863,
+    "char_count": 846
+  },
+  {
+    "product_name": "Automatic Def Control Nozzle",
+    "start_line": 1863,
+    "end_line": 1879,
+    "char_count": 403
+  },
+  {
+    "product_name": "Portable Fuel Filter",
+    "start_line": 1879,
+    "end_line": 1893,
+    "char_count": 547
+  },
+  {
+    "product_name": "Fuel Filters Spin-On Cartridge Style",
+    "start_line": 1893,
+    "end_line": 1941,
+    "char_count": 1272
+  },
+  {
+    "product_name": "Filter Wrench",
+    "start_line": 1941,
+    "end_line": 1950,
+    "char_count": 230
+  },
+  {
+    "product_name": "Breakaway Valve",
+    "start_line": 1950,
+    "end_line": 1969,
+    "char_count": 451
+  },
+  {
+    "product_name": "Drum Dollies",
+    "start_line": 1969,
+    "end_line": 1990,
+    "char_count": 436
+  },
+  {
+    "product_name": "Band Dollies",
+    "start_line": 1990,
+    "end_line": 2049,
+    "char_count": 1300
+  },
+  {
+    "product_name": "Drum Cradles",
+    "start_line": 2049,
+    "end_line": 2081,
+    "char_count": 461
+  },
+  {
+    "product_name": "Drum Trolleys",
+    "start_line": 2081,
+    "end_line": 2231,
+    "char_count": 2131
+  },
+  {
+    "product_name": "Drum Wrench",
+    "start_line": 2231,
+    "end_line": 2252,
+    "char_count": 318
+  },
+  {
+    "product_name": "Drum Level Indicator",
+    "start_line": 2252,
+    "end_line": 2293,
+    "char_count": 1103
+  },
+  {
+    "product_name": "Drum Faucets/Taps with Bucket Hanger",
+    "start_line": 2293,
+    "end_line": 2307,
+    "char_count": 155
+  },
+  {
+    "product_name": "Drum Faucets/Taps - Food Gr",
+    "start_line": 2307,
+    "end_line": 2316,
+    "char_count": 144
+  },
+  {
+    "product_name": "Drum Faucets/Taps",
+    "start_line": 2316,
+    "end_line": 2337,
+    "char_count": 263
+  },
+  {
+    "product_name": "Coalescing Filters",
+    "start_line": 2337,
+    "end_line": 2398,
+    "char_count": 1344
+  },
+  {
+    "product_name": "Air Lubricators",
+    "start_line": 2398,
+    "end_line": 2434,
+    "char_count": 762
+  },
+  {
+    "product_name": "Air Lubricators Metal Bowl",
+    "start_line": 2434,
+    "end_line": 2470,
+    "char_count": 777
+  },
+  {
+    "product_name": "Filter Regulator Combination",
+    "start_line": 2470,
+    "end_line": 2507,
+    "char_count": 867
+  },
+  {
+    "product_name": "Filter - Regulator & Lubricator - 2 PC Metal Bowl",
+    "start_line": 2507,
+    "end_line": 2556,
+    "char_count": 1892
+  },
+  {
+    "product_name": "Modular Series",
+    "start_line": 2556,
+    "end_line": 2560,
+    "char_count": 45
+  },
+  {
+    "product_name": "Compact Series",
+    "start_line": 2560,
+    "end_line": 2631,
+    "char_count": 1595
+  },
+  {
+    "product_name": "Filter - Regulator & Lubricator - 3 PC",
+    "start_line": 2631,
+    "end_line": 2676,
+    "char_count": 1179
+  },
+  {
+    "product_name": "Filter - Regulator & Lubricator - 3 PC Metal Bowl",
+    "start_line": 2676,
+    "end_line": 2721,
+    "char_count": 1200
+  },
+  {
+    "product_name": "FRL Accessories",
+    "start_line": 2721,
+    "end_line": 2723,
+    "char_count": 15
+  },
+  {
+    "product_name": "Spacer",
+    "start_line": 2723,
+    "end_line": 2729,
+    "char_count": 108
+  },
+  {
+    "product_name": "Spacer with Port for Air Outlet",
+    "start_line": 2729,
+    "end_line": 2735,
+    "char_count": 161
+  },
+  {
+    "product_name": "Piping Adapter",
+    "start_line": 2735,
+    "end_line": 2741,
+    "char_count": 227
+  },
+  {
+    "product_name": "Wall Mounting Bracket",
+    "start_line": 2741,
+    "end_line": 2758,
+    "char_count": 416
+  },
+  {
+    "product_name": "Mounting Clamp",
+    "start_line": 2758,
+    "end_line": 2774,
+    "char_count": 332
+  },
+  {
+    "product_name": "Pressure Gauges",
+    "start_line": 2774,
+    "end_line": 2783,
+    "char_count": 212
+  },
+  {
+    "product_name": "Auto Drain Valve External",
+    "start_line": 2783,
+    "end_line": 2790,
+    "char_count": 219
+  },
+  {
+    "product_name": "Safety Lockout Valve",
+    "start_line": 2790,
+    "end_line": 2817,
+    "char_count": 460
+  },
+  {
+    "product_name": "Automatic Line Drain",
+    "start_line": 2817,
+    "end_line": 2835,
+    "char_count": 301
+  },
+  {
+    "product_name": "Replacement Sintered Bronze Filter Elements",
+    "start_line": 2835,
+    "end_line": 2841,
+    "char_count": 130
+  },
+  {
+    "product_name": "Replacement Porosilicate Filter Elements",
+    "start_line": 2841,
+    "end_line": 2845,
+    "char_count": 88
+  },
+  {
+    "product_name": "Replacement Bowl for Filters, Lubricator",
+    "start_line": 2845,
+    "end_line": 2849,
+    "char_count": 46
+  },
+  {
+    "product_name": "Air Blow Guns & Accessories",
+    "start_line": 2849,
+    "end_line": 2851,
+    "char_count": 27
+  },
+  {
+    "product_name": "Air Blow Guns Professional",
+    "start_line": 2851,
+    "end_line": 2861,
+    "char_count": 259
+  },
+  {
+    "product_name": "Standard Reach",
+    "start_line": 2861,
+    "end_line": 2875,
+    "char_count": 183
+  },
+  {
+    "product_name": "Extended Reach",
+    "start_line": 2875,
+    "end_line": 3500,
+    "char_count": 12423
+  }
+]
