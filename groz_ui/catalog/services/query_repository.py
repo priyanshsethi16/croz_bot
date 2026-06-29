@@ -78,6 +78,7 @@ def _serialize_family(family: ProductFamily) -> dict:
         'product_name': family.product_name,
         'product_code': family.product_code,
         'raw_category': family.raw_category,
+        'aliases': family.aliases or [],
         'category': family.normalized_category.name if family.normalized_category else family.raw_category,
         'category_slug': family.normalized_category.slug if family.normalized_category else '',
         'description': family.description,
@@ -238,6 +239,7 @@ def list_products_filtered(
                 str(product.get('product_code') or ''),
                 str(product.get('raw_category') or ''),
                 str(product.get('category') or ''),
+                ' '.join(product.get('aliases') or []),
                 str(product.get('description') or ''),
                 json.dumps(product.get('materials') or {}, ensure_ascii=False),
             ]))
@@ -283,6 +285,7 @@ def product_to_chunk(product: dict, *, score: float = 1.0) -> dict:
         f"# {product['product_name']}\n\n"
         f"Product Code: {product['product_code']}\n\n"
         f"Category: {product['category']}\n\n"
+        f"Aliases: {json.dumps(product.get('aliases') or [], ensure_ascii=False)}\n\n"
         f"Description: {product['description']}\n\n"
         f"Features: {json.dumps(product['features'], ensure_ascii=False)}\n\n"
         f"Specifications: {json.dumps(product['specifications'], ensure_ascii=False)}\n\n"

@@ -15,7 +15,7 @@ Implemented and verified:
 - review-gated structured persistence with deterministic UUIDs;
 - isolated `catalog_chunks_v2` dense + BM25 collection and source-aware payload indexes;
 - exact-count embedding confirmation, reconciliation, and activation commands;
-- English deterministic query routing plus `gpt-4o-mini` decomposition fallback;
+- memory-aware AI query routing with `gpt-4o-mini`/configured chat model structured plans;
 - PostgreSQL exact/list/count/comparison routes;
 - source-filtered V2 hybrid retrieval, multi-query merge/deduplication, evidence completeness, and citations;
 - manual-specific text chunking and product-code links;
@@ -56,8 +56,8 @@ No Pinecone dependency or hosted reranking service is used.
 - Dense embeddings use OpenAI `text-embedding-3-small`.
 - Qdrant remains the dense + BM25 sparse hybrid vector store.
 - PostgreSQL is the source of truth for exhaustive product data.
-- OpenAI `gpt-4o-mini` is the chat and query-planning model.
-- Query decomposition is used only for complex multi-intent queries, not every query.
+- The configured chat model is used for both answering and memory-aware query routing.
+- Query decomposition is produced by the AI router only when the current request needs multiple executable tasks.
 - A separate Qdrant collection per PDF will not be created. One versioned collection with payload filters will be used.
 
 ## Historical repository baseline
@@ -502,9 +502,9 @@ PostgreSQL and Qdrant cannot share one transaction. Use a staged/outbox-style pr
 
 A reconciliation command must find missing, stale, duplicated, or orphaned Qdrant points. Never expose a half-indexed document as active.
 
-## English-only query planner
+## English-only memory-aware AI query router
 
-Add a query-planning layer above the current `HybridRetriever`. The planner returns validated JSON; it never writes SQL directly.
+The runtime query-planning layer sits above PostgreSQL repositories and `HybridRetriever`. The AI router returns validated JSON; it never writes SQL directly and it never executes retrieval itself.
 
 Suggested plan shape:
 
@@ -533,16 +533,17 @@ Supported intents:
 | `general_semantic` | `Which tool is suitable for demolition?` | Direct hybrid retrieval |
 | `ambiguous` | `Show me the best one` | Use conversation state or ask a clarification |
 
-### Fast routing before the model
+### Runtime routing
 
-Use deterministic checks first for obvious cases:
+Every chat request is planned by the AI router with the current query, selected catalog/document scope, and compact k=1 session memory. The current query always wins over memory. Memory is only used to resolve follow-up references to the previous product/category/request.
 
-- recognized product/order-code pattern;
-- exhaustive words such as `all`, `every`, `available`, `list`, and `types`;
-- aggregation words such as `count`, `how many`, and `total`;
-- explicit catalog/manual scope from the UI.
+There is no deterministic first-pass runtime fallback. Application code still validates the AI plan before execution:
 
-Call `gpt-4o-mini` as the planner only when rules cannot safely determine the route or decomposition is needed. Limit decomposition to five focused subqueries.
+- exact product/order-code tasks are verified against PostgreSQL;
+- invalid exact codes return missing/clarification instead of silently becoming semantic search;
+- exhaustive/count inventory tasks use safe repository functions;
+- manual troubleshooting plans must carry `source_type = manual`;
+- hybrid tasks are sent through source-filtered Qdrant retrieval.
 
 ### Query scope
 
@@ -667,17 +668,17 @@ Target files: `rag_pipeline/providers.py`, indexing/reconciliation services, and
 
 Exit gate: reindex/delete affects only the selected document and leaves no orphaned points.
 
-### Phase 5 — Query planner and retrieval services
+### Phase 5 — Query router and retrieval services
 
-Target files: new `rag_pipeline/planner.py`, repository/service modules, `retriever.py`, and unit/integration tests.
+Target files: `rag_pipeline/ai_router.py`, shared planner schemas, repository/service modules, `retriever.py`, and unit/integration tests.
 
-- Implement deterministic routing and validated `gpt-4o-mini` planning fallback.
+- Implement validated memory-aware AI routing.
 - Add exact, exhaustive, aggregate, comparison, recommendation, manual, and multi-intent routes.
 - Add catalog/document/source filters to every Qdrant call.
 - Implement decomposition, merge, deduplication, evidence quotas, and deterministic reranking.
-- Keep simple semantic questions on the current one-query fast path.
+- Keep simple semantic questions on one focused hybrid-search task.
 
-Exit gate: every planner intent selects the expected backend and scope in tests.
+Exit gate: every AI-router intent selects the expected backend and scope in tests, and runtime execution does not call `deterministic_plan`.
 
 ### Phase 6 — Chat orchestration and citations
 

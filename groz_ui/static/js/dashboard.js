@@ -11,33 +11,67 @@ overlayEl.addEventListener('click', closeSidebar);
 // Utility to parse and return a clean, user-friendly error message from tracebacks/API responses
 function getCleanErrorMessage(errText) {
   if (!errText) return 'Unknown error occurred.';
+  const text = String(errText).trim();
+  const lowerText = text.toLowerCase();
   
   // Check for common API errors
-  if (errText.includes('high demand') || errText.includes('experiencing high demand')) {
+  if (lowerText.includes('high demand') || lowerText.includes('experiencing high demand')) {
     return 'Google Gemini is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.';
   }
-  if (errText.includes('503 UNAVAILABLE') || errText.includes('503 Service Unavailable')) {
+  if (lowerText.includes('503 unavailable') || lowerText.includes('503 service unavailable')) {
     return 'Google Gemini API is temporarily unavailable (503). Please try again in a few minutes.';
   }
-  if (errText.includes('Quota exceeded') || errText.includes('429')) {
+  if (lowerText.includes('quota exceeded') || lowerText.includes('resource_exhausted') || lowerText.includes('429')) {
     return 'API quota limit exceeded. Please wait a moment before trying again.';
   }
-  if (errText.includes('GEMINI_API_KEY is required')) {
+  if (lowerText.includes('gemini_api_key is required') || lowerText.includes('api key not valid')) {
     return 'Gemini API Key is missing or invalid. Please configure it in Models & Keys.';
   }
+  if (lowerText.includes('[failed] all retries exhausted')) {
+    return 'Gemini extraction failed after all retries for one or more pages.';
+  }
+
+  const isNoiseLine = (line) => {
+    const trimmed = String(line || '').trim();
+    if (!trimmed) return true;
+    if (/^[\^~`\-|. ]+$/.test(trimmed)) return true;
+    if (trimmed.startsWith('Traceback (most recent call last):')) return true;
+    if (trimmed.startsWith('During handling of the above exception')) return true;
+    if (trimmed.startsWith('The above exception was the direct cause')) return true;
+    if (trimmed.startsWith('File "')) return true;
+    if ((/\d+%\|/.test(trimmed) && trimmed.includes('[') && trimmed.includes(']')) || trimmed.includes('it/s]')) return true;
+    if (/^(return|raise|await|for|if|elif|else|with|def|class)\b/.test(trimmed)) return true;
+    return false;
+  };
+
+  const errorLinePatterns = [
+    /^(?:[A-Za-z_][\w.]*\.)?(?:[A-Za-z_][\w]*(?:Error|Exception)|InvalidArgument|ResourceExhausted|ServiceUnavailable|TooManyRequests|DeadlineExceeded|PermissionDenied|Unauthenticated|FailedPrecondition|NotFound|Aborted|RuntimeError|ValueError|SyntaxError):\s*(.+)$/i,
+    /^ERROR:\s*(.+)$/i,
+    /All Gemini (?:keys|retries) failed:\s*(.+)$/i,
+  ];
 
   // Fallback: extract the last non-empty line of the error text
-  const lines = errText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-  if (lines.length > 0) {
-    const lastLine = lines[lines.length - 1];
-    const match = lastLine.match(/^[a-zA-Z0-9.]+Exception:\s*(.+)$/) || 
-                  lastLine.match(/^[a-zA-Z0-9.]+Error:\s*(.+)$/);
-    if (match) {
-      return match[1];
+  const lines = text.replace(/\r/g, '\n').split('\n').map(l => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (isNoiseLine(line)) continue;
+    for (const pattern of errorLinePatterns) {
+      const match = line.match(pattern);
+      if (match && match[1] && match[1].trim().toLowerCase() !== 'none') {
+        return match[1].trim();
+      }
     }
-    return lastLine;
+    if (line.toUpperCase().startsWith('WARNING:')) {
+      const warningMessage = line.replace(/^WARNING:\s*/i, '').trim();
+      if (/\b(failed|error)\b/i.test(warningMessage)) {
+        return warningMessage.slice(0, 500);
+      }
+    }
   }
-  return errText;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!isNoiseLine(lines[i])) return lines[i];
+  }
+  return 'Pipeline failed. Check the server logs for the full error.';
 }
 
 // ── Panel navigation ──────────────────────────────────────────────────────────
@@ -1957,7 +1991,8 @@ function renderSplitParts(parts) {
   if (parts.length) loadSplitPartPreview(0);
 }
 
-async function runSingleSplit(idx) {
+async function runSingleSplit(idx, options = {}) {
+  const fromBatch = !!options.fromBatch;
   const part   = _splitParts[idx];
   const itemEl = document.getElementById(`split-part-${idx}`);
   const statEl = document.getElementById(`split-status-${idx}`);
@@ -1969,7 +2004,7 @@ async function runSingleSplit(idx) {
   statEl.textContent = 'Running…';
   btnEl.disabled = true;
   btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
-  if (processAllBtn) { processAllBtn.disabled = true; processAllBtn.style.opacity = '0.5'; }
+  if (processAllBtn && !fromBatch) { processAllBtn.disabled = true; processAllBtn.style.opacity = '0.5'; }
 
   try {
     const res  = await fetch('/admin-panel/api/pipeline-split/', {
@@ -1987,6 +2022,7 @@ async function runSingleSplit(idx) {
       statEl.className = 'split-part-status errored';
       statEl.textContent = '✗ Failed';
       showToast(`Part ${idx+1} failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
+      return false;
     } else {
       itemEl.className = 'split-part-item done';
       statEl.className = 'split-part-status done';
@@ -2031,12 +2067,14 @@ async function runSingleSplit(idx) {
       _trackedPercent = null;  // let server recompute fresh percent
       await refreshStats();
       loadPdfList();
+      return true;
     }
   } catch(e) {
     itemEl.className = 'split-part-item errored';
     statEl.className = 'split-part-status errored';
     statEl.textContent = '✗ Error';
     showToast(`Network error on part ${idx+1}.`, 'error', 10000);
+    return false;
   } finally {
     const currentBtn = document.getElementById(`split-btn-${idx}`);
     if (currentBtn) {
@@ -2048,7 +2086,7 @@ async function runSingleSplit(idx) {
       }
     }
     const processAllBtn2 = document.getElementById('btn-run-all-splits');
-    if (processAllBtn2) { processAllBtn2.disabled = false; processAllBtn2.style.opacity = ''; }
+    if (processAllBtn2 && !fromBatch) { processAllBtn2.disabled = false; processAllBtn2.style.opacity = ''; }
   }
 }
 
@@ -2056,15 +2094,36 @@ async function runAllSplits() {
   const btn = document.getElementById('btn-run-all-splits');
   btn.disabled = true;
   btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+  let failedCount = 0;
   for (let i = 0; i < _splitParts.length; i++) {
     const statEl = document.getElementById(`split-status-${i}`);
     if (statEl && statEl.textContent === '✓ Done') continue; // skip already done
-    await runSingleSplit(i);
+    const ok = await runSingleSplit(i, { fromBatch: true });
+    if (!ok) failedCount += 1;
   }
+
+  const statuses = _splitParts.map((_, i) => document.getElementById(`split-status-${i}`)?.textContent || '');
+  const doneCount = statuses.filter(text => text === '✓ Done').length;
+  const allDone = _splitParts.length > 0 && doneCount === _splitParts.length;
+  const nextToIndex = document.getElementById('next-to-index');
+
   btn.disabled = false;
-  btn.innerHTML = '<i class="fa fa-check"></i> All Done';
-  document.getElementById('next-to-index').style.display = 'flex';
-  showToast('All parts processed!', 'success');
+  btn.style.opacity = '';
+
+  if (allDone) {
+    btn.innerHTML = '<i class="fa fa-check"></i> All Done';
+    if (nextToIndex) nextToIndex.style.display = 'flex';
+    showToast('All parts processed!', 'success');
+    return;
+  }
+
+  btn.innerHTML = '<i class="fa fa-redo"></i> Retry Failed';
+  if (nextToIndex) nextToIndex.style.display = 'none';
+  const remainingCount = _splitParts.length - doneCount;
+  const reason = failedCount
+    ? `${failedCount} part${failedCount === 1 ? '' : 's'} failed`
+    : `${remainingCount} part${remainingCount === 1 ? '' : 's'} still pending`;
+  showToast(`Process All incomplete: ${reason}. Fix the issue and retry.`, 'error', 10000);
 }
 
 // ── Chunks Drawer ─────────────────────────────────────────────────────
@@ -2445,6 +2504,45 @@ function _familySelectedRecord() {
   return _familySelectedId ? (_familyPanelState.familiesById[_familySelectedId] || null) : null;
 }
 
+function _normalizeFamilyVariant(variant = {}) {
+  return {
+    name: String(variant.name || '').trim(),
+  };
+}
+
+function _collectFamilyVariants() {
+  return [...document.querySelectorAll('#family-variants-list .family-variant-row')]
+    .map(row => _normalizeFamilyVariant({
+      name: row.querySelector('[data-variant-field="name"]')?.value || '',
+    }))
+    .filter(variant => variant.name);
+}
+
+function renderFamilyVariantRows(variants = []) {
+  const list = document.getElementById('family-variants-list');
+  if (!list) return;
+  const rows = (variants || []).map(_normalizeFamilyVariant);
+  if (!rows.length) rows.push(_normalizeFamilyVariant());
+  list.innerHTML = rows.map((variant, index) => `
+    <div class="family-variant-row" data-variant-index="${index}">
+      <input type="text" data-variant-field="name" placeholder="Variant name" value="${escAttr(variant.name)}" />
+      <button type="button" class="btn btn-sm btn-secondary family-variant-remove" onclick="removeFamilyVariantRow(${index})">
+        <i class="fa fa-times"></i>
+      </button>
+    </div>
+  `).join('');
+}
+
+function addFamilyVariantRow() {
+  renderFamilyVariantRows([..._collectFamilyVariants(), _normalizeFamilyVariant()]);
+}
+
+function removeFamilyVariantRow(index) {
+  const variants = _collectFamilyVariants();
+  variants.splice(index, 1);
+  renderFamilyVariantRows(variants);
+}
+
 function _familyPageLabel(chunk) {
   const start = Number(chunk.page_start || 0);
   const end = Number(chunk.page_end || chunk.page_start || 0);
@@ -2457,14 +2555,15 @@ function _familyResetForm() {
   _familySelectedChunkIds = new Set();
   const id = document.getElementById('family-id');
   const name = document.getElementById('family-name');
-  const code = document.getElementById('family-code');
   const category = document.getElementById('family-category');
+  const aliases = document.getElementById('family-aliases');
   const status = document.getElementById('family-review-status');
   if (id) id.value = '';
   if (name) name.value = '';
-  if (code) code.value = '';
   if (category) category.value = '';
+  if (aliases) aliases.value = '';
   if (status) status.value = 'approved';
+  renderFamilyVariantRows([]);
 }
 
 function renderFamilySelectionSummary() {
@@ -2583,7 +2682,7 @@ function renderFamilyCards() {
   const badge = document.getElementById('family-count-badge');
   if (!list) return;
 
-  const families = _familyPanelState.families || [];
+    const families = _familyPanelState.families || [];
   if (badge) badge.textContent = String(families.length);
 
   if (!families.length) {
@@ -2595,6 +2694,8 @@ function renderFamilyCards() {
     const active = _familySelectedId === family.id;
     const chunkPreview = (family.chunks || []).slice(0, 3).map(chunk => `C${String(chunk.ordinal || 0).padStart(3, '0')}`).join(', ');
     const more = family.chunk_count > 3 ? ` +${family.chunk_count - 3} more` : '';
+    const variantCount = (family.variants || []).length;
+    const aliasCount = (family.aliases || []).length;
     const pageText = family.page_start && family.page_end
       ? (family.page_start === family.page_end ? `Page ${family.page_start}` : `Pages ${family.page_start}-${family.page_end}`)
       : 'Page range unset';
@@ -2610,7 +2711,8 @@ function renderFamilyCards() {
         </div>
         <div class="family-card-meta">
           <span class="badge badge-blue">${family.chunk_count} chunk${family.chunk_count === 1 ? '' : 's'}</span>
-          ${family.product_code ? `<span class="badge badge-grey">${escHtml(family.product_code)}</span>` : ''}
+          ${variantCount ? `<span class="badge badge-grey">${variantCount} variant${variantCount === 1 ? '' : 's'}</span>` : ''}
+          ${aliasCount ? `<span class="badge badge-grey">${aliasCount} alias${aliasCount === 1 ? '' : 'es'}</span>` : ''}
           ${chunkPreview ? `<span class="badge badge-grey">${escHtml(chunkPreview)}${escHtml(more)}</span>` : ''}
         </div>
       </div>
@@ -2652,14 +2754,15 @@ function loadFamilyFromCard(familyId) {
 
   const id = document.getElementById('family-id');
   const name = document.getElementById('family-name');
-  const code = document.getElementById('family-code');
   const category = document.getElementById('family-category');
+  const aliases = document.getElementById('family-aliases');
   const status = document.getElementById('family-review-status');
   if (id) id.value = family.id;
   if (name) name.value = family.product_name || '';
-  if (code) code.value = family.product_code || '';
   if (category) category.value = family.raw_category || '';
+  if (aliases) aliases.value = (family.aliases || []).join(', ');
   if (status) status.value = family.review_status || 'approved';
+  renderFamilyVariantRows(family.variants || []);
 
   renderFamilyWorkspace();
 }
@@ -2776,14 +2879,15 @@ async function loadFamilyPanel(force = false) {
       _familySelectedChunkIds = new Set((family.chunks || []).map(chunk => String(chunk.id)));
       const id = document.getElementById('family-id');
       const name = document.getElementById('family-name');
-      const code = document.getElementById('family-code');
       const category = document.getElementById('family-category');
+      const aliases = document.getElementById('family-aliases');
       const status = document.getElementById('family-review-status');
       if (id) id.value = family.id;
       if (name) name.value = family.product_name || '';
-      if (code) code.value = family.product_code || '';
       if (category) category.value = family.raw_category || '';
+      if (aliases) aliases.value = (family.aliases || []).join(', ');
       if (status) status.value = family.review_status || 'approved';
+      renderFamilyVariantRows(family.variants || []);
     } else {
       const validChunkIds = new Set(Object.keys(_familyPanelState.chunksById));
       _familySelectedChunkIds = new Set([..._familySelectedChunkIds].filter(id => validChunkIds.has(String(id))));
@@ -2808,8 +2912,9 @@ async function saveProductFamily() {
   const pdfName = _familyPanelState.pdf || selectedPdf || '';
   const familyId = (document.getElementById('family-id')?.value || _familySelectedId || '').trim();
   const productName = document.getElementById('family-name')?.value.trim() || '';
-  const productCode = document.getElementById('family-code')?.value.trim() || '';
   const rawCategory = document.getElementById('family-category')?.value.trim() || '';
+  const aliases = document.getElementById('family-aliases')?.value.trim() || '';
+  const variants = _collectFamilyVariants();
   const reviewStatus = document.getElementById('family-review-status')?.value || 'approved';
   const chunkIds = [..._familySelectedChunkIds];
 
@@ -2818,7 +2923,7 @@ async function saveProductFamily() {
     return;
   }
   if (!productName) {
-    showToast('Product family name is required.', 'error');
+    showToast('Actual product name is required.', 'error');
     return;
   }
   if (!chunkIds.length) {
@@ -2840,8 +2945,9 @@ async function saveProductFamily() {
         pdf: pdfName,
         family_id: familyId,
         product_name: productName,
-        product_code: productCode,
         raw_category: rawCategory,
+        aliases,
+        variants,
         review_status: reviewStatus,
         chunk_ids: chunkIds,
       }),
@@ -2863,14 +2969,15 @@ async function saveProductFamily() {
 
     const id = document.getElementById('family-id');
     const name = document.getElementById('family-name');
-    const code = document.getElementById('family-code');
     const category = document.getElementById('family-category');
+    const aliasesField = document.getElementById('family-aliases');
     const status = document.getElementById('family-review-status');
     if (id) id.value = _familySelectedId;
     if (name) name.value = data.family?.product_name || productName;
-    if (code) code.value = data.family?.product_code || productCode;
     if (category) category.value = data.family?.raw_category || rawCategory;
+    if (aliasesField) aliasesField.value = (data.family?.aliases || []).join(', ') || aliases;
     if (status) status.value = data.family?.review_status || reviewStatus;
+    renderFamilyVariantRows(data.family?.variants || variants);
 
     renderFamilyWorkspace();
     document.getElementById('next-to-index-families').style.display = 'flex';

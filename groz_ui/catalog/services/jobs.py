@@ -149,12 +149,13 @@ def run_ingestion_job(job_id: str, *, allow_disabled: bool = False) -> dict:
             command,
             cwd=str(settings.PROJECT_ROOT),
             env=subprocess_environment(),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             timeout=None,
         )
         if result.returncode != 0:
-            details = (result.stdout + result.stderr)[-4000:]
+            details = (result.stdout or '')[-4000:]
             raise IngestionJobError(f'Vision pipeline failed with exit code {result.returncode}:\n{details}')
         if not assembled_path.exists():
             raise IngestionJobError('Vision pipeline completed without assembled_products.json.')

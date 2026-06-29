@@ -1655,7 +1655,8 @@
 }
 
 .family-field input,
-.family-field select {
+.family-field select,
+.family-field textarea {
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -1663,12 +1664,52 @@
   font-size: 13px;
   outline: none;
   padding: 8px 10px;
+  resize: vertical;
   width: 100%;
 }
 
 .family-field input:focus,
-.family-field select:focus {
+.family-field select:focus,
+.family-field textarea:focus {
   border-color: var(--orange);
+}
+
+.family-variants-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.family-variants-head label {
+  margin: 0;
+}
+
+.family-variants-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.family-variant-row {
+  align-items: center;
+  background: #fafafa;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
+  padding: 8px;
+}
+
+.family-variant-row input {
+  font-size: 12px;
+  padding: 7px 8px;
+}
+
+.family-variant-remove {
+  justify-self: end;
 }
 
 .family-selection-summary {

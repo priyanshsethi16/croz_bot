@@ -161,6 +161,10 @@ def persist_assembled_products(
         family.product_name = product_name
         family.product_code = _clean(product.get('product_code'))
         family.raw_category = raw_category
+        aliases = product.get('aliases') or product.get('alias') or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        family.aliases = [_clean(alias) for alias in aliases if _clean(alias)]
         if not preserve_manual_review:
             family.normalized_category = normalized_category
             family.review_status = desired_review_status

@@ -616,24 +616,33 @@
             <aside class="family-editor-card">
               <div class="family-editor-head">
                 <div>
-                  <h4>Family Editor</h4>
-                  <p>Create or update a family, then assign selected chunks to it.</p>
+                  <h4>Product Editor</h4>
+                  <p>Create or update the actual product, then assign selected chunks to it.</p>
                 </div>
                 <span class="badge badge-blue" id="family-editor-chunk-count">0 selected</span>
               </div>
 
               <input type="hidden" id="family-id" />
               <div class="family-field">
-                <label for="family-name">Product family name</label>
+                <label for="family-name">Actual product name</label>
                 <input type="text" id="family-name" placeholder="Cordless Impact Drill Driver 13mm (1/2&quot;)" />
               </div>
               <div class="family-field">
-                <label for="family-code">Product code</label>
-                <input type="text" id="family-code" placeholder="BLMD-358JST" />
+                <label for="family-category">Parent category</label>
+                <input type="text" id="family-category" placeholder="Cordless Drills" />
               </div>
               <div class="family-field">
-                <label for="family-category">Raw category</label>
-                <input type="text" id="family-category" placeholder="Cordless Impact Drill" />
+                <label for="family-aliases">Aliases</label>
+                <textarea id="family-aliases" rows="2" placeholder="impact drill, cordless drill, drill driver"></textarea>
+              </div>
+              <div class="family-field family-variants-field">
+                <div class="family-variants-head">
+                  <label>Variants</label>
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="addFamilyVariantRow()">
+                    <i class="fa fa-plus"></i> Add Variant
+                  </button>
+                </div>
+                <div class="family-variants-list" id="family-variants-list"></div>
               </div>
               <div class="family-field">
                 <label for="family-review-status">Review status</label>

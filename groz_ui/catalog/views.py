@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -14,14 +16,99 @@ from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
+from .services.chat_memory import (
+    ADMIN_CHAT_MEMORY_KEY,
+    build_memory_update,
+    clear_turn,
+    load_turn,
+    save_turn,
+)
+from rag_pipeline.ai_router import AIQueryRouterError
+
 from .models import DocumentChunk, ProductFamily
 
 PROJECT_ROOT = settings.PROJECT_ROOT
+logger = logging.getLogger(__name__)
 
 
 def _clean_parsing_instructions(value) -> str:
     """Limit optional admin PDF-specific VLM instructions before subprocess use."""
     return str(value or '').strip()[:4000]
+
+
+def _pipeline_noise_line(line: str) -> bool:
+    stripped = str(line or '').strip()
+    if not stripped:
+        return True
+    if re.fullmatch(r'[\^~`\-|. ]+', stripped):
+        return True
+    if stripped.startswith((
+        'Traceback (most recent call last):',
+        'During handling of the above exception',
+        'The above exception was the direct cause',
+        'File "',
+    )):
+        return True
+    if (
+        re.search(r'\d+%\|', stripped)
+        and '[' in stripped
+        and ']' in stripped
+    ) or 'it/s]' in stripped:
+        return True
+    if re.match(r'^(return|raise|await|for|if|elif|else|with|def|class)\b', stripped):
+        return True
+    return False
+
+
+def _clean_pipeline_error(output: str) -> str:
+    """Extract a useful user-facing error from subprocess stdout/stderr."""
+    raw = str(output or '').strip()
+    if not raw:
+        return 'Pipeline failed without output.'
+
+    lowered = raw.lower()
+    if 'high demand' in lowered or 'experiencing high demand' in lowered:
+        return 'Google Gemini is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.'
+    if '503 unavailable' in lowered or '503 service unavailable' in lowered:
+        return 'Google Gemini API is temporarily unavailable (503). Please try again in a few minutes.'
+    if 'quota exceeded' in lowered or 'resource_exhausted' in lowered or '429' in lowered:
+        return 'API quota limit exceeded. Please wait a moment before trying again.'
+    if 'api key not valid' in lowered or 'gemini_api_key is required' in lowered:
+        return 'Gemini API Key is missing or invalid. Please configure it in Models & Keys.'
+    if '[failed] all retries exhausted' in lowered:
+        return 'Gemini extraction failed after all retries for one or more pages.'
+
+    lines = [line.strip() for line in raw.replace('\r', '\n').splitlines() if line.strip()]
+    exception_re = re.compile(
+        r'^(?:[A-Za-z_][\w.]*\.)?'
+        r'(?P<name>[A-Za-z_][\w]*(?:Error|Exception)|InvalidArgument|ResourceExhausted|'
+        r'ServiceUnavailable|TooManyRequests|DeadlineExceeded|PermissionDenied|Unauthenticated|'
+        r'FailedPrecondition|NotFound|Aborted|RuntimeError|ValueError|SyntaxError):\s*'
+        r'(?P<message>.+)$'
+    )
+    gemini_failed_re = re.compile(r'All Gemini (?:keys|retries) failed:\s*(?P<message>.+)$', re.I)
+
+    for line in reversed(lines):
+        if _pipeline_noise_line(line):
+            continue
+        error_match = exception_re.match(line)
+        if error_match:
+            return error_match.group('message').strip()[:500]
+        if line.upper().startswith('ERROR:'):
+            return line.split(':', 1)[1].strip()[:500] or line[:500]
+        if line.upper().startswith('WARNING:'):
+            warning_message = line.split(':', 1)[1].strip()
+            if re.search(r'\b(failed|error)\b', warning_message, re.I):
+                return warning_message[:500]
+        gemini_match = gemini_failed_re.search(line)
+        if gemini_match and gemini_match.group('message').strip().lower() != 'none':
+            return gemini_match.group('message').strip()[:500]
+
+    for line in reversed(lines):
+        if not _pipeline_noise_line(line):
+            return line[:500]
+
+    return 'Pipeline failed. Check the server logs for the full error.'
 
 
 def _resolve_catalog_document(pdf_name: str):
@@ -376,12 +463,19 @@ def run_pipeline(request):
             env['PDF_PARSING_INSTRUCTIONS'] = parsing_instructions
         result = subprocess.run(
             [sys.executable, '-m', 'vision_pipeline.main', '--pdf', str(pdf_path)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            timeout=600,
             env=env,
         )
-        output = result.stdout + result.stderr
+        output = result.stdout or ''
         if result.returncode != 0:
-            return JsonResponse({'error': output[-2000:]}, status=500)
+            return JsonResponse({
+                'error': _clean_pipeline_error(output),
+                'detail': output[-4000:],
+            }, status=500)
 
         # Update progress for this specific PDF to 'chunked' (50%)
         pdf_progress = request.session.get('pdf_progress', {})
@@ -753,6 +847,7 @@ def admin_chat(request):
         from .model_config import get_runtime_config
         from .services.query_engine import CatalogQueryEngine
 
+        memory_turn = load_turn(request.session, ADMIN_CHAT_MEMORY_KEY)
         runtime = get_runtime_config()
         if not runtime.openai_api_key:
             return JsonResponse({'error': 'OPENAI_API_KEY is required for retrieval embeddings.'}, status=400)
@@ -768,10 +863,30 @@ def admin_chat(request):
             document_ids=document_ids,
             page=max(1, int(body.get('page', 1))),
             page_size=min(100, max(1, int(body.get('page_size', 50)))),
+            memory=memory_turn.model_dump(mode='json', exclude_defaults=True, exclude_none=True) or None,
         )
         payload = execution.as_dict()
         payload['query_path'] = 'v2'
+        try:
+            memory_update = build_memory_update(
+                query,
+                execution,
+                standalone_query=getattr(execution, 'standalone_query', None),
+            )
+            if memory_update is None:
+                clear_turn(request.session, ADMIN_CHAT_MEMORY_KEY)
+            else:
+                save_turn(request.session, ADMIN_CHAT_MEMORY_KEY, memory_update)
+        except Exception:
+            logger.exception('Failed to persist admin chat memory.')
         return JsonResponse(payload)
+    except AIQueryRouterError:
+        correlation_id = str(uuid.uuid4())
+        logger.exception('AI query router failed; correlation_id=%s', correlation_id)
+        return JsonResponse({
+            'error': 'AI query router failed.',
+            'correlation_id': correlation_id,
+        }, status=502)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -1128,12 +1243,19 @@ def run_pipeline_split(request):
             env['PDF_PARSING_INSTRUCTIONS'] = parsing_instructions
         result = subprocess.run(
             [sys.executable, '-m', 'vision_pipeline.main', '--pdf', str(pdf_path)],
-            capture_output=True, text=True, cwd=str(PROJECT_ROOT), timeout=600,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            timeout=600,
             env=env,
         )
-        output = result.stdout + result.stderr
+        output = result.stdout or ''
         if result.returncode != 0:
-            return JsonResponse({'error': output[-2000:]}, status=500)
+            return JsonResponse({
+                'error': _clean_pipeline_error(output),
+                'detail': output[-4000:],
+            }, status=500)
 
         # Update stage for this split part in session + DB stage map
         import json as _j
@@ -1300,8 +1422,15 @@ def delete_pdf(request):
         from rag_pipeline.providers import COLLECTION, build_qdrant_client
         client = build_qdrant_client()
         if client.collection_exists(COLLECTION):
-            # Try both sanitized and original stem
-            for source_stem in [stem, sanitized_stem]:
+            # Try every source_pdf spelling used by legacy and V2 paths.
+            source_pdf_values = list(dict.fromkeys([
+                filename,
+                stem,
+                sanitized_stem,
+                f'{stem}.pdf',
+                f'{sanitized_stem}.pdf',
+            ]))
+            for source_stem in source_pdf_values:
                 try:
                     client.delete(
                         collection_name=COLLECTION,
@@ -1322,33 +1451,42 @@ def delete_pdf(request):
         pass
 
     # Delete from V2 database
+    deleted_documents = 0
     try:
         from .models import CatalogDocument
         from .services.documents import archive_document
+        from django.db.models import Q
         
-        # Find and delete documents matching filename
-        docs_to_delete = CatalogDocument.objects.filter(original_filename=filename)
+        filename_candidates = {
+            filename,
+            stem,
+            f'{stem}.pdf',
+            sanitized_stem,
+            f'{sanitized_stem}.pdf',
+        }
+        document_filter = Q(original_filename__in=filename_candidates)
+        if not is_split:
+            document_filter |= Q(original_filename__startswith=stem + '_')
+            document_filter |= Q(original_filename__startswith=sanitized_stem + '_')
+
+        docs_to_delete = list(
+            CatalogDocument.objects.filter(document_filter)
+            .distinct()
+            .order_by('original_filename', 'id')
+        )
         for doc in docs_to_delete:
             try:
                 archive_document(doc)
             except Exception:
                 pass
             try:
-                doc.delete()
-            except Exception:
-                pass
-        
-        # Also find split parts starting with this stem
-        split_docs = CatalogDocument.objects.filter(
-            original_filename__startswith=stem + '_'
-        )
-        for doc in split_docs:
-            try:
-                archive_document(doc)
+                if doc.file:
+                    doc.file.delete(save=False)
             except Exception:
                 pass
             try:
                 doc.delete()
+                deleted_documents += 1
             except Exception:
                 pass
                 
@@ -1379,7 +1517,10 @@ def delete_pdf(request):
     request.session['approved_pdfs'] = approved_pdfs
     request.session.modified = True
 
-    return JsonResponse({'message': f'"{filename}" and all associated data deleted.'})
+    return JsonResponse({
+        'message': f'"{filename}" and all associated data deleted.',
+        'deleted_documents': deleted_documents,
+    })
 
 
 # -- API: Delete embeddings only (Create Chunks panel) ────────────────────────
@@ -1593,11 +1734,19 @@ def _serialize_family_editor_family(family):
         'product_name': family.product_name,
         'product_code': family.product_code,
         'raw_category': family.raw_category,
+        'aliases': family.aliases or [],
         'category': family.normalized_category.name if family.normalized_category else family.raw_category,
         'review_status': family.review_status,
         'page_start': family.page_start,
         'page_end': family.page_end,
         'chunk_count': len(chunks),
+        'variants': [
+            {
+                'id': str(variant.id),
+                'name': variant.name,
+            }
+            for variant in family.variants.all().order_by('name', 'id')
+        ],
         'chunks': [
             {
                 'id': str(chunk.id),
@@ -1610,6 +1759,50 @@ def _serialize_family_editor_family(family):
             for chunk in chunks
         ],
     }
+
+
+def _clean_family_aliases(value):
+    if isinstance(value, str):
+        raw_values = re.split(r'[,\n;]+', value)
+    elif isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = []
+    aliases = []
+    seen = set()
+    for raw in raw_values:
+        alias = re.sub(r'\s+', ' ', str(raw or '').strip())
+        key = alias.lower()
+        if alias and key not in seen:
+            aliases.append(alias[:120])
+            seen.add(key)
+    return aliases[:20]
+
+
+def _clean_family_variants(value):
+    if not isinstance(value, list):
+        return []
+    variants = []
+    seen = set()
+    for raw in value[:50]:
+        if not isinstance(raw, dict):
+            continue
+        name = re.sub(r'\s+', ' ', str(raw.get('name') or '').strip())[:500]
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        variants.append({'name': name})
+    return variants
+
+
+def _variant_row_hash(variant):
+    import hashlib
+
+    payload = json.dumps(variant, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
 @login_required
@@ -1677,6 +1870,7 @@ def list_product_families(request):
             'normalized_category',
         ).prefetch_related(
             Prefetch('chunks', queryset=DocumentChunk.objects.select_related('family').order_by('ordinal')),
+            'variants',
         ).order_by('product_name', 'product_code', 'id')
         
         for family in doc_families:
@@ -1708,15 +1902,16 @@ def save_product_family(request):
 
     pdf_name = str(body.get('pdf', '')).strip()
     product_name = str(body.get('product_name', '')).strip()
-    product_code = str(body.get('product_code', '')).strip()
     raw_category = str(body.get('raw_category', '')).strip()
+    aliases = _clean_family_aliases(body.get('aliases', []))
+    variants = _clean_family_variants(body.get('variants', []))
     review_status = str(body.get('review_status', 'approved')).strip().lower()
     family_id = str(body.get('family_id', '')).strip()
     chunk_ids = body.get('chunk_ids', [])
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
     if not product_name:
-        return JsonResponse({'error': 'Product family name is required.'}, status=400)
+        return JsonResponse({'error': 'Actual product name is required.'}, status=400)
     if review_status not in {ProductFamily.ReviewStatus.APPROVED, ProductFamily.ReviewStatus.NEEDS_REVIEW, ProductFamily.ReviewStatus.REJECTED}:
         return JsonResponse({'error': 'Invalid review status.'}, status=400)
     if not isinstance(chunk_ids, list):
@@ -1733,6 +1928,7 @@ def save_product_family(request):
     from django.db.models import Count
     from django.db.models import Prefetch
     from django.utils import timezone
+    from .models import ProductVariant
     from .services.taxonomy import resolve_category
     import re
 
@@ -1771,8 +1967,9 @@ def save_product_family(request):
             raw_category=raw_category,
         )
         family.product_name = product_name
-        family.product_code = product_code
+        family.product_code = ''
         family.raw_category = raw_category
+        family.aliases = aliases
         family.normalized_category = category
         family.review_status = review_status
         computed_page_start = min((chunk.page_start for chunk in chunks if chunk.page_start), default=0)
@@ -1780,6 +1977,24 @@ def save_product_family(request):
         family.page_start = int(body.get('page_start') or computed_page_start or family.page_start or 0)
         family.page_end = int(body.get('page_end') or computed_page_end or family.page_end or family.page_start or 0)
         family.save()
+
+        DocumentChunk.objects.filter(variant__family=family).update(variant=None)
+        family.variants.all().delete()
+        for variant in variants:
+            source_row_hash = _variant_row_hash(variant)
+            ProductVariant.objects.create(
+                family=family,
+                product_code='',
+                order_number='',
+                name=variant['name'],
+                size='',
+                unit='',
+                specifications={},
+                ordering_data={},
+                page_start=family.page_start,
+                page_end=family.page_end,
+                source_row_hash=source_row_hash,
+            )
 
         if chunk_ids:
             updated_at = timezone.now()
@@ -1881,6 +2096,7 @@ def save_product_family(request):
             'normalized_category',
         ).prefetch_related(
             Prefetch('chunks', queryset=DocumentChunk.objects.select_related('family').order_by('ordinal')),
+            'variants',
         ).order_by('product_name', 'product_code', 'id')
     ]
     chunks = [

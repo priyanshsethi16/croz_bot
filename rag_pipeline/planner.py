@@ -1,4 +1,9 @@
-"""English query routing with deterministic fast paths and validated LLM plans."""
+"""Shared query-plan schemas plus legacy deterministic planner helpers.
+
+Runtime routing is owned by rag_pipeline.ai_router. The deterministic helpers
+remain for baseline tests and offline evaluation only; CatalogQueryEngine does
+not call them as a fallback.
+"""
 
 from __future__ import annotations
 
@@ -293,6 +298,7 @@ def enrich_complex_plan(
     api_key: str,
     model: str = 'gpt-4o-mini',
 ) -> QueryPlan:
+    """Legacy/offline model planner; runtime uses AIQueryRouter instead."""
     if not api_key:
         return plan.model_copy(update={
             'intent': QueryIntent.MULTI_INTENT,
@@ -330,9 +336,9 @@ def enrich_complex_plan(
         })
 
     intents = list(dict.fromkeys(output.intents))
-    # Structured output guarantees shape, not semantic route validity. An
-    # exact lookup without an explicit code cannot be executed safely, so it
-    # becomes a hybrid catalog search before leaving the planner.
+    # Legacy/offline safety: structured output guarantees shape, not semantic
+    # route validity. Runtime exact-code plans are handled by AIQueryRouter and
+    # PostgreSQL validation in CatalogQueryEngine.
     tasks = [
         task.model_copy(update={'route': QueryRoute.HYBRID_SEARCH})
         if task.route == QueryRoute.POSTGRES_EXACT and not task.product_codes

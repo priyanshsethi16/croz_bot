@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 
@@ -18,17 +17,15 @@ from catalog.services.query_repository import (
     resolve_product_code_tokens,
     source_chunks_for_products,
 )
+from rag_pipeline.ai_router import AIQueryRouter
 from rag_pipeline.llm import LLMAnswerer
 from rag_pipeline.planner import (
-    QueryEntity,
     QueryIntent,
     QueryPlan,
     QueryRoute,
     QueryScope,
-    deterministic_plan,
-    enrich_complex_plan,
+    QueryTask,
     extract_requested_constraints,
-    should_use_model_planner,
 )
 from rag_pipeline.retriever import HybridRetriever
 
@@ -36,6 +33,7 @@ from rag_pipeline.retriever import HybridRetriever
 @dataclass
 class QueryExecution:
     plan: QueryPlan
+    standalone_query: str
     answer: str
     chunks: list[dict]
     sources: list[dict]
@@ -83,25 +81,36 @@ def _scope_filter(scope: QueryScope) -> models.Filter:
     return models.Filter(must=conditions)
 
 
-def _candidate_tokens(query: str) -> list[str]:
-    stop = {
-        'SHOW', 'FIND', 'WHAT', 'WHICH', 'ABOUT', 'DETAILS', 'SPECIFICATIONS',
-        'COMPARE', 'VERSUS', 'WITH', 'FROM', 'PRODUCT', 'PRODUCTS', 'AVAILABLE',
-    }
-    values = []
-    for token in re.findall(r'[A-Za-z0-9][A-Za-z0-9./-]{1,39}', query):
-        value = token.strip('.,').upper()
-        if value not in stop and value not in values:
-            values.append(value)
-    return values[:20]
-
-
 def _category_entity(plan: QueryPlan) -> str:
     return next((entity.value for entity in plan.entities if entity.type == 'category'), '')
 
 
 def _code_entities(plan: QueryPlan) -> list[str]:
     return [entity.value for entity in plan.entities if entity.type == 'product_code']
+
+
+def _planned_product_codes(plan: QueryPlan) -> list[str]:
+    codes: list[str] = []
+    for code in _code_entities(plan):
+        normalized = str(code or '').strip().upper()
+        if normalized and normalized not in codes:
+            codes.append(normalized)
+    for task in plan.tasks:
+        for code in task.product_codes:
+            normalized = str(code or '').strip().upper()
+            if normalized and normalized not in codes:
+                codes.append(normalized)
+    return codes
+
+
+def _inventory_task(plan: QueryPlan) -> QueryTask | None:
+    return next((task for task in plan.tasks if task.route == QueryRoute.POSTGRES_INVENTORY), None)
+
+
+def _task_label(task: QueryTask) -> str:
+    if task.route == QueryRoute.POSTGRES_EXACT and task.product_codes:
+        return ', '.join(task.product_codes)
+    return task.purpose or task.query
 
 
 def _result_identity(result: dict) -> str:
@@ -615,13 +624,18 @@ class CatalogQueryEngine:
             api_key=runtime.chat_api_key,
             model=runtime.chat_model,
         )
+        self.router = AIQueryRouter(
+            provider=runtime.chat_provider,
+            api_key=runtime.chat_api_key,
+            model=runtime.chat_model,
+        )
 
     def _semantic_retrieve(self, query: str, scope: QueryScope, *, top_k: int = 5) -> list[dict]:
         retriever = HybridRetriever(top_k=top_k)  # HuggingFace embeddings need no API key
         return retriever.retrieve(query, query_filter=_scope_filter(scope))
 
     def _normalize_planned_tasks(self, plan: QueryPlan) -> QueryPlan:
-        """Validate exact-task codes and reroute unusable tasks to hybrid search."""
+        """Normalize inventory filters while preserving the router's route choice."""
         normalized_tasks = []
         for task in plan.tasks:
             if task.route == QueryRoute.POSTGRES_INVENTORY:
@@ -648,10 +662,7 @@ class CatalogQueryEngine:
             if valid_codes:
                 normalized_tasks.append(task.model_copy(update={'product_codes': valid_codes}))
             else:
-                normalized_tasks.append(task.model_copy(update={
-                    'route': QueryRoute.HYBRID_SEARCH,
-                    'product_codes': [],
-                }))
+                normalized_tasks.append(task)
         return plan.model_copy(update={
             'tasks': normalized_tasks,
             'subqueries': [task.query for task in normalized_tasks],
@@ -665,7 +676,7 @@ class CatalogQueryEngine:
         pinned_inventory_sources: list[dict] = []
         verified_inventory: dict[str, dict] = {}
         for task in plan.tasks:
-            task_label = task.purpose or task.query
+            task_label = _task_label(task)
             if task.route == QueryRoute.POSTGRES_INVENTORY:
                 products = list_products_filtered(
                     categories=task.categories,
@@ -689,9 +700,7 @@ class CatalogQueryEngine:
                     products = find_by_product_codes(valid_codes, scope=plan.scope)
                     results = [product_to_chunk(product) for product in products]
                 else:
-                    # Defensive fallback in case an unnormalized plan reaches
-                    # execution through a test, cache, or future code path.
-                    results = self._semantic_retrieve(task.query, plan.scope, top_k=5)
+                    results = []
             else:
                 results = self._semantic_retrieve(task.query, plan.scope, top_k=5)
             result_sets.append((task_label, results))
@@ -717,54 +726,23 @@ class CatalogQueryEngine:
         document_ids: list[str] | None = None,
         page: int = 1,
         page_size: int = 50,
+        memory: dict | None = None,
     ) -> QueryExecution:
-        scope = QueryScope(
+        request_scope = QueryScope(
             catalog_ids=catalog_ids or [],
             document_ids=document_ids or [],
             source_types=['catalog'],
         )
-        plan = deterministic_plan(query, scope)
-
-        # Validate code-like tokens against PostgreSQL before they can control
-        # routing. This rejects adjectives such as NON-SPARKING/HEAVY-DUTY.
-        candidates = _candidate_tokens(query)
-        valid_codes = resolve_product_code_tokens(candidates, scope=scope)
-        non_code_entities = [entity for entity in plan.entities if entity.type != 'product_code']
-        plan = plan.model_copy(update={
-            'entities': [
-                *non_code_entities,
-                *[QueryEntity(type='product_code', value=value) for value in valid_codes],
-            ],
-        })
-        structured_probe = find_by_product_codes(valid_codes, scope=scope) if valid_codes else []
-
-        if should_use_model_planner(query, plan, valid_product_codes=valid_codes):
-            plan = enrich_complex_plan(
-                plan,
-                query,
-                api_key=self.runtime.openai_api_key,
-                model='gpt-4o-mini',
-            )
-            plan = self._normalize_planned_tasks(plan)
-        elif structured_probe and plan.intent in (QueryIntent.AMBIGUOUS, QueryIntent.GENERAL_SEMANTIC):
-            plan = plan.model_copy(update={
-                'intent': QueryIntent.EXACT_LOOKUP,
-                'intents': [QueryIntent.EXACT_LOOKUP],
-                'needs_clarification': False,
-                'clarification_question': '',
-            })
-        elif plan.intent in (QueryIntent.EXACT_LOOKUP, QueryIntent.COMPARISON) and not valid_codes:
-            # A regex-looking token that is not in PostgreSQL must never force
-            # an empty exact route; semantic retrieval is the safe fallback.
-            plan = plan.model_copy(update={
-                'intent': QueryIntent.GENERAL_SEMANTIC,
-                'intents': [QueryIntent.GENERAL_SEMANTIC],
-                'entities': non_code_entities,
-            })
+        router_result = self.router.plan(query, scope=request_scope, memory=memory)
+        routed_plan = router_result.plan
+        plan = routed_plan.to_query_plan()
+        scope = plan.scope
+        analysis_query = routed_plan.standalone_query or query
 
         if plan.needs_clarification:
             return QueryExecution(
                 plan=plan,
+                standalone_query=analysis_query,
                 answer=plan.clarification_question,
                 chunks=[],
                 sources=[],
@@ -782,54 +760,93 @@ class CatalogQueryEngine:
         exhaustive_products: list[dict] | None = None
         planned_inventory_products: list[dict] = []
 
-        if plan.used_model_planner and plan.tasks:
-            chunks, missing, planned_inventory_products = self._execute_planned_tasks(plan)
-            complete = not missing
-            total = len(chunks)
+        inventory_task = _inventory_task(plan)
+        planned_codes = _planned_product_codes(plan)
+        valid_codes = resolve_product_code_tokens(planned_codes, scope=scope)
+
+        if plan.intent == QueryIntent.EXHAUSTIVE_LIST:
+            category = _category_entity(plan) or (
+                inventory_task.categories[0]
+                if inventory_task and inventory_task.categories
+                else ''
+            )
+            if inventory_task:
+                products = list_products_filtered(
+                    categories=inventory_task.categories,
+                    materials=inventory_task.materials,
+                    scope=scope,
+                )
+                total = len(products)
+                start = (page - 1) * page_size
+                exhaustive_products = products[start:start + page_size]
+                chunks = [product_to_chunk(product) for product in exhaustive_products]
+                complete = page * page_size >= total
+                if total == 0 and category:
+                    missing = [category]
+            else:
+                product_page = list_products(
+                    category_value=category,
+                    scope=scope,
+                    page=page,
+                    page_size=page_size,
+                )
+                chunks = [product_to_chunk(product) for product in product_page.products]
+                complete = product_page.complete
+                total = product_page.total
+                exhaustive_products = product_page.products
+                if category and total == 0:
+                    missing = [category]
+
+        elif plan.intent == QueryIntent.AGGREGATION:
+            category = _category_entity(plan) or (
+                inventory_task.categories[0]
+                if inventory_task and inventory_task.categories
+                else ''
+            )
+            if inventory_task:
+                total = len(list_products_filtered(
+                    categories=inventory_task.categories,
+                    materials=inventory_task.materials,
+                    scope=scope,
+                ))
+            else:
+                total = list_products(
+                    category_value=category,
+                    scope=scope,
+                    page=1,
+                    page_size=page_size,
+                ).total
+            label = category or 'products'
+            chunks = [{
+                'text': f'Total active {label}: {total}',
+                'metadata': {
+                    'product_name': f'{label} count',
+                    'product_code': '',
+                    'source_pdf': 'PostgreSQL inventory',
+                },
+                'score': 1.0,
+            }]
+            complete = True
 
         elif plan.intent == QueryIntent.EXACT_LOOKUP:
-            products = structured_probe or find_by_product_codes(_code_entities(plan), scope=scope)
+            products = find_by_product_codes(valid_codes, scope=scope) if valid_codes else []
             chunks = [product_to_chunk(product) for product in products]
-            if products and _query_needs_semantic_details(query):
-                semantic_chunks = self._semantic_retrieve(query, plan.scope, top_k=5)
+            if products and _query_needs_semantic_details(analysis_query):
+                semantic_chunks = self._semantic_retrieve(analysis_query, scope, top_k=5)
                 chunks, _ = _merge_subquery_results([
                     ('Structured exact match', chunks),
                     ('Catalog specification details', semantic_chunks),
                 ], limit=10)
-            complete = True
+            complete = bool(products)
             total = len(products)
             if not products:
-                missing = _code_entities(plan)
+                missing = planned_codes or [analysis_query]
 
-        elif plan.intent in (QueryIntent.EXHAUSTIVE_LIST, QueryIntent.AGGREGATION):
-            category = _category_entity(plan)
-            product_page = list_products(
-                category_value=category,
-                scope=scope,
-                page=page,
-                page_size=page_size,
-            )
-            chunks = [product_to_chunk(product) for product in product_page.products]
-            complete = product_page.complete
-            total = product_page.total
-            if plan.intent == QueryIntent.EXHAUSTIVE_LIST:
-                exhaustive_products = product_page.products
-            if category and total == 0:
-                missing = [category]
-            if plan.intent == QueryIntent.AGGREGATION:
-                label = category or 'products'
-                chunks = [{
-                    'text': f'Total active {label}: {total}',
-                    'metadata': {'product_name': f'{label} count', 'product_code': '', 'source_pdf': 'PostgreSQL inventory'},
-                    'score': 1.0,
-                }]
-                complete = True
-
-        elif plan.intent == QueryIntent.COMPARISON and _code_entities(plan):
-            products = find_by_product_codes(_code_entities(plan), scope=scope)
+        elif plan.intent == QueryIntent.COMPARISON:
+            products = find_by_product_codes(valid_codes, scope=scope) if valid_codes else []
             chunks = [product_to_chunk(product) for product in products]
-            if products and _query_needs_semantic_details(query):
-                semantic_chunks = self._semantic_retrieve(query, plan.scope, top_k=5)
+            if products and _query_needs_semantic_details(analysis_query):
+                semantic_chunks = self._semantic_retrieve(analysis_query, scope, top_k=5)
                 chunks, _ = _merge_subquery_results([
                     ('Structured comparison matches', chunks),
                     ('Catalog comparison details', semantic_chunks),
@@ -847,14 +864,27 @@ class CatalogQueryEngine:
                 )
                 if value
             }
-            missing = [code for code in _code_entities(plan) if code.upper() not in found_codes]
-            complete = not missing
+            if planned_codes:
+                missing = [code for code in planned_codes if code.upper() not in found_codes]
+                complete = not missing
+            else:
+                missing = [analysis_query]
+                complete = False
             total = len(products)
 
-        elif plan.intent == QueryIntent.MULTI_INTENT or plan.subqueries:
-            subqueries = plan.subqueries or [part.strip() for part in re.split(r'[,;]|\band\b', query) if part.strip()][:5]
+        elif plan.tasks:
+            chunks, missing, planned_inventory_products = self._execute_planned_tasks(plan)
+            complete = not missing
+            total = len(chunks)
+
+        elif plan.subqueries:
+            subqueries = plan.subqueries or [
+                part.strip()
+                for part in re.split(r'[,;]|\band\b', analysis_query)
+                if part.strip()
+            ][:5]
             result_sets = [
-                (subquery, self._semantic_retrieve(subquery, plan.scope, top_k=3))
+                (subquery, self._semantic_retrieve(subquery, scope, top_k=3))
                 for subquery in subqueries
             ]
             chunks, missing = _merge_subquery_results(result_sets)
@@ -862,18 +892,18 @@ class CatalogQueryEngine:
             total = len(chunks)
 
         else:
-            chunks = self._semantic_retrieve(query, plan.scope, top_k=5)
+            chunks = self._semantic_retrieve(analysis_query, scope, top_k=5)
             total = len(chunks)
 
         verified_variant_table = (
-            _render_verified_variant_table(chunks, query)
-            if _query_needs_verified_variant_table(query)
+            _render_verified_variant_table(chunks, analysis_query)
+            if _query_needs_verified_variant_table(analysis_query)
             else ''
         )
         verified_inventory_table = _render_verified_inventory_table(planned_inventory_products)
-        requested_constraints = extract_requested_constraints(query)
+        requested_constraints = extract_requested_constraints(analysis_query)
         deterministic_constraint_table = (
-            _render_constraint_matches(chunks, requested_constraints, query)
+            _render_constraint_matches(chunks, requested_constraints, analysis_query)
             if plan.used_model_planner
             else ''
         )
@@ -891,7 +921,7 @@ class CatalogQueryEngine:
         }
         if plan.intent == QueryIntent.EXHAUSTIVE_LIST and exhaustive_products is not None:
             introduction = self.answerer.exhaustive_introduction(
-                query,
+                analysis_query,
                 returned_count=len(exhaustive_products),
                 total_results=total or 0,
                 page=page,
@@ -906,13 +936,17 @@ class CatalogQueryEngine:
                 complete_result=complete,
             )
         elif plan.intent == QueryIntent.AGGREGATION:
-            label = _category_entity(plan) or 'product'
+            label = _category_entity(plan) or (
+                inventory_task.categories[0]
+                if inventory_task and inventory_task.categories
+                else 'product'
+            )
             answer = (
                 f'There are {total or 0} active {label} product families '
                 'in the selected catalog scope.'
             )
         else:
-            answer = self.answerer.answer(query, chunks, evidence=evidence)
+            answer = self.answerer.answer(analysis_query, chunks, evidence=evidence)
             if deterministic_constraint_table:
                 answer = _strip_model_constraint_selections(answer)
             answer = _apply_verified_variant_table(
@@ -928,7 +962,7 @@ class CatalogQueryEngine:
                     answer,
                     chunks,
                     evidence['required_constraints'],
-                    query,
+                    analysis_query,
                 )
                 missing_constraints = _missing_answer_constraints(
                     answer,
@@ -943,7 +977,7 @@ class CatalogQueryEngine:
                         ],
                     }
                     answer = self.answerer.answer(
-                        query + '\n\nExplicitly address these required constraints: '
+                        analysis_query + '\n\nExplicitly address these required constraints: '
                         + ', '.join(missing_constraints),
                         chunks,
                         evidence=retry_evidence,
@@ -962,7 +996,7 @@ class CatalogQueryEngine:
                         answer,
                         chunks,
                         evidence['required_constraints'],
-                        query,
+                        analysis_query,
                     )
                     missing_constraints = _missing_answer_constraints(
                         answer,
@@ -1003,6 +1037,7 @@ class CatalogQueryEngine:
 
         return QueryExecution(
             plan=plan,
+            standalone_query=analysis_query,
             answer=answer,
             chunks=chunks,
             sources=sources,

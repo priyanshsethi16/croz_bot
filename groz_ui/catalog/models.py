@@ -237,6 +237,7 @@ class ProductFamily(models.Model):
     product_name = models.CharField(max_length=500)
     product_code = models.CharField(max_length=160, blank=True)
     raw_category = models.CharField(max_length=500, blank=True)
+    aliases = models.JSONField(default=list, blank=True)
     normalized_category = models.ForeignKey(
         Category,
         null=True,
