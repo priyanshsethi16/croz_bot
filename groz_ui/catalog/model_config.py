@@ -14,6 +14,27 @@ from django.conf import settings
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 VISION_MODELS = (
+    # OpenAI GPT-5 Series
+    ("gpt-5.4", "GPT-5.4"),
+    ("gpt-5.4-mini", "GPT-5.4 mini"),
+    ("gpt-5", "GPT-5"),
+    ("gpt-5-turbo", "GPT-5 Turbo"),
+    ("gpt-5.3", "GPT-5.3"),
+    ("gpt-5-preview", "GPT-5 Preview"),
+    ("gpt-4.5", "GPT-4.5"),
+    ("gpt-4.5-mini", "GPT-4.5 Mini"),
+    # OpenAI GPT-4 Series
+    ("gpt-4o", "GPT-4o"),
+    ("gpt-4o-mini", "GPT-4o mini"),
+    ("gpt-4-turbo", "GPT-4 Turbo"),
+    ("gpt-4-vision-preview", "GPT-4 Vision"),
+    ("o1", "o1"),
+    ("o1-mini", "o1 mini"),
+    ("o1-preview", "o1 Preview"),
+    ("o3-mini", "o3 mini"),
+    ("gpt-4.1", "GPT-4.1"),
+    ("gpt-5.5", "GPT-5.5"),
+    # Google Gemini Series
     ("gemini-3.5-flash", "Gemini 3.5 Flash"),
     ("gemini-2.5-flash", "Gemini 2.5 Flash"),
     ("gemini-2.5-pro", "Gemini 2.5 Pro"),
@@ -195,7 +216,7 @@ def update_configuration(payload: dict, user=None) -> dict:
     vision_model = str(payload.get("vision_model", config.vision_model)).strip()
     allowed_vision = {value for value, _ in VISION_MODELS}
     if vision_model not in allowed_vision:
-        vision_model = "gemini-2.5-flash"  # safe default
+        vision_model = "gpt-4o"  # safe default
 
     chat_provider = str(payload.get("chat_provider", config.chat_provider)).strip().lower()
     if chat_provider not in CHAT_MODELS:
