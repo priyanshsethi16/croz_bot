@@ -61,7 +61,7 @@ openai:
 #   - Best reasoning: o1 or o1-mini
 
 pdf:
-  dpi: 150                  # PNG rasterisation DPI (200 saves tokens vs 300, good for most catalogs)
+  dpi: 200                 # PNG rasterisation DPI (200 saves tokens vs 300, good for most catalogs)
 
 paths:
   pages_dir: "vision_pipeline/data/pages"         # rasterized PNG pages
