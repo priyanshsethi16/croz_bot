@@ -46,9 +46,15 @@ Rules:
   recommendations, counts, or exhaustive lists, use catalog scope unless the
   query explicitly asks for manuals too.
 - Return at most five focused tasks.
+- The intents list should contain relevant intent types, but keep it focused (ideally 1-3 intents).
 - If the request is ambiguous, set needs_clarification=true and keep tasks empty.
 - Do not write SQL.
 - Do not answer the user's question.
+
+Task routes - use ONLY these exact values:
+- postgres_inventory: for exhaustive family inventory by category/material
+- postgres_exact: for exact product/order-code lookup when user provides a real code
+- hybrid_search: for specifications, suitability, recommendations, descriptions, variants
 
 Output keys:
 standalone_query, intent, intents, scope, entities, constraints, subqueries,
@@ -62,17 +68,27 @@ Schema requirements:
 - standalone_query: string
 - intent: one of exact_lookup, exhaustive_list, aggregation, comparison,
   recommendation, troubleshooting, multi_intent, general_semantic, ambiguous
-- intents: list of the allowed intents
+- intents: list of the allowed intents (maximum 10 items, but keep it focused to 1-3 relevant intents)
 - scope: object with catalog_ids, document_ids, source_types
 - entities: list of objects with type and value
 - constraints: object
 - subqueries: list of strings
-- tasks: list of objects with route, purpose, query, product_codes, categories,
-  materials, exhaustive
+- tasks: list of objects with:
+  - route: MUST be one of 'postgres_inventory', 'postgres_exact', or 'hybrid_search' (no other values allowed)
+  - purpose: string
+  - query: string
+  - product_codes: list of strings (optional)
+  - categories: list of strings (optional)
+  - materials: list of strings (optional)
+  - exhaustive: boolean (optional)
 - needs_clarification: boolean
 - clarification_question: string
 - confidence: number between 0 and 1
 - memory_used: boolean
+
+IMPORTANT: The 'route' field in tasks MUST be exactly one of:
+  'postgres_inventory', 'postgres_exact', 'hybrid_search'
+Do NOT use values like 'catalog', 'database', 'search', or any other value.
 
 Original request payload:
 {request}
@@ -155,7 +171,7 @@ class ConversationTurn(BaseModel):
     last_user_query: str = ''
     last_standalone_query: str = ''
     last_intent: QueryIntent = QueryIntent.GENERAL_SEMANTIC
-    last_intents: list[QueryIntent] = Field(default_factory=list, max_length=5)
+    last_intents: list[QueryIntent] = Field(default_factory=list, max_length=10)
     last_entities: list[QueryEntity] = Field(default_factory=list, max_length=20)
     last_scope: QueryScope = Field(default_factory=QueryScope)
     last_answer_summary: str = ''
@@ -214,7 +230,7 @@ class AIRouterPlan(BaseModel):
 
     standalone_query: str
     intent: QueryIntent
-    intents: list[QueryIntent] = Field(default_factory=list, max_length=5)
+    intents: list[QueryIntent] = Field(default_factory=list, max_length=10)
     scope: QueryScope = Field(default_factory=QueryScope)
     entities: list[QueryEntity] = Field(default_factory=list, max_length=20)
     constraints: dict[str, Any] = Field(default_factory=dict)
