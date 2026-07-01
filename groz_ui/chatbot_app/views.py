@@ -29,7 +29,75 @@ def home(request):
 
 
 def chat_home(request):
-    return render(request, 'chatbot_app/chat.html')
+    from django.db.models import Count, Q
+    from catalog.models import ProductFamily, DocumentChunk
+    
+    # Icon mapping
+    category_icons = {
+        'lubrication': 'fa-oil-can',
+        'grease': 'fa-pump-soap',
+        'hammer': 'fa-hammer',
+        'measuring': 'fa-ruler',
+        'measurement': 'fa-ruler',
+        'led': 'fa-lightbulb',
+        'lighting': 'fa-lightbulb',
+        'light': 'fa-lightbulb',
+        'fluid': 'fa-tint',
+        'precision': 'fa-drafting-compass',
+        'tool': 'fa-tools',
+        'wrench': 'fa-wrench',
+        'screw': 'fa-screwdriver',
+        'drill': 'fa-drill',
+        'valve': 'fa-cog',
+        'pump': 'fa-pump-soap',
+        'bearing': 'fa-cog',
+        'gun': 'fa-tools',
+        'kit': 'fa-toolbox',
+        'equipment': 'fa-cogs',
+        'accessory': 'fa-puzzle-piece',
+        'additions': 'fa-plus-circle',
+        'packer': 'fa-box',
+        'lever': 'fa-hand-pointer',
+        'pistol': 'fa-hand-rock',
+        'swivel': 'fa-sync',
+    }
+    
+    # Get ALL product families that have indexed chunks
+    product_families = (
+        ProductFamily.objects
+        .filter(
+            document__is_active=True,
+            chunks__index_status='indexed'
+        )
+        .distinct()
+        .values('id', 'product_name', 'raw_category')
+        .order_by('product_name')
+    )
+    
+    category_list = []
+    seen_names = set()
+    
+    for family in product_families:
+        prod_name = family['product_name'].strip()
+        if not prod_name or prod_name in seen_names:
+            continue
+        
+        seen_names.add(prod_name)
+        
+        icon = 'fa-tools'
+        search_text = (prod_name + ' ' + (family['raw_category'] or '')).lower()
+        for keyword, icon_class in category_icons.items():
+            if keyword in search_text:
+                icon = icon_class
+                break
+        
+        category_list.append({
+            'name': prod_name,
+            'icon': icon,
+            'count': 1
+        })
+    
+    return render(request, 'chatbot_app/chat.html', {'categories': category_list})
 
 
 def user_logout(request):

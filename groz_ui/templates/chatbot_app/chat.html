@@ -5,7 +5,7 @@
 {% block top_right_link %}{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/chat.css' %}"/>
+<link rel="stylesheet" href="{% static 'css/chat.css' %}?v=202606301730"/>
 {% endblock %}
 
 {% block content %}
@@ -21,38 +21,12 @@
       <span><i class="fa fa-border-all cat-icon"></i>All Products</span>
       <i class="fa fa-chevron-right"></i>
     </a>
-    <a class="cat-item" href="#" onclick="askCat('Lubrication Equipment',this);return false;">
-      <span><i class="fa fa-oil-can cat-icon"></i>Lubrication Equipment</span>
+    {% for category in categories %}
+    <a class="cat-item" href="#" onclick="askCat('{{ category.name }}',this);return false;">
+      <span><i class="fa {{ category.icon }} cat-icon"></i>{{ category.name }}</span>
       <i class="fa fa-chevron-right"></i>
     </a>
-    <a class="cat-item" href="#" onclick="askCat('Grease Pumps',this);return false;">
-      <span><i class="fa fa-pump-soap cat-icon"></i>Grease Pumps</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Grease Guns',this);return false;">
-      <span><i class="fa fa-tools cat-icon"></i>Grease Guns</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Hammers',this);return false;">
-      <span><i class="fa fa-hammer cat-icon"></i>Hammers</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Measuring Tools',this);return false;">
-      <span><i class="fa fa-ruler cat-icon"></i>Measuring Tools</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('LED Lighting',this);return false;">
-      <span><i class="fa fa-lightbulb cat-icon"></i>LED Lighting</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Fluid Handling',this);return false;">
-      <span><i class="fa fa-tint cat-icon"></i>Fluid Handling</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
-    <a class="cat-item" href="#" onclick="askCat('Precision Tools',this);return false;">
-      <span><i class="fa fa-drafting-compass cat-icon"></i>Precision Tools</span>
-      <i class="fa fa-chevron-right"></i>
-    </a>
+    {% endfor %}
 
     <div class="cat-info-box">
       <i class="fa fa-info-circle"></i>
@@ -125,5 +99,5 @@
 
 {% block extra_scripts %}
 <script>const CSRF = '{{ csrf_token }}';</script>
-<script src="{% static 'js/chat.js' %}"></script>
+<script src="{% static 'js/chat.js' %}?v=202606301730"></script>
 {% endblock %}
