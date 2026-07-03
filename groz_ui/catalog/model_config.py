@@ -14,6 +14,8 @@ from django.conf import settings
 EMBEDDING_MODEL = "text-embedding-3-small"
 
 VISION_MODELS = (
+    # Mistral OCR-4
+    ("mistral-ocr-latest", "Mistral OCR-4 + LLM"),
     # OpenAI GPT-5 Series
     ("gpt-5.4", "GPT-5.4"),
     ("gpt-5.4-mini", "GPT-5.4 mini"),
@@ -70,6 +72,7 @@ DEFAULT_CHAT_MODEL = {
 SECRET_OPENAI = "OPENAI_API_KEY"
 SECRET_GROQ = "GROQ_API_KEY"
 SECRET_GEMINI = "GEMINI_API_KEY"
+SECRET_MISTRAL = "MISTRAL_API_KEY"
 _ENCRYPTED_PREFIX = "enc:v1:"
 
 
@@ -127,6 +130,10 @@ def get_secret(name: str) -> str:
     return os.getenv(name, "").strip()
 
 
+def get_mistral_key() -> str:
+    return get_secret(SECRET_MISTRAL)
+
+
 def save_secret(name: str, value: str) -> None:
     from .models import ApiKey
 
@@ -158,6 +165,7 @@ class RuntimeModelConfig:
     openai_api_key: str
     groq_api_key: str
     gemini_api_key: str
+    mistral_api_key: str
     embedding_model: str
     vision_model: str
     chat_provider: str
@@ -176,6 +184,7 @@ def get_runtime_config() -> RuntimeModelConfig:
         openai_api_key=get_secret(SECRET_OPENAI),
         groq_api_key=get_secret(SECRET_GROQ),
         gemini_api_key=get_secret(SECRET_GEMINI),
+        mistral_api_key=get_secret(SECRET_MISTRAL),
         embedding_model=EMBEDDING_MODEL,
         vision_model=config.vision_model,
         chat_provider=config.chat_provider,
@@ -188,6 +197,7 @@ def configuration_payload() -> dict:
     openai_key = get_secret(SECRET_OPENAI)
     groq_key = get_secret(SECRET_GROQ)
     gemini_key = get_secret(SECRET_GEMINI)
+    mistral_key = get_secret(SECRET_MISTRAL)
     return {
         "configuration": {
             "embedding_model": EMBEDDING_MODEL,
@@ -199,6 +209,7 @@ def configuration_payload() -> dict:
             "openai": {"configured": bool(openai_key), "masked": mask_secret(openai_key)},
             "groq": {"configured": bool(groq_key), "masked": mask_secret(groq_key)},
             "gemini": {"configured": bool(gemini_key), "masked": mask_secret(gemini_key)},
+            "mistral": {"configured": bool(mistral_key), "masked": mask_secret(mistral_key)},
         },
         "options": {
             "vision_models": [{"value": value, "label": label} for value, label in VISION_MODELS],
@@ -216,7 +227,7 @@ def update_configuration(payload: dict, user=None) -> dict:
     vision_model = str(payload.get("vision_model", config.vision_model)).strip()
     allowed_vision = {value for value, _ in VISION_MODELS}
     if vision_model not in allowed_vision:
-        vision_model = "gpt-4o"  # safe default
+        vision_model = "gemini-2.5-flash"  # safe default
 
     chat_provider = str(payload.get("chat_provider", config.chat_provider)).strip().lower()
     if chat_provider not in CHAT_MODELS:
@@ -241,6 +252,11 @@ def update_configuration(payload: dict, user=None) -> dict:
     elif str(payload.get("gemini_api_key", "")).strip():
         save_secret(SECRET_GEMINI, str(payload["gemini_api_key"]))
 
+    if payload.get("clear_mistral_key"):
+        clear_secret(SECRET_MISTRAL)
+    elif str(payload.get("mistral_api_key", "")).strip():
+        save_secret(SECRET_MISTRAL, str(payload["mistral_api_key"]))
+
     config.embedding_model = EMBEDDING_MODEL
     config.vision_model = vision_model
     config.chat_provider = chat_provider
@@ -259,8 +275,17 @@ def subprocess_environment() -> dict[str, str]:
         env[SECRET_GROQ] = runtime.groq_api_key
     if runtime.gemini_api_key:
         env[SECRET_GEMINI] = runtime.gemini_api_key
+    if runtime.mistral_api_key:
+        env[SECRET_MISTRAL] = runtime.mistral_api_key
     env["OPENAI_EMBEDDING_MODEL"] = runtime.embedding_model
     env["GEMINI_VISION_MODEL"] = runtime.vision_model
     env["CHAT_PROVIDER"] = runtime.chat_provider
     env["CHAT_MODEL"] = runtime.chat_model
+    # Tell the pipeline which provider to use based on the selected model
+    if runtime.vision_model == "mistral-ocr-latest":
+        env["VISION_PROVIDER"] = "mistral"
+    elif runtime.vision_model.startswith("gemini"):
+        env["VISION_PROVIDER"] = "gemini"
+    elif runtime.vision_model.startswith(("gpt-", "o1", "o3")):
+        env["VISION_PROVIDER"] = "openai"
     return env

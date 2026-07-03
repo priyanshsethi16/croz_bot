@@ -155,20 +155,48 @@ def _get_catalog_stats():
     input_dir = PROJECT_ROOT / 'input'
     splits_dir = PROJECT_ROOT / 'input' / 'splits'
 
-    pdfs      = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
+    pdfs = list(input_dir.glob('*.pdf')) if input_dir.exists() else []
+
+    # Also collect all split parts, keyed by their name for processed lookup
+    all_split_parts = []
+    split_parent_stems = set()
+    if splits_dir.exists():
+        for stem_dir in splits_dir.iterdir():
+            if stem_dir.is_dir():
+                parts = sorted(stem_dir.glob('*.pdf'))
+                if parts:
+                    split_parent_stems.add(stem_dir.name)
+                    all_split_parts.extend(parts)
+
+    # For top-level PDFs that have been split, use split parts instead
+    effective_pdfs = [p for p in pdfs if p.stem not in split_parent_stems] + all_split_parts
     processed = []
+    processed_checksums = set()  # track which disk files are already processed
 
     # DB-only: processed documents with chunks in Postgres
-    # Show each split part individually with its own stats (don't group)
     try:
         from .models import CatalogDocument, DocumentChunk
+        import hashlib
+        # Build checksum → disk file map for all effective PDFs
+        disk_checksum_to_file: dict = {}
+        for p in effective_pdfs:
+            try:
+                disk_checksum_to_file[hashlib.sha256(p.read_bytes()).hexdigest()] = p
+            except Exception:
+                pass
+
         for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
             chunk_count = DocumentChunk.objects.filter(document=doc).count()
             if chunk_count == 0:
                 continue
-            fn = doc.original_filename
-            # Add .pdf extension if missing
-            display = fn if fn.endswith('.pdf') else f'{fn}.pdf'
+            # Prefer the actual disk filename if we can match by checksum
+            disk_file = disk_checksum_to_file.get(doc.checksum_sha256)
+            if disk_file:
+                display = disk_file.name
+                processed_checksums.add(doc.checksum_sha256)
+            else:
+                fn = doc.original_filename
+                display = fn if fn.endswith('.pdf') else f'{fn}.pdf'
             processed.append({
                 'name': display,
                 'chunks': chunk_count,
@@ -193,13 +221,46 @@ def _get_catalog_stats():
         except Exception:
             indexed = 0
 
+    # Build unprocessed list with status info from DB
+    processed_names = {proc['name'] for proc in processed}
+    unprocessed_raw = []
+    for p in effective_pdfs:
+        if p.name in processed_names or p.stem in processed_names:
+            continue
+        try:
+            import hashlib
+            if hashlib.sha256(p.read_bytes()).hexdigest() in processed_checksums:
+                continue
+        except Exception:
+            pass
+        unprocessed_raw.append(p)
+    unprocessed = []
+    try:
+        from .models import CatalogDocument, DocumentChunk, IngestionJob
+        for p in unprocessed_raw:
+            stem = p.stem
+            doc = CatalogDocument.objects.filter(
+                original_filename__in=[stem, p.name]
+            ).order_by('-version').first()
+            status = 'Pending'
+            if doc:
+                running = IngestionJob.objects.filter(
+                    document=doc,
+                    status__in=[IngestionJob.Status.PENDING, IngestionJob.Status.RUNNING]
+                ).exists()
+                has_chunks = DocumentChunk.objects.filter(document=doc).exists()
+                if (running or doc.status in (CatalogDocument.Status.EXTRACTING, CatalogDocument.Status.INDEXING)) and not has_chunks:
+                    status = 'Processing'
+                elif doc.status == CatalogDocument.Status.FAILED:
+                    status = 'Failed'
+            unprocessed.append({'name': p.name, 'status': status})
+    except Exception:
+        unprocessed = [{'name': p.name, 'status': 'Pending'} for p in unprocessed_raw]
+
     stats = {
-        'total_pdfs': len(pdfs),
+        'total_pdfs': len(effective_pdfs),
         'processed': processed,
-        'unprocessed': [p.name for p in pdfs if not any(
-            proc['name'] == p.name or proc['name'] == p.stem
-            for proc in processed
-        )],
+        'unprocessed': unprocessed,
         'indexed': indexed,
         'total_chunks': total_chunks,
     }
@@ -435,6 +496,231 @@ def _ingest_assembled_products_for_document(doc, assembled):
         doc.save(update_fields=['is_active', 'status'])
 
 
+# ── API: Run Mistral OCR Pipeline (pdf_extractor) ────────────────────────────
+
+@login_required
+@require_POST
+def run_pipeline_mistral(request):
+    """Run Mistral OCR-4 + Groq LLM pipeline on a whole PDF."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        filename = body.get('filename', '')
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    pdf_path = _resolve_pdf_path(filename)
+    if not pdf_path.exists():
+        return JsonResponse({'error': f'File not found: {filename}'}, status=404)
+
+    try:
+        from .model_config import get_runtime_config, subprocess_environment
+        runtime = get_runtime_config()
+        if not runtime.mistral_api_key:
+            return JsonResponse({'error': 'Mistral API key is not configured. Open Models & Keys.'}, status=400)
+        if not runtime.groq_api_key:
+            return JsonResponse({'error': 'Groq API key is required for Mistral OCR-4 + LLM extraction. Open Models & Keys.'}, status=400)
+
+        env = subprocess_environment()
+        runner = str(PROJECT_ROOT / 'pdf_extractor' / 'run_mistral_pipeline.py')
+        result = subprocess.run(
+            [sys.executable, runner, '--pdf', str(pdf_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(PROJECT_ROOT / 'pdf_extractor'),
+            timeout=600,
+            env=env,
+        )
+        stderr_out = result.stderr or ''
+        stdout_out = result.stdout or ''
+        logger.info('[mistral-pipeline] pdf=%s rc=%d\nSTDERR:\n%s', filename, result.returncode, stderr_out)
+
+        if result.returncode != 0:
+            error_text = stderr_out + stdout_out
+            return JsonResponse({
+                'error': _clean_pipeline_error(error_text) or 'Mistral pipeline failed.',
+                'detail': error_text[-4000:],
+            }, status=500)
+
+        # Parse structured JSON from stdout
+        try:
+            data = json.loads(stdout_out.strip())
+        except Exception:
+            return JsonResponse({
+                'error': 'Mistral pipeline returned invalid output.',
+                'detail': stdout_out[-2000:],
+            }, status=500)
+
+        assembled = _build_assembled_from_mistral(data, pdf_path)
+        doc = _ensure_catalog_document(pdf_path)
+        _ingest_assembled_products_for_document(doc, assembled)
+
+        pdf_progress = request.session.get('pdf_progress', {})
+        approved_pdfs = request.session.get('approved_pdfs', [])
+        if filename in approved_pdfs:
+            pdf_progress[filename] = 'chunked'
+            request.session['pdf_progress'] = pdf_progress
+            request.session.modified = True
+
+        return JsonResponse({'message': 'Mistral OCR pipeline completed.', 'output': stderr_out[-3000:]})
+    except subprocess.TimeoutExpired:
+        return JsonResponse({'error': 'Pipeline timed out (10 min limit).'}, status=500)
+    except Exception as e:
+        logger.exception('[mistral-pipeline] unexpected error')
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
+@require_POST
+def run_pipeline_mistral_split(request):
+    """Run Mistral OCR-4 + Groq LLM pipeline on a single split part."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+        stem = body.get('stem', '').strip()
+        part_file = body.get('part_file', '').strip()
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    pdf_path = PROJECT_ROOT / 'input' / 'splits' / stem / part_file
+    if not pdf_path.exists():
+        return JsonResponse({'error': f'Split file not found: {part_file}'}, status=404)
+
+    try:
+        from .model_config import get_runtime_config, subprocess_environment
+        runtime = get_runtime_config()
+        if not runtime.mistral_api_key:
+            return JsonResponse({'error': 'Mistral API key is not configured. Open Models & Keys.'}, status=400)
+        if not runtime.groq_api_key:
+            return JsonResponse({'error': 'Groq API key is required for Mistral OCR-4 + LLM extraction.'}, status=400)
+
+        env = subprocess_environment()
+        runner = str(PROJECT_ROOT / 'pdf_extractor' / 'run_mistral_pipeline.py')
+        result = subprocess.run(
+            [sys.executable, runner, '--pdf', str(pdf_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(PROJECT_ROOT / 'pdf_extractor'),
+            timeout=600,
+            env=env,
+        )
+        stderr_out = result.stderr or ''
+        stdout_out = result.stdout or ''
+        logger.info('[mistral-split] part=%s rc=%d\nSTDERR:\n%s', part_file, result.returncode, stderr_out)
+
+        if result.returncode != 0:
+            error_text = stderr_out + stdout_out
+            return JsonResponse({
+                'error': _clean_pipeline_error(error_text) or 'Mistral pipeline failed.',
+                'detail': error_text[-4000:],
+            }, status=500)
+
+        try:
+            data = json.loads(stdout_out.strip())
+        except Exception:
+            return JsonResponse({
+                'error': 'Mistral pipeline returned invalid output.',
+                'detail': stdout_out[-2000:],
+            }, status=500)
+
+        assembled = _build_assembled_from_mistral(data, pdf_path)
+        doc = _ensure_catalog_document(pdf_path)
+        _ingest_assembled_products_for_document(doc, assembled)
+
+        import json as _j
+        from .models import ApiKey
+        try:
+            _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
+        except Exception:
+            _stage_map = {}
+        _stage_map[part_file] = 'chunked'
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / stem
+        all_parts = sorted(p.name for p in splits_dir.glob('*.pdf')) if splits_dir.exists() else [part_file]
+        done_parts = [p for p in all_parts if _stage_map.get(p) in ('chunked', 'families', 'indexed', 'tested')]
+        if len(done_parts) == len(all_parts):
+            _stage_map[stem] = 'chunked'
+        ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
+
+        pdf_progress = request.session.get('pdf_progress', {})
+        pdf_progress[part_file] = 'chunked'
+        if len(done_parts) == len(all_parts):
+            pdf_progress[stem] = 'chunked'
+        request.session['pdf_progress'] = pdf_progress
+        request.session.modified = True
+
+        return JsonResponse({'message': f'{part_file} processed via Mistral OCR.', 'output': stderr_out[-2000:]})
+    except subprocess.TimeoutExpired:
+        return JsonResponse({'error': 'Pipeline timed out.'}, status=500)
+    except Exception as e:
+        logger.exception('[mistral-split] unexpected error')
+        return JsonResponse({'error': str(e)}, status=500)
+
+
+def _build_assembled_from_mistral(data: dict, pdf_path: Path) -> list:
+    """Convert run_mistral_pipeline.py output into assembled product list for ingestion."""
+    products = data.get('products', [])
+    markdown_text = data.get('markdown', '')
+    source_pdf = data.get('source_pdf', pdf_path.name)
+
+    if not products:
+        # Fallback: ingest the whole markdown as one product
+        return [{
+            'product_name': pdf_path.stem.replace('_', ' ').title(),
+            'product_code': '',
+            'category': '',
+            'description': markdown_text[:500],
+            'features': [],
+            'utilities': [],
+            'specifications': {},
+            'children': [],
+            'page_start': 1,
+            'page_end': 1,
+            'source_pdf': source_pdf,
+            'raw_text': markdown_text,
+        }]
+
+    assembled = []
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get('product_name') or '').strip()
+        if not name:
+            continue
+        # Prefer per-product raw_text; fall back to full markdown only if needed
+        product_raw = str(p.get('raw_text') or p.get('_chunk_text') or markdown_text)
+        assembled.append({
+            'product_name': name,
+            'product_code': str(p.get('product_code') or ''),
+            'category': str(p.get('category') or ''),
+            'description': str(p.get('description') or ''),
+            'features': p.get('features') if isinstance(p.get('features'), list) else [],
+            'utilities': p.get('utilities') if isinstance(p.get('utilities'), list) else [],
+            'specifications': p.get('specifications') if isinstance(p.get('specifications'), dict) else {},
+            'children': p.get('children') if isinstance(p.get('children'), list) else [],
+            'page_start': int(p.get('page_start') or 1),
+            'page_end': int(p.get('page_end') or 1),
+            'source_pdf': source_pdf,
+            'raw_text': product_raw,
+        })
+    return assembled or [{
+        'product_name': pdf_path.stem.replace('_', ' ').title(),
+        'product_code': '',
+        'category': '',
+        'description': markdown_text[:500],
+        'features': [], 'utilities': [], 'specifications': {}, 'children': [],
+        'page_start': 1, 'page_end': 1,
+        'source_pdf': source_pdf, 'raw_text': markdown_text,
+    }]
+
+
+def _ingest_mistral_output_for_pdf(pdf_path: Path, env: dict) -> None:
+    pass  # replaced by direct ingestion in the views above
+
+
 # ── API: Run Vision Pipeline ──────────────────────────────────────────────────
 
 @login_required
@@ -471,11 +757,25 @@ def run_pipeline(request):
             env=env,
         )
         output = result.stdout or ''
-        if result.returncode != 0:
+        logger.info('[pipeline] pdf=%s rc=%d\n%s', filename, result.returncode, output)
+        if result.returncode == 1:
             return JsonResponse({
                 'error': _clean_pipeline_error(output),
                 'detail': output[-4000:],
+                'output': output[-4000:],
             }, status=500)
+        if result.returncode == 2:
+            return JsonResponse({
+                'error': _clean_pipeline_error(output),
+                'detail': output[-4000:],
+                'output': output[-4000:],
+            }, status=500)
+        if result.returncode == 3:
+            return JsonResponse({
+                'error': 'No products could be extracted from this PDF. All pages failed validation.',
+                'detail': output,
+                'output': output,
+            }, status=422)
 
         # Update progress for this specific PDF to 'chunked' (50%)
         pdf_progress = request.session.get('pdf_progress', {})
@@ -490,6 +790,7 @@ def run_pipeline(request):
     except subprocess.TimeoutExpired:
         return JsonResponse({'error': 'Pipeline timed out (10 min limit).'}, status=500)
     except Exception as e:
+        logger.exception('[pipeline] unexpected error pdf=%s', filename)
         return JsonResponse({'error': str(e)}, status=500)
 
 
@@ -579,7 +880,12 @@ def list_pdfs(request):
                 ).first()
                 
                 if running_job:
-                    status = 'Processing'
+                    # Only show Processing if chunks don't exist yet
+                    # (avoids stale job showing Processing after chunks are already created)
+                    if chunks_count == 0:
+                        status = 'Processing'
+                    else:
+                        status = 'Ready'
                 else:
                     if doc.status == CatalogDocument.Status.UPLOADED:
                         status = 'Pending'
@@ -812,8 +1118,13 @@ def pdf_preview(request):
     try:
         doc   = fitz.open(str(pdf_path))
         total = len(doc)
+        # Support paginated loading: ?page=1&per_page=50
+        per_page = min(200, max(1, int(request.GET.get('per_page', total))))
+        page_num = max(1, int(request.GET.get('page', 1)))
+        start = (page_num - 1) * per_page
+        end   = min(start + per_page, total)
         pages = []
-        for i in range(min(total, 50)):
+        for i in range(start, end):
             thumb = doc[i].get_pixmap(matrix=fitz.Matrix(0.2, 0.2))
             full  = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             thumb_b64 = base64.b64encode(thumb.pil_tobytes(format='JPEG', optimize=True, quality=60)).decode()
@@ -824,7 +1135,13 @@ def pdf_preview(request):
                 'full':  f'data:image/jpeg;base64,{full_b64}',
             })
         doc.close()
-        return JsonResponse({'pages': pages, 'total': total})
+        return JsonResponse({
+            'pages':    pages,
+            'total':    total,
+            'page':     page_num,
+            'per_page': per_page,
+            'has_more': end < total,
+        })
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
 
@@ -1238,6 +1555,11 @@ def run_pipeline_split(request):
         runtime = get_runtime_config()
         if not runtime.gemini_api_key:
             return JsonResponse({'error': 'Gemini API key is not configured. Open Models & Keys.'}, status=400)
+        _key = runtime.gemini_api_key
+        _provider = 'gemini' if runtime.vision_model.startswith('gemini') else 'openai'
+        _active_key = runtime.gemini_api_key if _provider == 'gemini' else runtime.openai_api_key
+        logger.warning('[pipeline-split] provider=%s model=%s key=%s...%s part=%s',
+                    _provider, runtime.vision_model, _active_key[:6], _active_key[-4:], part_file)
         env = subprocess_environment()
         if parsing_instructions:
             env['PDF_PARSING_INSTRUCTIONS'] = parsing_instructions
@@ -1251,11 +1573,28 @@ def run_pipeline_split(request):
             env=env,
         )
         output = result.stdout or ''
-        if result.returncode != 0:
+        logger.info('[pipeline-split] part=%s rc=%d\n%s', part_file, result.returncode, output)
+        if result.returncode == 1:
+            logger.error('[pipeline-split] FAILED part=%s rc=%d\n%s', part_file, result.returncode, output[-3000:])
             return JsonResponse({
                 'error': _clean_pipeline_error(output),
                 'detail': output[-4000:],
+                'output': output[-4000:],
             }, status=500)
+        if result.returncode == 2:
+            logger.error('[pipeline-split] API failure part=%s\n%s', part_file, output[-3000:])
+            return JsonResponse({
+                'error': _clean_pipeline_error(output),
+                'detail': output[-4000:],
+                'output': output[-4000:],
+            }, status=500)
+        if result.returncode == 3:
+            logger.warning('[pipeline-split] No products extracted part=%s\n%s', part_file, output)
+            return JsonResponse({
+                'error': 'No products could be extracted from this PDF part. All pages failed validation.',
+                'detail': output,
+                'output': output,
+            }, status=422)
 
         # Update stage for this split part in session + DB stage map
         import json as _j
@@ -1282,6 +1621,7 @@ def run_pipeline_split(request):
         request.session.modified = True
 
         # Pipeline ingests directly into Postgres — no post-run file reading needed
+        logger.warning('[pipeline-split] SUCCESS provider=%s model=%s part=%s', _provider, runtime.vision_model, part_file)
         return JsonResponse({'message': f'{part_file} processed.', 'output': output[-2000:]})
     except subprocess.TimeoutExpired:
         return JsonResponse({'error': 'Pipeline timed out.'}, status=500)

@@ -11,8 +11,11 @@ class KeyRotator:
     """Rotate API keys across providers while preserving selected VLM model."""
 
     def __init__(self, cfg: dict):
-        self.provider = cfg.get("provider", "gemini").lower()
-        
+        self.provider = (
+            os.getenv("VISION_PROVIDER", "").strip().lower()
+            or cfg.get("provider", "gemini")
+        ).lower()
+
         if self.provider == "openai":
             self._init_openai(cfg)
         elif self.provider == "groq":

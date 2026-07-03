@@ -67,6 +67,9 @@ Return ONLY the JSON array, no other text."""
         )
         
         result = response.choices[0].message.content.strip()
+        # Strip thinking blocks (qwen3 thinking mode)
+        import re as _re
+        result = _re.sub(r'<think>.*?</think>', '', result, flags=_re.DOTALL).strip()
         # Remove markdown code blocks if present
         if result.startswith("```"):
             result = result.split("```")[1]

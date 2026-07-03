@@ -198,7 +198,7 @@ def persist_assembled_products(
             )
             totals['variants'] += 1
 
-        chunk_input = {**product, 'page_num': family.page_start, 'category': raw_category}
+        chunk_input = {**product, 'page_num': family.page_start, 'page_start': family.page_start, 'page_end': family.page_end, 'category': raw_category}
         # Legacy Markdown must remain byte-for-byte identical so its existing
         # dense and sparse vectors can be reused by exact content hash.
         chunk_override = product.get('_chunk_text')

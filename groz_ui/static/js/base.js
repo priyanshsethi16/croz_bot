@@ -1,4 +1,9 @@
+const _toastRecent = new Map();
 function showToast(msg, type='info', duration=4000) {
+  const key = type + ':' + msg;
+  if (_toastRecent.has(key)) return;
+  _toastRecent.set(key, true);
+  setTimeout(() => _toastRecent.delete(key), 1500);
   const icons={success:'fa-check-circle',error:'fa-exclamation-circle',info:'fa-info-circle'};
   const t=document.createElement('div');
   t.className=`toast ${type}`;

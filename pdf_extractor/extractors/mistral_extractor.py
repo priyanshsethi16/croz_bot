@@ -3,7 +3,7 @@ import base64
 try:
     from mistralai import Mistral
 except ImportError:
-    from mistralai.client import MistralClient as Mistral
+    from mistralai.client import Mistral
 from extractors.base import BaseExtractor, ExtractionResult
 
 

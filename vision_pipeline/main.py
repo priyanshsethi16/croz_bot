@@ -131,7 +131,9 @@ def main():
     print(f"Pages to process: {len(png_paths)}")
 
     all_products: list[dict] = []
+    raw_products_by_page: dict[int, list[dict]] = {}  # raw VLM output before validation
     failed_pages: list[int] = []
+    api_failed_pages: list[int] = []  # pages where API call itself failed (quota/network)
 
     with tqdm(total=len(png_paths), desc="Pages", unit="page") as pbar:
         for png_path in png_paths:
@@ -141,11 +143,16 @@ def main():
             if products is None:
                 tqdm.write(f"  p{page_num:03d} → [FAILED] all retries exhausted")
                 failed_pages.append(page_num)
+                api_failed_pages.append(page_num)
                 pbar.update(1)
                 continue
 
             if not products:
                 tqdm.write(f"  p{page_num:03d} → [EMPTY] no products found")
+
+            # Store raw output before validation for fallback use
+            if isinstance(products, list) and products:
+                raw_products_by_page[page_num] = products
 
             validated, validation_issues = validate_page_products(
                 products,
@@ -179,6 +186,37 @@ def main():
     # ── Step 3: Assemble + ingest directly into Postgres ──────────────────
     assembled = assemble_product_families(all_products)
 
+    # Fallback: if validation failed all products but raw VLM output exists,
+    # build a minimal assembled entry so the PDF isn't silently dropped.
+    if not assembled and not all_products and failed_pages and not api_failed_pages:
+        print("WARNING: All pages failed schema validation. Attempting raw fallback ingestion.")
+        for page_num, raw_list in raw_products_by_page.items():
+            for item in raw_list:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get('product_name') or '').strip()
+                if not name:
+                    continue
+                assembled.append({
+                    'product_name': name,
+                    'product_code': str(item.get('product_code') or ''),
+                    'category': str(item.get('category') or item.get('raw_category') or ''),
+                    'raw_category': str(item.get('raw_category') or item.get('category') or ''),
+                    'description': str(item.get('description') or ''),
+                    'features': item.get('features') if isinstance(item.get('features'), list) else [],
+                    'utilities': item.get('utilities') if isinstance(item.get('utilities'), list) else [],
+                    'specifications': item.get('specifications') if isinstance(item.get('specifications'), dict) else {},
+                    'children': item.get('children') if isinstance(item.get('children'), list) else [],
+                    'source_pages': [page_num],
+                    'page_start': page_num,
+                    'page_end': page_num,
+                    'source_pdf': pdf_path.name,
+                    'source_key': f'p{page_num}:fallback',
+                    'extraction_confidence': float(item.get('extraction_confidence') or 0.5),
+                })
+        if assembled:
+            print(f"  Fallback assembled {len(assembled)} product(s) from raw VLM output.")
+
     print("=" * 60)
     print("Vision Pipeline Complete!")
     print(f"  Pages processed : {len(png_paths) - len(failed_pages)}")
@@ -206,8 +244,16 @@ def main():
     except Exception as e:
         print(f"WARNING: Could not clean up artifact dir: {e}")
 
-    if failed_pages:
-        sys.exit(2)
+    # Exit codes:
+    # 0 = success (all pages ok, or only validation failures but products ingested)
+    # 1 = hard failure (ingestion error)
+    # 2 = no products extracted AND all failures were API errors (quota/network)
+    # 3 = no products extracted but failures were validation-only (blank/TOC pages)
+    if failed_pages and not assembled:
+        if api_failed_pages:
+            sys.exit(2)  # API quota/network issue
+        else:
+            sys.exit(3)  # pages had no valid products (blank/index pages)
 
 
 if __name__ == "__main__":

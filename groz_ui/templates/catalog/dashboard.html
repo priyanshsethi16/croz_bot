@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=split-progress-20260625"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=grouped-rows-20260702e"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -252,7 +252,7 @@
           {% endif %}
         </div>
         <div class="panel-body" id="catalog-overview-body">
-          {% if stats.processed %}
+          {% if stats.processed or stats.unprocessed %}
           <div class="table-wrap">
             <table class="catalog-table">
               <thead>
@@ -290,6 +290,39 @@
                       </button>
                       {% endif %}
                     </div>
+                  </td>
+                </tr>
+              {% endfor %}
+              {% for item in stats.unprocessed %}
+                <tr style="opacity:0.75">
+                  <td>
+                    <div class="pdf-name-cell">
+                      <i class="fa fa-file-pdf" style="color:#aaa"></i>
+                      <span class="pname">{{ item.name }}</span>
+                    </div>
+                  </td>
+                  <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">—</span></td>
+                  <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">—</span></td>
+                  <td>
+                    {% if item.status == 'Processing' %}
+                      <span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>
+                    {% elif item.status == 'Failed' %}
+                      <span class="badge badge-red"><i class="fa fa-times-circle"></i> Failed</span>
+                    {% else %}
+                      <span class="badge" style="background:#f1f5f9;color:#64748b"><i class="fa fa-clock"></i> Pending</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if is_admin %}
+                    <div class="table-actions">
+                      <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">
+                        <i class="fa fa-layer-group"></i> Create Chunks
+                      </button>
+                      <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
+                        <i class="fa fa-trash"></i> Delete
+                      </button>
+                    </div>
+                    {% endif %}
                   </td>
                 </tr>
               {% endfor %}
@@ -843,8 +876,30 @@
               </div>
               <div class="model-field">
                 <label for="vision-model">PDF extraction VLM</label>
-                <select id="vision-model"></select>
+                <select id="vision-model" onchange="onVisionModelChange()"></select>
                 <small>Used by Create Chunks for page-image understanding.</small>
+              </div>
+            </section>
+
+            <section class="model-settings-card" id="mistral-settings-card" style="display:none">
+              <div class="model-card-head">
+                <div class="provider-logo" style="background:#f97316;color:#fff"><i class="fa fa-bolt"></i></div>
+                <div>
+                  <h4>Mistral OCR-4</h4>
+                  <p>Mistral OCR-4 + Groq LLM for PDF chunk extraction</p>
+                </div>
+                <span class="key-status" id="mistral-key-status">Checking…</span>
+              </div>
+              <div class="model-field">
+                <label for="mistral-api-key">Mistral API key</label>
+                <div class="secret-input-wrap">
+                  <input type="password" id="mistral-api-key" autocomplete="new-password" placeholder="Enter a new Mistral key"/>
+                  <button type="button" onclick="toggleSecretVisibility('mistral-api-key', this)" title="Show or hide key"><i class="fa fa-eye"></i></button>
+                </div>
+                <label class="clear-key-option"><input type="checkbox" id="clear-mistral-key"/> Remove saved Mistral key</label>
+              </div>
+              <div class="model-field">
+                <small><i class="fa fa-info-circle"></i> Groq API key (above) is also required for the LLM extraction step.</small>
               </div>
             </section>
 
@@ -998,5 +1053,5 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=split-progress-20260625c"></script>
+<script src="{% static 'js/dashboard.js' %}?v=grouped-rows-20260702k"></script>
 {% endblock %}

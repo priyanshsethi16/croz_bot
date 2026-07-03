@@ -181,7 +181,9 @@ def generate_markdown(product: dict[str, Any]) -> str:
     name     = str(product.get("product_name") or "Unknown Product").strip()
     code     = str(product.get("product_code") or "").strip()
     category = str(product.get("category") or "").strip()
-    page_num = product.get("page_num", "")
+    page_start = product.get("page_start") or product.get("page_num") or ""
+    page_end   = product.get("page_end") or page_start
+    page_num   = f"{page_start}–{page_end}" if page_end and str(page_end) != str(page_start) else page_start
     desc     = str(product.get("description") or "").strip()
     features: list = product.get("features") or []
     utilities: list = product.get("utilities") or []

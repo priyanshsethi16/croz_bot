@@ -3,7 +3,7 @@
 # The admin UI overrides model/key settings.
 # CLI runs load API keys from .env and may set vision model via env vars.
 
-provider: "openai"  # Options: "gemini", "openai", "groq"
+provider: "gemini"  # Options: "gemini", "openai", "groq"
 
 groq:
   vision_model: "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -14,7 +14,7 @@ groq:
   request_delay: 5.0   # seconds between calls (free tier: ~15 RPM)
 
 gemini:
-  gemini_model: "gemini-2.5-flash"   # overridden by admin Models & Keys
+  gemini_model: "gemini-3.5-flash"   # overridden by admin Models & Keys
   max_tokens: 8192
   max_retries: 2        # 1 attempt per key — rotation handles failures
   retry_delay: 1.0

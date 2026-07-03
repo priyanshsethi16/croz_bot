@@ -548,9 +548,12 @@ async function loadPdfPreview(filename) {
       return;
     }
     countEl.textContent = data.total + ' pages';
-    subEl.textContent   = data.pages.length < data.total
-      ? `Showing first ${data.pages.length} of ${data.total} pages`
-      : `${data.total} page${data.total !== 1 ? 's' : ''}`;
+    subEl.textContent   = `${data.total} page${data.total !== 1 ? 's' : ''}`;
+
+    window._previewPages    = data.pages;
+    window._previewFilename = filename;
+    window._previewTotal    = data.total;
+    window._previewLoaded   = data.pages.length;
 
     strip.innerHTML = data.pages.map((p, i) => `
       <div class="pdf-thumb-item${i === 0 ? ' active' : ''}" onclick="selectPreviewPage(${i})" id="thumb-${i}">
@@ -558,7 +561,6 @@ async function loadPdfPreview(filename) {
         <span class="thumb-num">${p.num}</span>
       </div>`).join('');
 
-    window._previewPages = data.pages;
     if (data.pages.length) renderContinuousPreview(data.pages);
 
   } catch(e) {
@@ -698,6 +700,71 @@ function adjustZoom(delta) {
 
 // ── Load PDF list for chunk panel ─────────────────────────────────────────────
 let _activeChunkingBtn = null;
+let _pipelineRunning = false;
+
+function _chunkGroupRows(pdfDetails) {
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const groups  = {};
+  const plain   = [];
+  pdfDetails.forEach(item => {
+    if (splitRe.test(item.name)) {
+      const stem = item.name.replace(splitRe, '');
+      (groups[stem] = groups[stem] || []).push(item);
+    } else {
+      plain.push(item);
+    }
+  });
+  const rows = [];
+  plain.forEach(item => {
+    const stem = item.name.replace(/\.pdf$/i, '');
+    if (groups[stem]) {
+      rows.push({ type: 'group', stem, children: groups[stem] });
+      delete groups[stem];
+    } else {
+      rows.push({ type: 'plain', item });
+    }
+  });
+  Object.entries(groups).forEach(([stem, children]) => {
+    rows.push({ type: 'group', stem, children });
+  });
+  return rows;
+}
+
+function _toggleChunkGroup(stem) {
+  const btn = document.getElementById('ckg-btn-' + stem);
+  const children = document.querySelectorAll('.ckg-child-' + CSS.escape(stem));
+  const isOpen = btn && btn.classList.contains('open');
+  if (btn) {
+    btn.classList.toggle('open', !isOpen);
+    btn.querySelector('i').className = 'fa fa-chevron-' + (isOpen ? 'right' : 'down');
+  }
+  children.forEach(r => r.classList.toggle('visible', !isOpen));
+}
+
+function _buildChunkRowActions(item) {
+  let a = '<div class="table-actions">';
+  const dis = item.chunks_count === 0 ? 'disabled' : '';
+  a += `<button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')" ${dis} title="View chunks"><i class="fa fa-layer-group"></i> Chunks</button>`;
+  if (IS_ADMIN && item.chunks_count > 0 && item.document_id) {
+    a += `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})' title="Families"><i class="fa fa-sitemap"></i> Families</button>`;
+  }
+  if (item.status === 'Ready') {
+    if (item.has_embeddings) {
+      a += `<button class="btn btn-sm embed-btn" disabled style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed"><i class="fa fa-check-circle"></i> Embedded</button>`;
+    } else if (item.document_id) {
+      a += `<button class="btn btn-sm btn-primary embed-btn" onclick="triggerEmbeddingInline('${item.document_id}','${escHtml(item.name)}')"><i class="fa fa-brain"></i> Create Embedding</button>`;
+    } else {
+      a += `<button class="btn btn-sm btn-primary embed-btn" disabled><i class="fa fa-brain"></i> Create Embedding</button>`;
+    }
+  } else if (item.status === 'Processing') {
+    a += `<button class="btn btn-sm btn-primary embed-btn" disabled><i class="fa fa-spinner fa-spin"></i> Processing</button>`;
+  } else {
+    a += `<button class="btn btn-sm btn-primary" onclick="runChunkingForPdf('${escHtml(item.name)}',this)"><i class="fa fa-layer-group"></i> Create Chunks</button>`;
+  }
+  a += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')"><i class="fa fa-trash"></i> Delete</button>`;
+  a += '</div>';
+  return a;
+}
 
 async function loadPdfList() {
   const tbody = document.getElementById('pdf-selector-table-body');
@@ -710,122 +777,77 @@ async function loadPdfList() {
 
     const pdfDetails = _pdfDetails.filter(item => item.status === 'Ready');
     if (!pdfDetails.length) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="4" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">
-            No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">Upload one →</button>
-          </td>
-        </tr>
-      `;
+      tbody.innerHTML = `<tr><td colspan="4" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">Upload one →</button></td></tr>`;
       return;
     }
 
-    pdfDetails.forEach(item => {
-      const tr = document.createElement('tr');
-      tr.dataset.pdf = item.name;
-      tr.style.cursor = 'pointer';
-      if (selectedPdf === item.name) {
-        tr.classList.add('selected');
-      }
+    _chunkGroupRows(pdfDetails).forEach(row => {
+      if (row.type === 'plain') {
+        const item = row.item;
+        const tr = document.createElement('tr');
+        tr.dataset.pdf = item.name;
+        tr.style.cursor = 'pointer';
+        if (selectedPdf === item.name) tr.classList.add('selected');
+        tr.addEventListener('click', (e) => { if (e.target.closest('button,a,i')) return; selectPdfRow(tr, item.name); });
+        let sb = '';
+        if (item.status === 'Ready') sb = `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`;
+        else if (item.status === 'Processing') sb = `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
+        else if (item.status === 'Failed') sb = `<span class="badge badge-red"><i class="fa fa-exclamation-circle"></i> Failed</span>`;
+        else sb = `<span class="badge badge-grey"><i class="fa fa-clock"></i> Not chunked</span>`;
+        tr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:500;font-size:13px">${escHtml(item.name)}</span></div></td><td><span class="badge badge-blue">${item.chunks_count}</span></td><td>${sb}</td><td>${_buildChunkRowActions(item)}</td>`;
+        tbody.appendChild(tr);
 
-      // Add click handler to select the row
-      tr.addEventListener('click', (e) => {
-        if (e.target.closest('button') || e.target.closest('a') || e.target.closest('i')) return;
-        selectPdfRow(tr, item.name);
-      });
-
-      // Status Badge
-      let statusBadge = '';
-      if (item.status === 'Ready') {
-        statusBadge = `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`;
-      } else if (item.status === 'Processing') {
-        statusBadge = `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
-      } else if (item.status === 'Failed') {
-        statusBadge = `<span class="badge badge-red"><i class="fa fa-exclamation-circle"></i> Failed</span>`;
       } else {
-        statusBadge = `<span class="badge badge-grey"><i class="fa fa-clock"></i> Not chunked</span>`;
-      }
-
-      // Actions Buttons
-      let actionButtons = `<div class="table-actions">`;
-
-      // 1. Chunks Drawer Button (always visible, disabled if chunks count is 0)
-      const chunksDisabled = item.chunks_count === 0 ? 'disabled' : '';
-      actionButtons += `
-        <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')" ${chunksDisabled} title="View chunks">
-          <i class="fa fa-layer-group"></i> Chunks
-        </button>
-      `;
-      if (IS_ADMIN && item.chunks_count > 0 && item.document_id) {
-        actionButtons += `
-          <button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})' title="Review product families">
-            <i class="fa fa-sitemap"></i> Families
-          </button>
-        `;
-      }
-
-      // 2. Create Embedding OR Create Chunks (VLM Run)
-      if (item.status === 'Ready') {
-        if (item.has_embeddings) {
-          actionButtons += `
-            <button class="btn btn-sm embed-btn" disabled title="Already embedded" style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed">
-              <i class="fa fa-check-circle"></i> Embedded
-            </button>
-          `;
-        } else if (item.document_id) {
-          actionButtons += `
-            <button class="btn btn-sm btn-primary embed-btn" onclick="triggerEmbeddingInline('${item.document_id}', '${escHtml(item.name)}')" title="Generate embeddings and index to Qdrant">
-              <i class="fa fa-brain"></i> Create Embedding
-            </button>
-          `;
-        } else {
-          actionButtons += `
-            <button class="btn btn-sm btn-primary embed-btn" disabled title="No document record found">
-              <i class="fa fa-brain"></i> Create Embedding
-            </button>
-          `;
+        const { stem, children } = row;
+        const totalChunks = children.reduce((s, c) => s + (c.chunks_count || 0), 0);
+        const allReady = children.every(c => c.status === 'Ready');
+        const anyProcessing = children.some(c => c.status === 'Processing');
+        const psb = allReady
+          ? `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`
+          : anyProcessing
+          ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+          : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
+        const anyChunks = children.some(c => c.chunks_count > 0);
+        const allEmbedded = anyChunks && children.every(c => c.has_embeddings);
+        const anyEmbedded = children.some(c => c.has_embeddings);
+        const childDocIds = children.map(c => c.document_id).filter(Boolean);
+        let pa = '<div class="table-actions">';
+        pa += `<button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(stem)}')" ${!anyChunks ? 'disabled' : ''}><i class="fa fa-layer-group"></i> Chunks</button>`;
+        if (IS_ADMIN && anyChunks) pa += `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(stem)})'><i class="fa fa-sitemap"></i> Families</button>`;
+        if (IS_ADMIN && anyChunks) {
+          if (allEmbedded) {
+            pa += `<button class="btn btn-sm embed-btn" id="group-embed-btn-${escHtml(stem)}" disabled style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed"><i class="fa fa-check-circle"></i> Embedded</button>`;
+          } else {
+            pa += `<button class="btn btn-sm btn-primary embed-btn" id="group-embed-btn-${escHtml(stem)}" onclick="triggerGroupEmbedding('${escHtml(stem)}', ${JSON.stringify(childDocIds)}, this)"><i class="fa fa-brain"></i> Create Embedding</button>`;
+          }
         }
-      } else if (item.status === 'Processing') {
-        actionButtons += `
-          <button class="btn btn-sm btn-primary embed-btn" disabled>
-            <i class="fa fa-spinner fa-spin"></i> Processing
-          </button>
-        `;
-      } else {
-        // Pending / Not chunked / Failed -> show Create Chunks button
-        actionButtons += `
-          <button class="btn btn-sm btn-primary" onclick="runChunkingForPdf('${escHtml(item.name)}', this)" title="Run VLM parser to extract product chunks">
-            <i class="fa fa-layer-group"></i> Create Chunks
-          </button>
-        `;
+        pa += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(stem)}')"><i class="fa fa-trash"></i> Delete</button></div>`;
+
+        const parentTr = document.createElement('tr');
+        parentTr.className = 'pdf-group-parent';
+        parentTr.dataset.pdf = stem;
+        parentTr.style.cursor = 'pointer';
+        if (selectedPdf === stem || selectedPdf === stem + '.pdf') parentTr.classList.add('selected');
+        parentTr.addEventListener('click', (e) => { if (e.target.closest('button,a,i')) return; selectPdfRow(parentTr, stem); });
+        parentTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:6px"><button class="pdf-group-expand-btn" id="ckg-btn-${escHtml(stem)}" onclick="event.stopPropagation();_toggleChunkGroup('${escHtml(stem)}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:600;font-size:13px">${escHtml(stem)}</span><span class="split-count-badge">${children.length} parts</span></div></td><td><span class="badge badge-blue">${totalChunks}</span></td><td>${psb}</td><td>${pa}</td>`;
+        tbody.appendChild(parentTr);
+
+        children.forEach(child => {
+          const childTr = document.createElement('tr');
+          childTr.className = `pdf-child-row ckg-child-${escHtml(stem)}`;
+          childTr.dataset.pdf = child.name;
+          if (selectedPdf === child.name) childTr.classList.add('selected');
+          childTr.addEventListener('click', (e) => { if (e.target.closest('button,a,i')) return; selectPdfRow(childTr, child.name); });
+          let csb = '';
+          if (child.status === 'Ready') csb = `<span class="badge badge-green" style="font-size:10px"><i class="fa fa-check-circle"></i> Ready</span>`;
+          else if (child.status === 'Processing') csb = `<span class="badge badge-yellow" style="font-size:10px"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
+          else csb = `<span class="badge badge-grey" style="font-size:10px"><i class="fa fa-clock"></i> Pending</span>`;
+          childTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;font-weight:500">${escHtml(child.name)}</span></div></td><td><span class="badge badge-blue" style="font-size:10px">${child.chunks_count}</span></td><td>${csb}</td><td>${_buildChunkRowActions(child)}</td>`;
+          tbody.appendChild(childTr);
+        });
       }
-
-      // 3. Delete Button
-      actionButtons += `
-        <button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')" title="Delete embeddings only">
-          <i class="fa fa-trash"></i> Delete
-        </button>
-      `;
-
-      actionButtons += `</div>`;
-
-      tr.innerHTML = `
-        <td>
-          <div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px">
-            <i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i>
-            <span class="pname" style="font-weight:500;font-size:13px">${escHtml(item.name)}</span>
-          </div>
-        </td>
-        <td>
-          <span class="badge badge-blue">${item.chunks_count}</span>
-        </td>
-        <td>${statusBadge}</td>
-        <td>${actionButtons}</td>
-      `;
-      tbody.appendChild(tr);
     });
 
-    // Correct progress bar if the tracked PDF's actual embedding state doesn't match
     if (_trackedPdf && ['indexed', 'tested'].includes(_trackedStage)) {
       const stem = _trackedPdf.replace(/\.pdf$/i, '');
       const trackedDetail = pdfDetails.find(d =>
@@ -839,7 +861,7 @@ async function loadPdfList() {
     }
 
   } catch(e) {
-    console.error("Error loading PDF list: ", e);
+    console.error('Error loading PDF list: ', e);
   }
 }
 
@@ -920,7 +942,23 @@ function openFamilies(pdfName) {
   showPanel('families');
 }
 
+async function openChunkingFromDashboard(name, btn) {
+  // Switch panel manually so we can await loadExistingUploads before scrolling
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('.step-item').forEach(s => s.classList.remove('active'));
+  document.getElementById('panel-upload').classList.add('active');
+  document.querySelector('.sidebar-link[data-panel="upload"]')?.classList.add('active');
+  document.querySelector('.step-item[data-step="upload"]')?.classList.add('active');
+  closeSidebar();
+
+  await Promise.all([loadExistingUploads(), loadPdfPreview(name)]);
+  document.getElementById('pdf-preview-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  runChunkingForPdf(name, btn);
+}
+
 async function runChunkingForPdf(name, btnEl) {
+  if (_pipelineRunning) { return; }
   selectedPdf = name;
   const row = document.querySelector(`#pdf-selector-table-body tr[data-pdf="${name}"]`);
   if (row) {
@@ -931,11 +969,33 @@ async function runChunkingForPdf(name, btnEl) {
 }
 
 async function processWholePdf(btnEl) {
-  if (!selectedPdf) { showToast('No PDF selected.', 'error'); return; }
+  if (!selectedPdf) { return; }
+  if (_pipelineRunning) { return; }
+  _pipelineRunning = true;
   btnEl.disabled = true;
   btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Processing…';
+
+  const prog  = document.getElementById('chunk-progress');
+  const fill  = document.getElementById('chunk-fill');
+  const pct   = document.getElementById('chunk-pct');
+  const log   = document.getElementById('chunk-log');
+  const label = document.getElementById('chunk-progress-label');
+
+  if (prog) prog.classList.add('visible');
+  if (log)  { log.textContent = `▶ Starting extraction for: ${selectedPdf}\n`; log.classList.add('visible'); }
+
+  let p = 0;
+  const ticker = setInterval(() => {
+    p = Math.min(p + 2, 88);
+    if (fill) fill.style.width = p + '%';
+    if (pct)  pct.textContent  = p + '%';
+  }, 600);
+
+  const isMistral = _visionModel === 'mistral-ocr-latest';
+  const endpoint = isMistral ? '/admin-panel/api/pipeline-mistral/' : '/admin-panel/api/pipeline/';
+  let success = false;
   try {
-    const res = await fetch('/admin-panel/api/pipeline/', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
       body: JSON.stringify({
@@ -944,9 +1004,28 @@ async function processWholePdf(btnEl) {
       })
     });
     const data = await res.json();
+    clearInterval(ticker);
+    if (fill) { fill.style.width = '100%'; }
+    if (pct)  { pct.textContent = '100%'; }
+    if (label){ label.textContent = data.error ? 'Failed' : 'Complete'; }
+
+    // Always show pipeline log output
+    const pipelineLog = data.output || data.detail || '';
+    if (log && pipelineLog) {
+      log.textContent += pipelineLog;
+      log.scrollTop = log.scrollHeight;
+    }
+
     if (data.error) {
-      showToast(`Chunking failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
+      const errMsg = getCleanErrorMessage(data.error);
+      const lowerErr = errMsg.toLowerCase();
+      if (lowerErr.includes('high demand') || lowerErr.includes('quota') || lowerErr.includes('429')) {
+        showToast(errMsg, 'error', 10000);
+      }
+      if (prog) prog.classList.remove('visible');
+      if (log) log.classList.remove('visible');
     } else {
+      success = true;
       showToast('Product chunks created!', 'success');
       advanceTrackedStage('chunked');
       _setWholePdfDone(btnEl);
@@ -955,11 +1034,17 @@ async function processWholePdf(btnEl) {
       const nextEl = document.getElementById('next-to-index');
       if (nextEl) nextEl.style.display = 'flex';
       markStepDone('chunk');
+      if (prog) setTimeout(() => { prog.classList.remove('visible'); if (log) log.classList.remove('visible'); }, 3000);
     }
   } catch(e) {
-    showToast('Request failed.', 'error');
+    clearInterval(ticker);
   } finally {
+    _pipelineRunning = false;
     btnEl.disabled = false;
+    if (!success) btnEl.innerHTML = '<i class="fa fa-layer-group"></i> Process Whole PDF';
+    if (fill) fill.style.width = '0%';
+    if (pct)  pct.textContent = '0%';
+    if (label) label.textContent = 'Extracting products…';
   }
 }
 
@@ -1081,9 +1166,75 @@ async function triggerEmbeddingInline(documentId, pdfName) {
   }
 }
 
+// ── Group Embedding (all split parts) ───────────────────────────────────────
+async function triggerGroupEmbedding(stem, docIds, btnEl) {
+  if (!docIds || !docIds.length) {
+    showToast('No document IDs found for this group.', 'error');
+    return;
+  }
+  btnEl.disabled = true;
+  btnEl.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Indexing…';
+
+  let totalIndexed = 0;
+  let failed = 0;
+
+  for (const docId of docIds) {
+    try {
+      const auditRes = await fetch(`/admin-panel/api/v2/documents/${docId}/index-audit/`);
+      const audit = await auditRes.json();
+      if (!auditRes.ok || audit.error || audit.pending_embeddings === 0) continue;
+
+      const res = await fetch(`/admin-panel/api/v2/documents/${docId}/index/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ confirmed_embedding_count: audit.pending_embeddings })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { failed++; continue; }
+      totalIndexed += data.indexed || 0;
+    } catch(e) { failed++; }
+  }
+
+  if (failed > 0 && totalIndexed === 0) {
+    showToast(`Embedding failed for all parts of "${stem}".`, 'error');
+    btnEl.disabled = false;
+    btnEl.innerHTML = '<i class="fa fa-brain"></i> Create Embedding';
+    return;
+  }
+
+  // Update stage
+  try {
+    await fetch('/admin-panel/api/update-pdf-stage/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: stem, stage: 'indexed' })
+    });
+  } catch(e) {}
+
+  const msg = failed > 0
+    ? `Indexed ${totalIndexed} chunk(s) for "${stem}" (${failed} part(s) skipped).`
+    : `Indexed ${totalIndexed} chunk(s) for "${stem}".`;
+  showToast(msg, failed > 0 ? 'info' : 'success');
+
+  btnEl.disabled = true;
+  btnEl.style.cssText = 'background:#22c55e;color:#fff;opacity:1;cursor:not-allowed';
+  btnEl.innerHTML = '<i class="fa fa-check-circle"></i> Embedded';
+
+  const displayPdf = _trackedPdf || stem;
+  _trackedPdf = displayPdf;
+  _trackedStage = 'indexed';
+  _trackedPercent = null;
+  _trackedSetAt = Date.now();
+  _renderProgress(displayPdf, 'indexed');
+
+  await refreshStats();
+  await loadPdfList();
+}
+
 // ── Create Chunks (Pipeline) ──────────────────────────────────────────────────
 async function runChunking() {
-  if (!selectedPdf) { showToast('Please select a PDF first.', 'error'); return; }
+  if (!selectedPdf || _pipelineRunning) { return; }
+  _pipelineRunning = true;
 
   const btn   = _activeChunkingBtn || document.getElementById('btn-run-chunk');
   const prog  = document.getElementById('chunk-progress');
@@ -1105,8 +1256,11 @@ async function runChunking() {
     pct.textContent  = p + '%';
   }, 600);
 
+  const isMistral = _visionModel === 'mistral-ocr-latest';
+  const endpoint = isMistral ? '/admin-panel/api/pipeline-mistral/' : '/admin-panel/api/pipeline/';
+
   try {
-    const res  = await fetch('/admin-panel/api/pipeline/', {
+    const res  = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
       body: JSON.stringify({
@@ -1119,8 +1273,15 @@ async function runChunking() {
     fill.style.width = '100%'; pct.textContent = '100%';
     label.textContent = 'Complete';
 
+    const pipelineLog = data.output || data.detail || '';
+    if (pipelineLog) { log.textContent += pipelineLog; log.scrollTop = log.scrollHeight; }
+
     if (data.error) {
-      showToast(`Chunking failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
+      const errMsg = getCleanErrorMessage(data.error);
+      const lowerErr = errMsg.toLowerCase();
+      if (lowerErr.includes('high demand') || lowerErr.includes('quota') || lowerErr.includes('429')) {
+        showToast(errMsg, 'error', 10000);
+      }
     } else {
       showToast('Product chunks created!', 'success');
       advanceTrackedStage('chunked');
@@ -1136,10 +1297,10 @@ async function runChunking() {
     label.textContent = 'Extracting products…';
   } catch(e) {
     clearInterval(ticker);
-    showToast('Request failed.', 'error');
     prog.classList.remove('visible');
     log.classList.remove('visible');
   } finally {
+    _pipelineRunning = false;
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = '<i class="fa fa-layer-group"></i> Create Chunks';
@@ -1155,6 +1316,7 @@ function markStepDone(name) {
 
 // ── Models & encrypted API keys ──────────────────────────────────────────────
 let _modelOptions = { vision_models: [], chat_models: { gemini: [], openai: [] } };
+let _visionModel = 'gemini-2.5-flash';
 let _savedChatModel = '';
 
 function fillModelSelect(selectId, options, selectedValue) {
@@ -1174,7 +1336,14 @@ function setKeyStatus(provider, keyInfo) {
     ? `<i class="fa fa-check-circle"></i> Configured ${escHtml(keyInfo.masked)}`
     : '<i class="fa fa-exclamation-circle"></i> Not configured';
   input.value = '';
-  input.placeholder = keyInfo.configured ? 'Leave blank to keep current key' : `Enter ${provider === 'openai' ? 'an OpenAI' : 'a Gemini'} key`;
+  const placeholders = { openai: 'an OpenAI', gemini: 'a Gemini', mistral: 'a Mistral' };
+  input.placeholder = keyInfo.configured ? 'Leave blank to keep current key' : `Enter ${placeholders[provider] || 'an API'} key`;
+}
+
+function onVisionModelChange() {
+  const model = document.getElementById('vision-model')?.value || '';
+  const mistralCard = document.getElementById('mistral-settings-card');
+  if (mistralCard) mistralCard.style.display = model === 'mistral-ocr-latest' ? '' : 'none';
 }
 
 async function loadModelConfiguration(force = false) {
@@ -1187,15 +1356,20 @@ async function loadModelConfiguration(force = false) {
     if (!res.ok || data.error) throw new Error(data.error || 'Could not load model configuration.');
 
     _modelOptions = data.options;
+    _visionModel = data.configuration.vision_model || 'gemini-2.5-flash';
     _savedChatModel = data.configuration.chat_model;
     document.getElementById('embedding-model').value = data.configuration.embedding_model;
     fillModelSelect('vision-model', data.options.vision_models, data.configuration.vision_model);
+    onVisionModelChange();
     document.getElementById('chat-provider').value = data.configuration.chat_provider;
     refreshChatModelOptions(data.configuration.chat_model);
     setKeyStatus('openai', data.keys.openai);
     setKeyStatus('gemini', data.keys.gemini);
+    if (data.keys.mistral) setKeyStatus('mistral', data.keys.mistral);
     document.getElementById('clear-openai-key').checked = false;
     document.getElementById('clear-gemini-key').checked = false;
+    const clearMistral = document.getElementById('clear-mistral-key');
+    if (clearMistral) clearMistral.checked = false;
     if (message) message.textContent = 'Configuration loaded. Blank key fields keep the saved encrypted keys.';
   } catch (error) {
     if (message) message.textContent = error.message;
@@ -1235,8 +1409,10 @@ async function saveModelConfiguration() {
   const payload = {
     openai_api_key: document.getElementById('openai-api-key').value.trim(),
     gemini_api_key: document.getElementById('gemini-api-key').value.trim(),
+    mistral_api_key: (document.getElementById('mistral-api-key')?.value || '').trim(),
     clear_openai_key: document.getElementById('clear-openai-key').checked,
     clear_gemini_key: document.getElementById('clear-gemini-key').checked,
+    clear_mistral_key: document.getElementById('clear-mistral-key')?.checked || false,
     vision_model: document.getElementById('vision-model').value,
     chat_provider: document.getElementById('chat-provider').value,
     chat_model: document.getElementById('chat-model').value,
@@ -1254,11 +1430,15 @@ async function saveModelConfiguration() {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Could not save model configuration.');
     _modelOptions = data.options;
+    _visionModel = data.configuration.vision_model || 'gemini-2.5-flash';
     _savedChatModel = data.configuration.chat_model;
     setKeyStatus('openai', data.keys.openai);
     setKeyStatus('gemini', data.keys.gemini);
+    if (data.keys.mistral) setKeyStatus('mistral', data.keys.mistral);
     document.getElementById('clear-openai-key').checked = false;
     document.getElementById('clear-gemini-key').checked = false;
+    const clearMistralEl = document.getElementById('clear-mistral-key');
+    if (clearMistralEl) clearMistralEl.checked = false;
     if (message) message.textContent = data.message;
     showToast(data.message, 'success');
   } catch (error) {
@@ -1404,96 +1584,277 @@ function selectPdfFromOverview(pdfName) {
   .catch(() => {});
 }
 
-function updateCatalogTable(processed) {
+function _overviewGroupRows(items, isProcessed) {
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const groups = {};   // parentStem -> [item, ...]
+  const plain  = [];
+
+  items.forEach(item => {
+    if (splitRe.test(item.name)) {
+      const stem = item.name.replace(splitRe, '');
+      (groups[stem] = groups[stem] || []).push(item);
+    } else {
+      plain.push(item);
+    }
+  });
+
+  // For plain items whose stem matches a group key, promote them as group parents
+  // (shouldn't normally happen, but guard anyway)
+  const rows = [];
+
+  plain.forEach(item => {
+    const stem = item.name.replace(/\.pdf$/i, '');
+    if (groups[stem]) {
+      rows.push({ type: 'group-parent', stem, item, children: groups[stem] });
+      delete groups[stem];
+    } else {
+      rows.push({ type: 'plain', item });
+    }
+  });
+
+  // Any remaining groups (no matching plain parent)
+  Object.entries(groups).forEach(([stem, children]) => {
+    // Synthesise a virtual parent from aggregated child data
+    const totalChunks   = children.reduce((s, c) => s + (c.chunks || 0), 0);
+    const totalProducts = children.reduce((s, c) => s + (c.products || 0), 0);
+    const allReady = children.every(c => c.chunks > 0);
+    const anyProcessing = children.some(c => c.status === 'Processing');
+    const anyFailed = children.some(c => c.status === 'Failed');
+    const anyReady = children.some(c => c.chunks > 0);
+    const synth = {
+      name: stem,
+      chunks: totalChunks,
+      products: totalProducts,
+      status: allReady ? 'Ready' : anyProcessing ? 'Processing' : anyReady ? 'Partial' : anyFailed ? 'Failed' : 'Pending',
+    };
+    rows.push({ type: 'group-parent', stem, item: synth, children });
+  });
+
+  return rows;
+}
+
+function _toggleOverviewGroup(stem) {
+  const btn = document.getElementById('ovg-btn-' + stem);
+  const children = document.querySelectorAll('.ovg-child-' + CSS.escape(stem));
+  const isOpen = btn && btn.classList.contains('open');
+  if (btn) {
+    btn.classList.toggle('open', !isOpen);
+    btn.querySelector('i').className = 'fa fa-chevron-' + (isOpen ? 'right' : 'down');
+  }
+  children.forEach(r => r.classList.toggle('visible', !isOpen));
+}
+
+function updateCatalogTable(processed, unprocessed) {
   const container = document.getElementById('catalog-overview-body');
   if (!container) return;
 
-  // If there are no processed PDFs, show the empty state
-  if (!processed.length) {
+  unprocessed = unprocessed || [];
+
+  // Merge split parts from unprocessed into their processed group if same stem exists
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const processedStems = new Set(
+    processed
+      .filter(p => splitRe.test(p.name))
+      .map(p => p.name.replace(splitRe, ''))
+  );
+  const mergedUnprocessed = [];
+  unprocessed.forEach(item => {
+    if (splitRe.test(item.name)) {
+      const stem = item.name.replace(splitRe, '');
+      if (processedStems.has(stem)) {
+        // inject into processed list so it appears as child of that group
+        processed.push(item);
+        return;
+      }
+    }
+    mergedUnprocessed.push(item);
+  });
+  unprocessed = mergedUnprocessed;
+
+  if (!processed.length && !unprocessed.length) {
     let emptyHtml = `
       <div style="text-align:center;padding:48px 20px;color:var(--grey)">
         <i class="fa fa-inbox" style="font-size:40px;margin-bottom:14px;display:block;color:#d0d0d0"></i>
         <p style="font-size:14px;font-weight:600;margin-bottom:8px">No PDFs processed yet</p>
     `;
     if (IS_ADMIN) {
-      emptyHtml += `
-        <p style="font-size:13px;margin-bottom:20px">Follow the 5-step workflow to get started.</p>
-        <button class="btn btn-primary" onclick="showPanel('upload')">
-          <i class="fa fa-upload"></i> Upload Your First PDF
-        </button>
-      `;
+      emptyHtml += `<p style="font-size:13px;margin-bottom:20px">Follow the 5-step workflow to get started.</p>
+        <button class="btn btn-primary" onclick="showPanel('upload')"><i class="fa fa-upload"></i> Upload Your First PDF</button>`;
     } else {
-      emptyHtml += `
-        <p style="font-size:13px">No catalog data available yet. Please contact your administrator.</p>
-      `;
+      emptyHtml += `<p style="font-size:13px">No catalog data available yet. Please contact your administrator.</p>`;
     }
     emptyHtml += `</div>`;
     container.innerHTML = emptyHtml;
     return;
   }
 
-  // Otherwise, construct the table
   let tableHtml = `
     <div class="table-wrap">
       <table class="catalog-table">
-        <thead>
-          <tr>
-            <th>PDF Name</th>
-            <th>Chunks</th>
-            <th>Products</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>PDF Name</th><th>Chunks</th><th>Products</th><th>Status</th><th>Actions</th>
+        </tr></thead>
         <tbody>
   `;
 
-  // 1. Processed rows
-  processed.forEach(item => {
-    tableHtml += `
-      <tr style="cursor:pointer" onclick="selectPdfFromOverview('${escHtml(item.name)}')">
-        <td>
-          <div class="pdf-name-cell">
-            <i class="fa fa-file-pdf"></i>
-            <span class="pname">${escHtml(item.name)}</span>
-          </div>
-        </td>
-        <td><span class="badge badge-blue">${item.chunks}</span></td>
-        <td><span class="badge badge-green">${item.products}</span></td>
-        <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
-        <td onclick="event.stopPropagation()">
-          <div class="table-actions">
-            <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
-              <i class="fa fa-layer-group"></i> Chunks
-            </button>
-            ${IS_ADMIN && item.chunks > 0 ? `
-            <button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})'>
-              <i class="fa fa-sitemap"></i> Families
-            </button>` : ''}
-            <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
-              <i class="fa fa-comments"></i> Test
-            </button>
-    `;
-    if (IS_ADMIN) {
+  // ── Processed rows (grouped) ──
+  _overviewGroupRows(processed, true).forEach(row => {
+    if (row.type === 'plain') {
+      const item = row.item;
       tableHtml += `
-            <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')">
-              <i class="fa fa-trash"></i> Delete
-            </button>
-      `;
+        <tr style="cursor:pointer" onclick="selectPdfFromOverview('${escHtml(item.name)}')">
+          <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname">${escHtml(item.name)}</span></div></td>
+          <td><span class="badge badge-blue">${item.chunks}</span></td>
+          <td><span class="badge badge-green">${item.products}</span></td>
+          <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
+          <td onclick="event.stopPropagation()">
+            <div class="table-actions">
+              <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
+                <i class="fa fa-layer-group"></i> Chunks</button>
+              ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
+              <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')"><i class="fa fa-comments"></i> Test</button>
+              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" onclick="event.stopPropagation()"><i class="fa fa-trash"></i> Delete</button>` : ''}
+            </div>
+          </td>
+        </tr>`;
+    } else {
+      // Group parent row
+      const { stem, item, children } = row;
+      const safeStem = escHtml(stem);
+      const statusBadge = item.status === 'Ready'
+        ? `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`
+        : item.status === 'Partial'
+        ? `<span class="badge badge-yellow"><i class="fa fa-adjust"></i> Partial</span>`
+        : item.status === 'Processing'
+        ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+        : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
+      tableHtml += `
+        <tr class="pdf-group-parent" style="cursor:pointer" onclick="selectPdfFromOverview('${safeStem}')">
+          <td>
+            <div class="pdf-name-cell" style="gap:6px">
+              <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts">
+                <i class="fa fa-chevron-right"></i>
+              </button>
+              <i class="fa fa-file-pdf"></i>
+              <span class="pname">${safeStem}</span>
+              <span class="split-count-badge">${children.length} parts</span>
+            </div>
+          </td>
+          <td><span class="badge badge-blue">${item.chunks}</span></td>
+          <td><span class="badge badge-green">${item.products}</span></td>
+          <td>${statusBadge}</td>
+          <td onclick="event.stopPropagation()">
+            <div class="table-actions">
+              <button class="btn btn-sm btn-secondary" onclick="openChunks('${safeStem}')">
+                <i class="fa fa-layer-group"></i> Chunks</button>
+              ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(stem)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
+              <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')"><i class="fa fa-comments"></i> Test</button>
+              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i> Delete</button>` : ''}
+            </div>
+          </td>
+        </tr>`;
+      // Child rows (hidden by default)
+      children.forEach(child => {
+        const childReady = child.chunks > 0;
+        const childStatusBadge = childReady
+          ? `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`
+          : child.status === 'Processing'
+          ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+          : child.status === 'Failed'
+          ? `<span class="badge badge-red"><i class="fa fa-times-circle"></i> Failed</span>`
+          : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
+        tableHtml += `
+          <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
+            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555">${escHtml(child.name)}</span></div></td>
+            <td><span class="badge badge-blue">${child.chunks || 0}</span></td>
+            <td><span class="badge badge-green">${child.products || 0}</span></td>
+            <td>${childStatusBadge}</td>
+            <td>
+              <div class="table-actions">
+                ${childReady ? `
+                  <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Chunks</button>
+                  ${IS_ADMIN && child.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(child.name)})' style="font-size:11px;padding:5px 10px"><i class="fa fa-sitemap"></i> Families</button>` : ''}
+                ` : `
+                  ${IS_ADMIN ? `<button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>` : ''}}
+                `}
+                ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i> Delete</button>` : ''}
+              </div>
+            </td>
+          </tr>`;
+      });
     }
-    tableHtml += `
-          </div>
-        </td>
-      </tr>
-    `;
   });
 
-  tableHtml += `
-        </tbody>
-      </table>
-    </div>
-  `;
+  // ── Unprocessed rows (grouped) ──
+  _overviewGroupRows(unprocessed, false).forEach(row => {
+    if (row.type === 'plain') {
+      const item = row.item;
+      const statusBadge = item.status === 'Processing'
+        ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+        : item.status === 'Failed'
+        ? `<span class="badge badge-red"><i class="fa fa-times-circle"></i> Failed</span>`
+        : `<span class="badge" style="background:#f1f5f9;color:#64748b"><i class="fa fa-clock"></i> Pending</span>`;
+      tableHtml += `
+        <tr style="opacity:0.75">
+          <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#aaa"></i><span class="pname">${escHtml(item.name)}</span></div></td>
+          <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+          <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+          <td>${statusBadge}</td>
+          <td>${IS_ADMIN ? `<div class="table-actions">
+            <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(item.name)}',this)"><i class="fa fa-layer-group"></i> Create Chunks</button>
+            <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" ><i class="fa fa-trash"></i> Delete</button>
+          </div>` : ''}</td>
+        </tr>`;
+    } else {
+      const { stem, item, children } = row;
+      const safeStem = escHtml(stem);
+      const statusBadge = item.status === 'Processing'
+        ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+        : item.status === 'Failed'
+        ? `<span class="badge badge-red"><i class="fa fa-times-circle"></i> Failed</span>`
+        : `<span class="badge" style="background:#f1f5f9;color:#64748b"><i class="fa fa-clock"></i> Pending</span>`;
+      tableHtml += `
+        <tr class="pdf-group-parent" style="opacity:0.85">
+          <td>
+            <div class="pdf-name-cell" style="gap:6px">
+              <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts">
+                <i class="fa fa-chevron-right"></i>
+              </button>
+              <i class="fa fa-file-pdf" style="color:#aaa"></i>
+              <span class="pname">${safeStem}</span>
+              <span class="split-count-badge">${children.length} parts</span>
+            </div>
+          </td>
+          <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+          <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+          <td>${statusBadge}</td>
+          <td>${IS_ADMIN ? `<div class="table-actions">
+            <button class="btn btn-sm btn-primary" onclick="showPanel('chunk')"><i class="fa fa-layer-group"></i> Create Chunks</button>
+            <button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i> Delete</button>
+          </div>` : ''}</td>
+        </tr>`;
+      children.forEach(child => {
+        const cStatus = child.status === 'Processing'
+          ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+          : child.status === 'Failed'
+          ? `<span class="badge badge-red"><i class="fa fa-times-circle"></i> Failed</span>`
+          : `<span class="badge" style="background:#f1f5f9;color:#64748b"><i class="fa fa-clock"></i> Pending</span>`;
+        tableHtml += `
+          <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
+            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555">${escHtml(child.name)}</span></div></td>
+            <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+            <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+            <td>${cStatus}</td>
+            <td>${IS_ADMIN ? `<div class="table-actions">
+              <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>
+              <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i> Delete</button>
+            </div>` : ''}</td>
+          </tr>`;
+      });
+    }
+  });
 
+  tableHtml += `</tbody></table></div>`;
   container.innerHTML = tableHtml;
 }
 
@@ -1514,7 +1875,7 @@ async function refreshStats() {
     document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
     document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
     updateWorkflowProgress(data);
-    updateCatalogTable(data.processed || []);
+    updateCatalogTable(data.processed || [], data.unprocessed || []);
   } catch(e) {
     console.error('Error refreshing stats:', e);
   }
@@ -1894,6 +2255,7 @@ function setPreset(btn, val) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  fetch('/admin-panel/api/model-config/').then(r => r.ok ? r.json() : null).then(d => { if (d && d.configuration) _visionModel = d.configuration.vision_model || _visionModel; }).catch(() => {});
   // On fresh page load, completely reset all progress tracking state
   _trackedPdf = null;
   _trackedStage = null;
@@ -2007,7 +2369,9 @@ async function runSingleSplit(idx, options = {}) {
   if (processAllBtn && !fromBatch) { processAllBtn.disabled = true; processAllBtn.style.opacity = '0.5'; }
 
   try {
-    const res  = await fetch('/admin-panel/api/pipeline-split/', {
+    const isMistral = _visionModel === 'mistral-ocr-latest';
+    const splitEndpoint = isMistral ? '/admin-panel/api/pipeline-mistral-split/' : '/admin-panel/api/pipeline-split/';
+    const res  = await fetch(splitEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
       body: JSON.stringify({
@@ -2021,7 +2385,11 @@ async function runSingleSplit(idx, options = {}) {
       itemEl.className = 'split-part-item errored';
       statEl.className = 'split-part-status errored';
       statEl.textContent = '✗ Failed';
-      showToast(`Part ${idx+1} failed: ${getCleanErrorMessage(data.error)}`, 'error', 10000);
+      const errMsg = getCleanErrorMessage(data.error);
+      const lowerErr = errMsg.toLowerCase();
+      if (lowerErr.includes('high demand') || lowerErr.includes('quota') || lowerErr.includes('429')) {
+        showToast(errMsg, 'error', 10000);
+      }
       return false;
     } else {
       itemEl.className = 'split-part-item done';
@@ -2073,7 +2441,6 @@ async function runSingleSplit(idx, options = {}) {
     itemEl.className = 'split-part-item errored';
     statEl.className = 'split-part-status errored';
     statEl.textContent = '✗ Error';
-    showToast(`Network error on part ${idx+1}.`, 'error', 10000);
     return false;
   } finally {
     const currentBtn = document.getElementById(`split-btn-${idx}`);
@@ -2113,17 +2480,12 @@ async function runAllSplits() {
   if (allDone) {
     btn.innerHTML = '<i class="fa fa-check"></i> All Done';
     if (nextToIndex) nextToIndex.style.display = 'flex';
-    showToast('All parts processed!', 'success');
+    showToast('Product chunks created!', 'success');
     return;
   }
 
   btn.innerHTML = '<i class="fa fa-redo"></i> Retry Failed';
   if (nextToIndex) nextToIndex.style.display = 'none';
-  const remainingCount = _splitParts.length - doneCount;
-  const reason = failedCount
-    ? `${failedCount} part${failedCount === 1 ? '' : 's'} failed`
-    : `${remainingCount} part${remainingCount === 1 ? '' : 's'} still pending`;
-  showToast(`Process All incomplete: ${reason}. Fix the issue and retry.`, 'error', 10000);
 }
 
 // ── Chunks Drawer ─────────────────────────────────────────────────────

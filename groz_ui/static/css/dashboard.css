@@ -286,6 +286,29 @@
 .file-group-children .file-item { width: 100%; box-sizing: border-box; }
 .file-group.open .file-group-children { display: flex; }
 
+/* ── Grouped rows in catalog/chunk tables ── */
+.pdf-group-parent td { background: #fafafa; font-weight: 600; }
+.pdf-group-parent:hover td { background: #f3f4f6 !important; }
+.pdf-group-parent td:first-child { border-left: 3px solid var(--orange); }
+.pdf-group-expand-btn {
+  width: 26px; height: 26px; border: 1.5px solid var(--border);
+  border-radius: 6px; background: #fff; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--grey); transition: all .15s; flex-shrink: 0;
+}
+.pdf-group-expand-btn:hover { border-color: var(--orange); color: var(--orange); }
+.pdf-group-expand-btn.open { background: var(--orange-light); border-color: var(--orange); color: var(--orange); }
+.pdf-child-row td { background: #fff; }
+.pdf-child-row td:first-child { padding-left: 32px; border-left: 3px solid #ffd4bb; }
+.pdf-child-row:hover td { background: #fff7f2 !important; }
+.pdf-child-row { display: none; }
+.pdf-child-row.visible { display: table-row; }
+.split-count-badge {
+  background: var(--orange-light); color: var(--orange);
+  font-size: 10px; font-weight: 700; padding: 2px 7px;
+  border-radius: 10px; margin-left: 6px;
+}
+
 /* ── Next step CTA ── */
 .next-step-bar {
   display: flex; align-items: center; justify-content: space-between;
@@ -401,6 +424,8 @@
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
 .badge-green  { background: #dcfce7; color: #166534; }
 .badge-blue   { background: #dbeafe; color: #1e40af; }
+.badge-yellow { background: #fef9c3; color: #854d0e; }
+.badge-red    { background: #fee2e2; color: #991b1b; }
 .badge-orange { background: #fff0ec; color: var(--orange); }
 .badge-grey   { background: var(--light); color: var(--grey); }
 
