@@ -15,7 +15,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 
 VISION_MODELS = (
     # Mistral OCR-4
-    ("mistral-ocr-latest", "Mistral OCR-4 + LLM"),
+    ("mistral-ocr-4", "Mistral OCR-4 + LLM"),
     # OpenAI GPT-5 Series
     ("gpt-5.4", "GPT-5.4"),
     ("gpt-5.4-mini", "GPT-5.4 mini"),
@@ -282,7 +282,7 @@ def subprocess_environment() -> dict[str, str]:
     env["CHAT_PROVIDER"] = runtime.chat_provider
     env["CHAT_MODEL"] = runtime.chat_model
     # Tell the pipeline which provider to use based on the selected model
-    if runtime.vision_model == "mistral-ocr-latest":
+    if runtime.vision_model == "mistral-ocr-4":
         env["VISION_PROVIDER"] = "mistral"
     elif runtime.vision_model.startswith("gemini"):
         env["VISION_PROVIDER"] = "gemini"

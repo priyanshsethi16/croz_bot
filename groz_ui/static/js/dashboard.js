@@ -75,6 +75,7 @@ function getCleanErrorMessage(errText) {
 }
 
 // ── Panel navigation ──────────────────────────────────────────────────────────
+let _pdfDetails = [];  // shared cache — populated by loadPdfList, reused by loadExistingUploads
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
@@ -210,9 +211,17 @@ async function loadExistingUploads() {
   if (!list) return;
   list.innerHTML = '';
   try {
-    const res  = await fetch('/admin-panel/api/pdfs/');
-    const data = await res.json();
-    const pdfs = data.pdfs || [];
+    // Use cached _pdfDetails if available (already fetched by loadPdfList)
+    // Only fetch fresh if cache is empty
+    let pdfs;
+    if (_pdfDetails && _pdfDetails.length > 0) {
+      pdfs = _pdfDetails.map(d => d.name);
+    } else {
+      const res  = await fetch('/admin-panel/api/pdfs/');
+      const data = await res.json();
+      _pdfDetails = data.pdf_details || [];
+      pdfs = data.pdfs || [];
+    }
 
     // Separate plain PDFs from split parts
     const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
@@ -286,6 +295,7 @@ async function loadExistingUploads() {
       group.appendChild(children);
       list.appendChild(group);
     });
+    _renderUploadPage();
   } catch(e) {}
 }
 
@@ -808,8 +818,7 @@ async function loadPdfList() {
           ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
           : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
         const anyChunks = children.some(c => c.chunks_count > 0);
-        const allEmbedded = anyChunks && children.every(c => c.has_embeddings);
-        const anyEmbedded = children.some(c => c.has_embeddings);
+        const allEmbedded = anyChunks && children.every(c => c.has_embeddings === true);
         const childDocIds = children.map(c => c.document_id).filter(Boolean);
         let pa = '<div class="table-actions">';
         pa += `<button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(stem)}')" ${!anyChunks ? 'disabled' : ''}><i class="fa fa-layer-group"></i> Chunks</button>`;
@@ -828,7 +837,13 @@ async function loadPdfList() {
         parentTr.dataset.pdf = stem;
         parentTr.style.cursor = 'pointer';
         if (selectedPdf === stem || selectedPdf === stem + '.pdf') parentTr.classList.add('selected');
-        parentTr.addEventListener('click', (e) => { if (e.target.closest('button,a,i')) return; selectPdfRow(parentTr, stem); });
+        parentTr.addEventListener('click', (e) => {
+          if (e.target.closest('button,a,i')) return;
+          selectPdfRow(parentTr, stem);
+          // Load split parts preview for parent group row
+          const partNames = children.map(c => c.name);
+          if (partNames.length) previewParentGroup(stem, partNames);
+        });
         parentTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:6px"><button class="pdf-group-expand-btn" id="ckg-btn-${escHtml(stem)}" onclick="event.stopPropagation();_toggleChunkGroup('${escHtml(stem)}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:600;font-size:13px">${escHtml(stem)}</span><span class="split-count-badge">${children.length} parts</span></div></td><td><span class="badge badge-blue">${totalChunks}</span></td><td>${psb}</td><td>${pa}</td>`;
         tbody.appendChild(parentTr);
 
@@ -859,6 +874,7 @@ async function loadPdfList() {
         _renderProgress(_trackedPdf, 'chunked');
       }
     }
+    _renderChunkPanelPage();
 
   } catch(e) {
     console.error('Error loading PDF list: ', e);
@@ -866,6 +882,131 @@ async function loadPdfList() {
 }
 
 let selectedPdf = null;
+
+// ── Chunk panel search + pagination ──────────────────────────────────────────
+const _chunkPanelState = { page: 1, pageSize: 15, query: '' };
+
+function _chunkPanelFilter() {
+  const q = (document.getElementById('chunk-panel-search')?.value || '').toLowerCase().trim();
+  if (q !== _chunkPanelState.query) _chunkPanelState.page = 1;
+  _chunkPanelState.query = q;
+  _renderChunkPanelPage();
+}
+
+function _chunkPanelSetPageSize(n) {
+  _chunkPanelState.pageSize = n;
+  _chunkPanelState.page = 1;
+  _renderChunkPanelPage();
+}
+
+function _renderChunkPanelPage() {
+  const tbody = document.getElementById('pdf-selector-table-body');
+  if (!tbody) return;
+  const q = _chunkPanelState.query;
+  const allRows = Array.from(tbody.querySelectorAll('tr:not(.ckg-child-hidden-placeholder)'));
+  const topRows = allRows.filter(r => !r.className.startsWith('pdf-child-row'));
+  const filtered = q ? topRows.filter(r => (r.textContent || '').toLowerCase().includes(q)) : topRows;
+  const pageSize = _chunkPanelState.pageSize;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  _chunkPanelState.page = Math.min(_chunkPanelState.page, totalPages);
+  const start = (_chunkPanelState.page - 1) * pageSize;
+  const pageRows = new Set(filtered.slice(start, start + pageSize));
+  allRows.forEach(r => {
+    if (r.className.startsWith('pdf-child-row')) return;
+    r.style.display = pageRows.has(r) ? '' : 'none';
+  });
+  const countEl = document.getElementById('chunk-panel-count');
+  if (countEl) countEl.textContent = filtered.length ? `${filtered.length} PDF${filtered.length !== 1 ? 's' : ''}` : 'No results';
+  _renderPagination('chunk-panel-pagination', _chunkPanelState.page, totalPages,
+    p => { _chunkPanelState.page = p; _renderChunkPanelPage(); },
+    _chunkPanelState.pageSize, '_chunkPanelSetPageSize');
+}
+
+// ── Upload panel search + pagination ───────────────────────────────────────────────────
+const _uploadPanelState = { page: 1, pageSize: 15, query: '' };
+let _uploadAllItems = [];  // flat list of {el, name} for pagination
+
+function _uploadPanelSetPageSize(n) {
+  _uploadPanelState.pageSize = n;
+  _uploadPanelState.page = 1;
+  _renderUploadPage();
+}
+
+function _uploadPanelFilter() {
+  const q = (document.getElementById('upload-panel-search')?.value || '').toLowerCase().trim();
+  if (q !== _uploadPanelState.query) _uploadPanelState.page = 1;
+  _uploadPanelState.query = q;
+  _renderUploadPage();
+}
+
+function _renderUploadPage() {
+  const list = document.getElementById('upload-file-list');
+  if (!list) return;
+  const q = _uploadPanelState.query;
+  // Top-level items: .file-item (plain) and .file-group (split group)
+  const topItems = Array.from(list.children).filter(el =>
+    el.classList.contains('file-item') || el.classList.contains('file-group')
+  );
+  const filtered = q ? topItems.filter(el => (el.textContent || '').toLowerCase().includes(q)) : topItems;
+  const pageSize = _uploadPanelState.pageSize;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  _uploadPanelState.page = Math.min(_uploadPanelState.page, totalPages);
+  const start = (_uploadPanelState.page - 1) * pageSize;
+  const pageSet = new Set(filtered.slice(start, start + pageSize));
+  topItems.forEach(el => { el.style.display = pageSet.has(el) ? '' : 'none'; });
+  const countEl = document.getElementById('upload-panel-count');
+  if (countEl) countEl.textContent = filtered.length ? `${filtered.length} file${filtered.length !== 1 ? 's' : ''}` : 'No results';
+  _renderPagination('upload-panel-pagination', _uploadPanelState.page, totalPages,
+    p => { _uploadPanelState.page = p; _renderUploadPage(); },
+    _uploadPanelState.pageSize, '_uploadPanelSetPageSize');
+}
+
+// ── Shared pagination renderer ────────────────────────────────────────────────
+function _renderPagination(containerId, currentPage, totalPages, onPageClick, currentPageSize, pageSizeFn) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (totalPages <= 1 && !pageSizeFn) { el.innerHTML = ''; return; }
+
+  const pageSizes = [10, 20, 50, 100];
+  let sizeHtml = '';
+  if (pageSizeFn) {
+    sizeHtml = `<div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+      <span style="font-size:12px;color:#888;white-space:nowrap">Per page:</span>
+      <div style="display:flex;gap:3px">`;
+    pageSizes.forEach(s => {
+      const active = s === currentPageSize;
+      sizeHtml += `<button onclick="${pageSizeFn}(${s})" style="padding:3px 8px;border:1px solid ${active ? 'var(--orange)' : '#e2e8f0'};border-radius:4px;background:${active ? 'var(--orange)' : '#fff'};color:${active ? '#fff' : '#374151'};font-size:11px;cursor:${active ? 'default' : 'pointer'};font-weight:${active ? '600' : '400'}" ${active ? 'disabled' : ''}>${s}</button>`;
+    });
+    sizeHtml += `</div></div>`;
+  }
+
+  if (totalPages <= 1) {
+    el.innerHTML = `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 0">${sizeHtml}</div>`;
+    return;
+  }
+
+  const btnBase = 'padding:4px 10px;border-radius:5px;font-size:12px;cursor:pointer;transition:all 0.15s;';
+  const btnActive = btnBase + 'border:1px solid var(--orange);background:var(--orange);color:#fff;font-weight:600;cursor:default;';
+  const btnNormal = btnBase + 'border:1px solid #e2e8f0;background:#fff;color:#374151;font-weight:400;';
+  const btnDisabled = btnBase + 'border:1px solid #e2e8f0;background:#f8fafc;color:#cbd5e1;cursor:not-allowed;';
+
+  let pagesHtml = `<button style="${currentPage === 1 ? btnDisabled : btnNormal}" ${currentPage === 1 ? 'disabled' : ''} onclick="(${onPageClick.toString()})(${currentPage - 1})">‹</button>`;
+  const range = [];
+  for (let i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) range.push(i);
+    else if (range[range.length - 1] !== '…') range.push('…');
+  }
+  range.forEach(p => {
+    if (p === '…') pagesHtml += `<span style="padding:4px 4px;font-size:12px;color:#aaa;align-self:center">…</span>`;
+    else pagesHtml += `<button style="${p === currentPage ? btnActive : btnNormal}" ${p === currentPage ? 'disabled' : ''} onclick="(${onPageClick.toString()})(${p})">${p}</button>`;
+  });
+  pagesHtml += `<button style="${currentPage === totalPages ? btnDisabled : btnNormal}" ${currentPage === totalPages ? 'disabled' : ''} onclick="(${onPageClick.toString()})(${currentPage + 1})">›</button>`;
+
+  el.innerHTML = `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:6px 0;width:100%">
+    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">${pagesHtml}</div>
+    ${sizeHtml}
+  </div>`;
+}
 let _familyPanelState = {
   pdf: '',
   document_id: '',
@@ -897,6 +1038,7 @@ function selectPdfRow(rowEl, name) {
   rowEl.classList.add('selected');
   selectedPdf = name;
   _userSelectedPdf = name;
+  _pipelineRunning = false;
   // Update progress bar to reflect this PDF's stage (always switch, don't prevent downgrade)
   fetch('/admin-panel/api/approve-pdf/', {
     method: 'POST',
@@ -938,6 +1080,16 @@ function openFamilies(pdfName) {
   if (pdfName) {
     selectedPdf = pdfName;
     _highlightPdfRow(pdfName);
+    // Always update progress bar to this PDF before switching panel
+    _trackedPdf = pdfName.replace(/\.pdf$/i, '');
+    fetch('/admin-panel/api/approve-pdf/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: pdfName })
+    })
+    .then(r => r.json())
+    .then(data => { if (!data.error) setTrackedPdf(pdfName, data.stage || 'uploaded'); })
+    .catch(() => {});
   }
   showPanel('families');
 }
@@ -1517,11 +1669,7 @@ async function deletePdf(filename) {
     const data = await res.json();
     if (data.error) { showToast(data.error, 'error'); return; }
     showToast(data.message, 'success');
-    refreshStats();
-    loadPdfList();
-    document.querySelectorAll('.catalog-table tbody tr').forEach(row => {
-      if (row.querySelector('.pname')?.textContent === filename) row.remove();
-    });
+    await Promise.all([refreshStats(), loadPdfList()]);
   } catch(e) { showToast('Delete failed.', 'error'); }
 }
 
@@ -1774,8 +1922,9 @@ function updateCatalogTable(processed, unprocessed) {
                 ${childReady ? `
                   <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Chunks</button>
                   ${IS_ADMIN && child.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(child.name)})' style="font-size:11px;padding:5px 10px"><i class="fa fa-sitemap"></i> Families</button>` : ''}
+                  <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')" style="font-size:11px;padding:5px 10px"><i class="fa fa-comments"></i> Test</button>
                 ` : `
-                  ${IS_ADMIN ? `<button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>` : ''}}
+                  ${IS_ADMIN ? `<button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>` : ''}
                 `}
                 ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i> Delete</button>` : ''}
               </div>
@@ -1855,7 +2004,96 @@ function updateCatalogTable(processed, unprocessed) {
   });
 
   tableHtml += `</tbody></table></div>`;
-  container.innerHTML = tableHtml;
+  let tableWrap = document.getElementById('overview-table-wrap');
+  if (!tableWrap) {
+    // First JS render: wipe static server-rendered table, insert our managed wrap
+    container.innerHTML = '<div id="overview-table-wrap"></div>';
+    tableWrap = document.getElementById('overview-table-wrap');
+  }
+  tableWrap.innerHTML = tableHtml;
+  _initOverviewSearch();
+}
+
+// ── Dashboard overview search + pagination ────────────────────────────────────
+const _overviewState = { page: 1, pageSize: 15, query: '', status: '' };
+
+function _overviewSetPageSize(n) {
+  _overviewState.pageSize = n;
+  _overviewState.page = 1;
+  _renderOverviewPage();
+}
+
+function _initOverviewSearch() {
+  const container = document.getElementById('catalog-overview-body');
+  if (!container) return;
+  if (!document.getElementById('overview-search-bar')) {
+    const bar = document.createElement('div');
+    bar.className = 'panel-search-bar';
+    bar.innerHTML = `
+      <div style="position:relative;flex:1;min-width:180px;max-width:280px">
+        <i class="fa fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px"></i>
+        <input type="text" id="overview-search-bar" placeholder="Search PDFs…" oninput="_overviewFilter()" class="panel-search-input">
+      </div>
+      <div style="position:relative;min-width:140px">
+        <select id="overview-status-filter" onchange="_overviewFilter()" class="panel-search-input" style="padding-left:10px;cursor:pointer;appearance:none;padding-right:28px">
+          <option value="">All statuses</option>
+          <option value="ready">Ready</option>
+          <option value="pending">Pending</option>
+          <option value="processing">Processing</option>
+          <option value="failed">Failed</option>
+          <option value="partial">Partial</option>
+        </select>
+        <i class="fa fa-chevron-down" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);color:#aaa;font-size:11px;pointer-events:none"></i>
+      </div>
+      <span id="overview-count" class="panel-search-count"></span>`;
+    container.insertBefore(bar, container.firstChild);
+  }
+  if (!document.getElementById('overview-pagination')) {
+    const pg = document.createElement('div');
+    pg.id = 'overview-pagination';
+    pg.className = 'panel-pagination';
+    container.appendChild(pg);
+  }
+  _overviewFilter();
+}
+
+function _overviewFilter() {
+  const q = (document.getElementById('overview-search-bar')?.value || '').toLowerCase().trim();
+  const s = (document.getElementById('overview-status-filter')?.value || '').toLowerCase().trim();
+  const changed = q !== _overviewState.query || s !== _overviewState.status;
+  _overviewState.query = q;
+  _overviewState.status = s;
+  if (changed) _overviewState.page = 1;
+  _renderOverviewPage();
+}
+
+function _renderOverviewPage() {
+  const tbody = document.querySelector('#catalog-overview-body .catalog-table tbody');
+  if (!tbody) return;
+  const q = _overviewState.query;
+  const s = _overviewState.status;
+  const allRows = Array.from(tbody.querySelectorAll('tr:not(.ovg-child-hidden-placeholder)'));
+  const topRows = allRows.filter(r => !r.className.startsWith('pdf-child-row'));
+  const filtered = topRows.filter(r => {
+    const text = (r.textContent || '').toLowerCase();
+    const matchQ = !q || text.includes(q);
+    const matchS = !s || text.includes(s);
+    return matchQ && matchS;
+  });
+  const pageSize = _overviewState.pageSize;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  _overviewState.page = Math.min(_overviewState.page, totalPages);
+  const start = (_overviewState.page - 1) * pageSize;
+  const pageRows = new Set(filtered.slice(start, start + pageSize));
+  allRows.forEach(r => {
+    if (r.className.startsWith('pdf-child-row')) return;
+    r.style.display = pageRows.has(r) ? '' : 'none';
+  });
+  const countEl = document.getElementById('overview-count');
+  if (countEl) countEl.textContent = filtered.length ? `${filtered.length} PDF${filtered.length !== 1 ? 's' : ''}` : 'No results';
+  _renderPagination('overview-pagination', _overviewState.page, totalPages,
+    p => { _overviewState.page = p; _renderOverviewPage(); },
+    _overviewState.pageSize, '_overviewSetPageSize');
 }
 
 async function refreshStats() {
@@ -1972,9 +2210,25 @@ function _resetProgress() {
 }
 
 function updateWorkflowProgress(data = {}) {
-  // On fresh page load (when _trackedPdf is null), ignore all server data
+  // On fresh page load (when _trackedPdf is null), restore from server if available
   if (!_trackedPdf) {
-    return; // Don't update from server until user interacts
+    if (data.tracked_pdf && data.tracked_stage) {
+      _trackedPdf   = data.tracked_pdf;
+      _trackedStage = data.tracked_stage;
+      _trackedSetAt = Date.now();
+      const pct = data.tracked_percent !== undefined ? data.tracked_percent : undefined;
+      if (pct !== undefined) {
+        _renderProgress(data.tracked_pdf, data.tracked_stage, pct);
+      } else {
+        _renderProgress(data.tracked_pdf, data.tracked_stage);
+      }
+      if (data.families_progress && data.tracked_stage === 'chunked') {
+        const { total, approved } = data.families_progress;
+        document.getElementById('workflow-progress-sub').textContent =
+          `${approved} of ${total} product families approved. Approve all families to advance to 60%.`;
+      }
+    }
+    return;
   }
   
   if (data.tracked_pdf && data.tracked_stage) {
@@ -2192,7 +2446,6 @@ function showSplitterForPdf(filename) {
 
 let _splitStem    = null;
 let _splitParts   = [];
-let _pdfDetails   = [];
 let _pagesPerPart = 5;
 
 function _updateWholePdfStatus(filename) {
@@ -2264,6 +2517,7 @@ document.addEventListener('DOMContentLoaded', () => {
   _userSelectedPdf = null;
   _resetProgress();
   refreshStats();
+  loadPdfList();  // preload PDF cache so Upload panel opens instantly
   const customInput = document.getElementById('pages-per-input');
   if (customInput) {
     customInput.addEventListener('input', () => {
@@ -2325,7 +2579,7 @@ function renderSplitParts(parts) {
   title.textContent  = `${parts.length} parts ready to process`;
   document.getElementById('next-to-chunk').style.display = 'none';
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
-  if (wholeBtn) wholeBtn.style.display = 'none';
+  if (wholeBtn) { wholeBtn.style.display = ''; wholeBtn.disabled = false; }
   const wholePdfStatus = document.getElementById('whole-pdf-status');
   if (wholePdfStatus) { wholePdfStatus.style.display = 'none'; wholePdfStatus.innerHTML = ''; }
   list.innerHTML = parts.map((p, i) => {
@@ -2542,12 +2796,19 @@ function renderChunks(pdfName, chunks) {
   ).join('');
 
   // Build content panes
+  // Resolve the parent PDF name for the View PDF button
+  // If pdfName is a split part (e.g. WOD-68_..._p0001-0002.pdf), use the parent stem
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const viewPdfName = splitRe.test(pdfName)
+    ? pdfName.replace(splitRe, '.pdf')
+    : pdfName;
+
   body.innerHTML = chunks.map((c, i) => `
     <div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">
       <div class="chunk-toolbar">
         <span>${escHtml(c.filename)}</span>
         <div>
-          <button class="btn btn-sm btn-secondary" onclick="viewChunkPdf('${escHtml(pdfName)}')" title="View PDF pages for verification">
+          <button class="btn btn-sm btn-secondary" onclick="viewChunkPdf('${escHtml(viewPdfName)}')" title="View PDF pages for verification">
             <i class="fa fa-file-pdf"></i> View PDF
           </button>
           <button class="btn btn-sm btn-secondary" id="chunk-edit-${i}" onclick="editChunk(${i})"><i class="fa fa-edit"></i> Edit</button>
@@ -2705,6 +2966,26 @@ async function viewChunkPdf(pdfName) {
     const data = await res.json();
     
     if (data.error) {
+      // If parent PDF not found, try loading the first split part
+      const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+      if (!splitRe2.test(pdfName)) {
+        // Try fetching split parts list
+        try {
+          const pdfsRes = await fetch('/admin-panel/api/pdfs/');
+          const pdfsData = await pdfsRes.json();
+          const allPdfs = pdfsData.pdfs || [];
+          const stem = pdfName.replace(/\.pdf$/i, '');
+          const firstPart = allPdfs.find(p => splitRe2.test(p) && p.replace(splitRe2, '') === stem);
+          if (firstPart) {
+            // Recurse with the first split part
+            await viewChunkPdf(firstPart);
+            // Update the name display to show parent
+            const nameEl = document.getElementById('floating-pdf-name');
+            if (nameEl) nameEl.textContent = pdfName;
+            return;
+          }
+        } catch(e2) {}
+      }
       strip.innerHTML = `<div style="padding:20px 10px;text-align:center;color:#dc2626;font-size:12px;"><i class="fa fa-exclamation-triangle" style="display:block;margin-bottom:8px;"></i>${data.error}</div>`;
       return;
     }
@@ -3044,15 +3325,24 @@ function renderFamilyCards() {
   const badge = document.getElementById('family-count-badge');
   if (!list) return;
 
-    const families = _familyPanelState.families || [];
-  if (badge) badge.textContent = String(families.length);
+  const families = _familyPanelState.families || [];
+  const q = (_familyPanelState.search || '').toLowerCase();
+  const filtered = q ? families.filter(f =>
+    (f.product_name || '').toLowerCase().includes(q) ||
+    (f.category || '').toLowerCase().includes(q) ||
+    (f.product_code || '').toLowerCase().includes(q)
+  ) : families;
 
-  if (!families.length) {
-    list.innerHTML = '<div class="family-card-empty">No product families created yet for this PDF.</div>';
+  if (badge) badge.textContent = String(filtered.length);
+
+  if (!filtered.length) {
+    list.innerHTML = q
+      ? `<div class="family-card-empty">No families match "${escHtml(q)}".</div>`
+      : '<div class="family-card-empty">No product families created yet for this PDF.</div>';
     return;
   }
 
-  list.innerHTML = families.map(family => {
+  list.innerHTML = filtered.map(family => {
     const active = _familySelectedId === family.id;
     const chunkPreview = (family.chunks || []).slice(0, 3).map(chunk => `C${String(chunk.ordinal || 0).padStart(3, '0')}`).join(', ');
     const more = family.chunk_count > 3 ? ` +${family.chunk_count - 3} more` : '';
@@ -3123,7 +3413,7 @@ function loadFamilyFromCard(familyId) {
   if (name) name.value = family.product_name || '';
   if (category) category.value = family.raw_category || '';
   if (aliases) aliases.value = (family.aliases || []).join(', ');
-  if (status) status.value = family.review_status || 'approved';
+  if (status) status.value = 'approved';
   renderFamilyVariantRows(family.variants || []);
 
   renderFamilyWorkspace();
@@ -3143,6 +3433,7 @@ function handleFamilySearch() {
     const haystack = row.dataset.search || '';
     row.style.display = !q || haystack.includes(q) ? '' : 'none';
   });
+  renderFamilyCards();
 }
 
 async function loadFamilyPanel(force = false) {
@@ -3161,7 +3452,8 @@ async function loadFamilyPanel(force = false) {
     }
 
     // Use the PDF shown in progress bar (parent stem for split PDFs)
-    let pdfName = _trackedPdf || selectedPdf;
+    // selectedPdf is set directly by openFamilies — prefer it over _trackedPdf
+    let pdfName = selectedPdf || _trackedPdf;
     
     // If pdfName doesn't have .pdf extension, add it for lookup
     if (pdfName && !pdfName.toLowerCase().endsWith('.pdf')) {
@@ -3172,16 +3464,13 @@ async function loadFamilyPanel(force = false) {
     
     // If not found, check if it's a parent stem of split PDFs
     if (!detail || !detail.chunks_count) {
-      const stem = pdfName.replace(/\.pdf$/i, '');
       const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-      
-      // Find any split part of this parent
-      const splitPart = _pdfDetails.find(d => {
-        return splitRe.test(d.name) && d.name.replace(splitRe, '') === stem;
-      });
-      
+      let splitPart = null;
+      if (pdfName) {
+        const stem = pdfName.replace(/\.pdf$/i, '');
+        splitPart = _pdfDetails.find(d => splitRe.test(d.name) && d.name.replace(splitRe, '') === stem);
+      }
       if (splitPart && splitPart.chunks_count > 0) {
-        // Use the first split part, but keep parent stem for display
         pdfName = splitPart.name;
         detail = splitPart;
       } else {
@@ -3248,7 +3537,7 @@ async function loadFamilyPanel(force = false) {
       if (name) name.value = family.product_name || '';
       if (category) category.value = family.raw_category || '';
       if (aliases) aliases.value = (family.aliases || []).join(', ');
-      if (status) status.value = family.review_status || 'approved';
+      if (status) status.value = 'approved';
       renderFamilyVariantRows(family.variants || []);
     } else {
       const validChunkIds = new Set(Object.keys(_familyPanelState.chunksById));
@@ -3256,6 +3545,12 @@ async function loadFamilyPanel(force = false) {
     }
 
     renderFamilyWorkspace();
+
+    // Auto-approve: if no families exist yet, auto-save each unassigned chunk as an approved family
+    const unassigned = (nextState.chunks || []).filter(c => !c.family_id);
+    if (!nextState.families.length && unassigned.length) {
+      await _autoApproveFamilies(nextState.pdf, unassigned);
+    }
   } catch (error) {
     body.innerHTML = `
       <tr>
@@ -3338,7 +3633,7 @@ async function saveProductFamily() {
     if (name) name.value = data.family?.product_name || productName;
     if (category) category.value = data.family?.raw_category || rawCategory;
     if (aliasesField) aliasesField.value = (data.family?.aliases || []).join(', ') || aliases;
-    if (status) status.value = data.family?.review_status || reviewStatus;
+    if (status) status.value = 'approved';
     renderFamilyVariantRows(data.family?.variants || variants);
 
     renderFamilyWorkspace();
@@ -3392,7 +3687,22 @@ async function saveProductFamily() {
 // Minimal markdown → HTML for chunk display
 function mdToHtml(md) {
   if (!md) return '';
-  let h = escHtml(md);
+
+  // Strip image references before escaping
+  let src = md.replace(/!\[[^\]]*\]\([^)]*\)/g, '');
+
+  // Normalise ALL-CAPS headings (e.g. "2 SPEED DESIGN", "# SPECIFICATIONS") → proper headings
+  src = src.replace(/^(#+)\s+([A-Z][A-Z\d ()&/:,-]{3,})$/gm, (_, hashes, text) => {
+    const titled = text.replace(/\b([A-Z]{2,})\b/g, w => w[0] + w.slice(1).toLowerCase());
+    return `${hashes} ${titled}`;
+  });
+  src = src.replace(/^([\d]*[\d.]?\s*[A-Z][A-Z\d ()&/:,-]{3,})$/gm, line => {
+    const trimmed = line.trim();
+    const titled = trimmed.replace(/\b([A-Z]{2,})\b/g, w => w[0] + w.slice(1).toLowerCase());
+    return `## ${titled}`;
+  });
+
+  let h = escHtml(src);
 
   // Tables
   h = h.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g, (_, header, rows) => {

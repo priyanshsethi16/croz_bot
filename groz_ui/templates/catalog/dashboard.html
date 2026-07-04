@@ -370,7 +370,15 @@
             <p class="uz-hint">Accepts .pdf files only &nbsp;·&nbsp; Multiple files supported</p>
           </div>
           <input type="file" id="pdf-file-input" accept=".pdf" multiple/>
+          <div class="panel-search-bar" style="margin:12px 0 8px">
+            <div style="position:relative;flex:1;min-width:180px;max-width:320px">
+              <i class="fa fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px"></i>
+              <input type="text" id="upload-panel-search" placeholder="Search uploaded PDFs…" oninput="_uploadPanelFilter()" class="panel-search-input">
+            </div>
+            <span id="upload-panel-count" class="panel-search-count"></span>
+          </div>
           <div class="file-list" id="upload-file-list"></div>
+          <div id="upload-panel-pagination" class="panel-pagination"></div>
 
           <!-- PDF Page Preview Gallery -->
           <div class="pdf-preview-section" id="pdf-preview-section" style="display:none">
@@ -543,6 +551,54 @@
               gap: 6px;
             }
           </style>
+          <!-- shared search+pagination styles -->
+          <style>
+            .panel-search-bar {
+              display: flex;
+              align-items: center;
+              flex-wrap: wrap;
+              gap: 10px;
+              margin-bottom: 12px;
+            }
+            .panel-search-input {
+              width: 100%;
+              padding: 7px 10px 7px 30px;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              font-size: 13px;
+              outline: none;
+              transition: border-color 0.15s;
+            }
+            .panel-search-input:focus { border-color: var(--orange); }
+            .panel-search-count {
+              font-size: 12px;
+              color: #888;
+              white-space: nowrap;
+            }
+            .panel-pagination {
+              display: flex;
+              align-items: center;
+              flex-wrap: wrap;
+              gap: 6px;
+              margin: 8px 0;
+              overflow-x: auto;
+              padding-bottom: 2px;
+            }
+            .panel-pagination::-webkit-scrollbar { height: 4px; }
+            .panel-pagination::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 2px; }
+            @media (max-width: 640px) {
+              .panel-search-bar { flex-direction: column; align-items: stretch; }
+              .panel-search-bar > div { max-width: 100% !important; }
+              .panel-pagination { justify-content: flex-start; }
+            }
+          </style>
+          <div class="panel-search-bar">
+            <div style="position:relative;flex:1;min-width:180px;max-width:320px">
+              <i class="fa fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px"></i>
+              <input type="text" id="chunk-panel-search" placeholder="Search PDFs…" oninput="_chunkPanelFilter()" class="panel-search-input">
+            </div>
+            <span id="chunk-panel-count" class="panel-search-count"></span>
+          </div>
           <div class="table-wrap" style="margin-bottom: 20px;">
             <table class="catalog-table">
               <thead>
@@ -560,6 +616,7 @@
               </tbody>
             </table>
           </div>
+          <div id="chunk-panel-pagination" class="panel-pagination"></div>
 
           <div class="progress-wrap" id="chunk-progress">
             <div class="progress-header">
@@ -680,7 +737,7 @@
               <div class="family-field">
                 <label for="family-review-status">Review status</label>
                 <select id="family-review-status">
-                  <option value="approved">Approved</option>
+                  <option value="approved" selected>Approved</option>
                   <option value="needs_review">Needs review</option>
                   <option value="rejected">Rejected</option>
                 </select>
@@ -1053,5 +1110,5 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=grouped-rows-20260702k"></script>
+<script src="{% static 'js/dashboard.js' %}?v=group-embed-20260703"></script>
 {% endblock %}

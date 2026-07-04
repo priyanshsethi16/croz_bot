@@ -11,7 +11,7 @@ load_dotenv()
 @dataclass
 class OCRConfig:
     mistral_api_key: str = ""
-    model: str = "mistral-ocr-latest"
+    model: str = "mistral-ocr-4"
     max_retries: int = 3
     retry_delay: float = 2.0
     timeout: int = 120

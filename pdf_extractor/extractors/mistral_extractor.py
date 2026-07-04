@@ -39,7 +39,7 @@ def _run_mistral(client: Mistral, pdf_path: str) -> ExtractionResult:
             pdf_base64 = base64.b64encode(f.read()).decode("utf-8")
 
         response = client.ocr.process(
-            model=os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
+            model=os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-4"),
             document={
                 "type": "document_url",
                 "document_url": f"data:application/pdf;base64,{pdf_base64}"

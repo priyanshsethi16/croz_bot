@@ -151,21 +151,22 @@ Return ONLY the JSON array, no other text."""
         self,
         headings: List[Dict[str, str]],
         full_text: str,
-        output_dir: str
+        output_dir: str,
+        print_fn=print,
     ) -> tuple[List[Dict], str]:
         """
         Complete workflow: identify products and split text.
         
         Returns (chunks, manifest_path)
         """
-        print("🤖 Identifying Groz products from headings...")
+        print_fn("🤖 Identifying Groz products from headings...")
         products = self.identify_products(headings)
-        print(f"   Found {len(products)} Groz product(s)")
+        print_fn(f"   Found {len(products)} Groz product(s)")
         
-        print("✂️  Splitting text by products...")
+        print_fn("✂️  Splitting text by products...")
         chunks = self.split_text_by_products(full_text, products)
         
-        print("💾 Saving product chunks...")
+        print_fn("💾 Saving product chunks...")
         manifest_path = self.save_chunks(chunks, output_dir)
         
         return chunks, manifest_path

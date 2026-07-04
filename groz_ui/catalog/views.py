@@ -119,27 +119,45 @@ def _resolve_catalog_document(pdf_name: str):
     if not pdf_name:
         return None
     pdf_stem = Path(pdf_name).stem
-    
-    # Try direct match first
-    doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
-    if not doc:
-        doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
-    
+
+    # Build list of stems to try: exact stem, then strip trailing " (N)" suffix
+    stems_to_try = [pdf_stem, pdf_name]
+    base_stem = re.sub(r'\s*\(\d+\)$', '', pdf_stem).strip()
+    if base_stem and base_stem != pdf_stem:
+        stems_to_try.append(base_stem)
+
+    for s in stems_to_try:
+        doc = CatalogDocument.objects.filter(original_filename=s).order_by('-version').first()
+        if doc:
+            return doc
+
     # If still not found and this looks like a parent stem, try finding any split part
-    if not doc:
-        split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
-        # Check if this is a parent stem (no split pattern)
-        if not split_re.search(pdf_stem):
-            # Try to find any split part belonging to this parent
-            splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
-            if splits_dir.exists():
-                # Get first split part and find its document
-                split_parts = sorted(splits_dir.glob('*.pdf'))
-                if split_parts:
-                    first_part_stem = split_parts[0].stem
-                    doc = CatalogDocument.objects.filter(original_filename=first_part_stem).order_by('-version').first()
-    
-    return doc
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+    if not split_re.search(pdf_stem):
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+        if splits_dir.exists():
+            leaf_parts = [p for p in sorted(splits_dir.rglob('*.pdf'))
+                          if not (PROJECT_ROOT / 'input' / 'splits' / p.stem).exists()]
+            if leaf_parts:
+                first_part_stem = leaf_parts[0].stem
+                doc = CatalogDocument.objects.filter(original_filename=first_part_stem).order_by('-version').first()
+                if doc:
+                    return doc
+
+    # Last resort: match by file checksum (handles renamed files like G15.pdf stored as G15-1)
+    pdf_with_ext = pdf_name if pdf_name.lower().endswith('.pdf') else pdf_name + '.pdf'
+    disk_file = PROJECT_ROOT / 'input' / pdf_with_ext
+    if disk_file.exists():
+        try:
+            import hashlib
+            checksum = hashlib.sha256(disk_file.read_bytes()).hexdigest()
+            doc = CatalogDocument.objects.filter(checksum_sha256=checksum).order_by('-version').first()
+            if doc:
+                return doc
+        except Exception:
+            pass
+
+    return None
 
 
 def _chunk_excerpt(text: str, limit: int = 180) -> str:
@@ -163,7 +181,8 @@ def _get_catalog_stats():
     if splits_dir.exists():
         for stem_dir in splits_dir.iterdir():
             if stem_dir.is_dir():
-                parts = sorted(stem_dir.glob('*.pdf'))
+                # Collect leaf PDFs at all nesting levels (skip intermediates that have their own subdir)
+                parts = [p for p in sorted(stem_dir.rglob('*.pdf')) if not (splits_dir / p.stem).exists()]
                 if parts:
                     split_parent_stems.add(stem_dir.name)
                     all_split_parts.extend(parts)
@@ -376,12 +395,11 @@ def _resolve_pdf_path(filename: str) -> Path:
     if not pdf_path.exists():
         splits_dir = PROJECT_ROOT / 'input' / 'splits'
         if splits_dir.exists():
-            for stem_dir in splits_dir.iterdir():
-                if stem_dir.is_dir():
-                    candidate = stem_dir / filename
-                    if candidate.exists():
-                        pdf_path = candidate
-                        break
+            # Search all levels of nesting under splits/
+            for candidate in splits_dir.rglob(filename):
+                if candidate.is_file():
+                    pdf_path = candidate
+                    break
     return pdf_path
 
 
@@ -692,6 +710,7 @@ def _build_assembled_from_mistral(data: dict, pdf_path: Path) -> list:
             continue
         # Prefer per-product raw_text; fall back to full markdown only if needed
         product_raw = str(p.get('raw_text') or p.get('_chunk_text') or markdown_text)
+        chunk_text = p.get('_chunk_text')
         assembled.append({
             'product_name': name,
             'product_code': str(p.get('product_code') or ''),
@@ -705,6 +724,7 @@ def _build_assembled_from_mistral(data: dict, pdf_path: Path) -> list:
             'page_end': int(p.get('page_end') or 1),
             'source_pdf': source_pdf,
             'raw_text': product_raw,
+            **({'_chunk_text': chunk_text} if chunk_text not in (None, '') else {}),
         })
     return assembled or [{
         'product_name': pdf_path.stem.replace('_', ' ').title(),
@@ -806,18 +826,19 @@ def list_pdfs(request):
     # Track which parent PDFs have been split
     split_parent_stems = set()
     
-    # Add split PDFs from input/splits/
+    # Add split PDFs from input/splits/ (all nesting levels)
     split_pdfs = []
     if splits_dir.exists():
         for stem_dir in splits_dir.iterdir():
-            if stem_dir.is_dir():
-                # Check if this directory has any split PDFs
-                split_files = list(stem_dir.glob('*.pdf'))
-                if split_files:
-                    # Mark this parent as having splits
-                    split_parent_stems.add(stem_dir.name)
-                    # Add all split PDFs from this directory
-                    for split_pdf in sorted(split_files):
+            if not stem_dir.is_dir():
+                continue
+            # Collect all PDFs recursively under this stem dir
+            all_files = sorted(stem_dir.rglob('*.pdf'))
+            if all_files:
+                split_parent_stems.add(stem_dir.name)
+                for split_pdf in all_files:
+                    # Only add leaf PDFs — skip intermediates that have their own splits subdir
+                    if not (splits_dir / split_pdf.stem).exists():
                         split_pdfs.append(split_pdf.name)
     
     # Filter out parent PDFs that have been split
@@ -998,9 +1019,7 @@ def approve_pdf(request):
             detected_stage = min(part_stages, key=lambda s: STAGE_ORDER.index(s))
     else:
         try:
-            doc = CatalogDocument.objects.filter(
-                original_filename__in=[pdf_stem, filename]
-            ).order_by('-version').first()
+            doc = _resolve_catalog_document(filename)
 
             if doc:
                 chunks_count = DocumentChunk.objects.filter(document=doc).count()
@@ -1020,7 +1039,10 @@ def approve_pdf(request):
         _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
     except Exception:
         _stage_map = {}
-    db_stage = _stage_map.get(filename)
+    # Also check by resolved doc's original_filename (handles renamed files like G3P-CL -> G3P)
+    _resolved_doc = _resolve_catalog_document(filename)
+    _resolved_stem = _resolved_doc.original_filename if _resolved_doc else None
+    db_stage = _stage_map.get(filename) or _stage_map.get(pdf_stem) or (_stage_map.get(_resolved_stem) if _resolved_stem else None)
     if db_stage not in STAGE_ORDER:
         db_stage = None
 
@@ -1029,7 +1051,7 @@ def approve_pdf(request):
     if detected_stage == 'uploaded':
         final_stage = 'uploaded'
     else:
-        existing_session_stage = request.session.get('pdf_progress', {}).get(filename)
+        existing_session_stage = request.session.get('pdf_progress', {}).get(filename) or request.session.get('pdf_progress', {}).get(pdf_stem)
         candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
         final_stage = max(candidate_stages, key=lambda s: STAGE_ORDER.index(s))
 
@@ -1398,7 +1420,7 @@ def catalog_stats(request):
             stats['tracked_percent']   = round(tracked_percent, 2)
             stats['total_split_parts'] = total_parts
         # NEW: Compute families stage progress (40% → 60% based on approved families)
-        elif tracked_stage == 'chunked':
+        elif tracked_stage in ('chunked', 'families'):
             # Check if families exist for this PDF - compute proportional progress
             try:
                 from .models import CatalogDocument, ProductFamily
@@ -1712,26 +1734,29 @@ def delete_pdf(request):
     is_split = bool(re.search(r'_(custom_)?p\d{4}-\d{4}$', stem))
     
     if is_split:
-        # Extract parent stem (remove the _pXXXX-XXXX or _custom_pXXXX-XXXX part)
-        parent_stem = re.sub(r'_(custom_)?p\d{4}-\d{4}$', '', stem)
-        
-        # Delete the specific split PDF file from input/splits/ParentName/ directory
-        splits_parent_dir = PROJECT_ROOT / 'input' / 'splits' / parent_stem
-        split_pdf_path = splits_parent_dir / filename
+        # Find and delete the actual PDF file (may be nested at any depth)
+        split_pdf_path = _resolve_pdf_path(filename)
+        actual_parent_dir = split_pdf_path.parent if split_pdf_path.exists() else None
         if split_pdf_path.exists():
             split_pdf_path.unlink()
-            print(f'Deleted split PDF: {split_pdf_path}')
-        
-        # Check if this was the last split in the directory
-        if splits_parent_dir.exists():
-            remaining_splits = list(splits_parent_dir.glob('*.pdf'))
-            if not remaining_splits:
-                # No more splits, delete the parent directory and the parent PDF
-                shutil.rmtree(splits_parent_dir)
-                parent_pdf = PROJECT_ROOT / 'input' / f'{parent_stem}.pdf'
+
+        # Also delete the PDF's own splits subdir if it exists (intermediate split)
+        own_splits_dir = PROJECT_ROOT / 'input' / 'splits' / stem
+        if own_splits_dir.exists():
+            shutil.rmtree(own_splits_dir)
+
+        # Walk up: clean any parent splits dir that is now empty of leaf PDFs
+        splits_root = PROJECT_ROOT / 'input' / 'splits'
+        if actual_parent_dir and actual_parent_dir != splits_root and actual_parent_dir.exists():
+            remaining = list(actual_parent_dir.rglob('*.pdf'))
+            if not remaining:
+                shutil.rmtree(actual_parent_dir)
+                # Also delete the grandparent intermediate PDF if its dir is now empty
+                grandparent_stem = actual_parent_dir.name
+                grandparent_pdf = splits_root / grandparent_stem.rsplit('_', 1)[0] if '_' in grandparent_stem else None
+                parent_pdf = PROJECT_ROOT / 'input' / f'{actual_parent_dir.name}.pdf'
                 if parent_pdf.exists():
                     parent_pdf.unlink()
-                    print(f'Deleted parent PDF: {parent_pdf}')
     else:
         # Delete main PDF file
         pdf_path = PROJECT_ROOT / 'input' / filename
@@ -1974,6 +1999,47 @@ def list_chunks(request):
 
     document_id = str(doc.id) if doc else None
 
+    # Check if this is a parent stem with a splits directory — if so, aggregate all leaf parts
+    splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+    if splits_dir.exists():
+        leaf_parts = [p for p in sorted(splits_dir.rglob('*.pdf'))
+                      if not (PROJECT_ROOT / 'input' / 'splits' / p.stem).exists()]
+        split_stems = [p.stem for p in leaf_parts]
+        split_docs = CatalogDocument.objects.filter(
+            original_filename__in=split_stems
+        ).order_by('original_filename')
+        if split_docs.exists():
+            document_id = str(split_docs.first().id)
+            ordinal_offset = 0
+            for split_doc in split_docs:
+                qs = DocumentChunk.objects.filter(document=split_doc)
+                if index_only:
+                    qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+                for c in qs.order_by('ordinal'):
+                    family = c.family
+                    prod_name = 'General Info'
+                    if family:
+                        prod_name = family.product_name
+                    elif c.variant and c.variant.family:
+                        prod_name = c.variant.family.product_name
+                    chunks.append({
+                        'id': str(c.id),
+                        'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
+                        'content': c.text,
+                        'excerpt': _chunk_excerpt(c.text),
+                        'ordinal': ordinal_offset + c.ordinal,
+                        'product_name': prod_name,
+                        'family_id': str(c.family_id) if c.family_id else '',
+                        'family_name': family.product_name if family else '',
+                        'family_code': family.product_code if family else '',
+                        'family_status': family.review_status if family else '',
+                        'page_start': c.page_start,
+                        'page_end': c.page_end,
+                        'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
+                    })
+                ordinal_offset += qs.count()
+            return JsonResponse({'document_id': document_id, 'chunks': chunks})
+
     if doc:
         qs = DocumentChunk.objects.filter(document=doc)
         if index_only:
@@ -2005,10 +2071,9 @@ def list_chunks(request):
         # No direct doc — check if this is a parent stem with split part documents
         splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
         if splits_dir.exists():
-            split_stems = sorted(
-                re.sub(r'[^a-zA-Z0-9_\-]', '_', p.stem)[:60].strip('_')
-                for p in splits_dir.glob('*.pdf')
-            )
+            leaf_parts = [p for p in sorted(splits_dir.rglob('*.pdf'))
+                          if not (PROJECT_ROOT / 'input' / 'splits' / p.stem).exists()]
+            split_stems = [p.stem for p in leaf_parts]
             split_docs = CatalogDocument.objects.filter(
                 original_filename__in=split_stems
             ).order_by('original_filename')
@@ -2274,12 +2339,13 @@ def save_product_family(request):
 
     with transaction.atomic():
         if family_id:
-            family = ProductFamily.objects.filter(id=family_id, document=doc).select_for_update().first()
+            family = ProductFamily.objects.select_for_update().filter(id=family_id).first()
             if not family:
                 return JsonResponse({'error': 'Family not found.'}, status=404)
+            # Use the family's actual document for chunk lookups
+            doc = family.document
             current_family_chunks = list(
                 DocumentChunk.objects.select_for_update().filter(
-                    document=doc,
                     family=family,
                 )
             )
@@ -2294,7 +2360,6 @@ def save_product_family(request):
         if chunk_ids:
             chunks = list(
                 DocumentChunk.objects.select_for_update().filter(
-                    document=doc,
                     id__in=chunk_ids,
                 )
             )
@@ -2365,7 +2430,6 @@ def save_product_family(request):
 
         refresh_chunk_ids = {chunk.id for chunk in current_family_chunks} | selected_chunk_ids
         indexed_chunks = DocumentChunk.objects.filter(
-            document=doc,
             id__in=refresh_chunk_ids,
             index_status=DocumentChunk.IndexStatus.INDEXED,
         ).select_related(
@@ -2413,7 +2477,7 @@ def save_product_family(request):
         import json as _j
         
         tracked_pdf = pdf_stem if len(docs_to_query) > 1 else pdf_name
-        new_stage = 'families' if approved_families == total_families else 'chunked'
+        new_stage = 'families' if approved_families > 0 else 'chunked'
         
         # Update DB stage map
         try:
