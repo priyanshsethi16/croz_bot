@@ -2128,6 +2128,7 @@ def _serialize_family_editor_chunk(chunk):
         'page_start': chunk.page_start,
         'page_end': chunk.page_end,
         'status': 'Embedded' if chunk.index_status == DocumentChunk.IndexStatus.INDEXED else 'Ready',
+        'content': chunk.text,
         'excerpt': _chunk_excerpt(chunk.text),
     }
 

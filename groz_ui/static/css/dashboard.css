@@ -916,6 +916,10 @@
 .chunk-content h3 {
   font-size: 13px; font-weight: 700; color: var(--dark); margin: 12px 0 6px;
 }
+.chunk-content h4, .chunk-content h5 {
+  font-size: 12px; font-weight: 700; color: var(--grey); margin: 10px 0 4px;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
 .chunk-content p  { margin: 6px 0; }
 .chunk-content ul { padding-left: 20px; margin: 6px 0; }
 .chunk-content li { margin: 4px 0; }

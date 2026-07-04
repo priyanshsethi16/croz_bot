@@ -3258,7 +3258,7 @@ function renderFamilyChunks() {
   if (!chunks.length) {
     body.innerHTML = `
       <tr>
-        <td colspan="7" class="index-table-empty">
+        <td colspan="8" class="index-table-empty">
           <i class="fa fa-sitemap" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
           No chunks found for this PDF.
         </td>
@@ -3307,7 +3307,11 @@ function renderFamilyChunks() {
           </div>
         </td>
         <td>${escHtml(_familyPageLabel(chunk))}</td>
-        <td class="family-excerpt">${escHtml(chunk.excerpt || '')}</td>
+        <td style="text-align:center;">
+          <button class="btn btn-sm btn-secondary" style="padding:3px 10px; font-size:12px;" onclick='event.stopPropagation(); showFamilyChunkPreview(${JSON.stringify(chunk.id)})'>
+            <i class="fa fa-eye"></i> Chunk
+          </button>
+        </td>
         <td class="family-status">
           ${chunk.status === 'Embedded'
             ? '<span class="badge badge-green"><i class="fa fa-database"></i> Embedded</span>'
@@ -3318,6 +3322,21 @@ function renderFamilyChunks() {
   }).join('');
 
   handleFamilySearch();
+}
+
+function showFamilyChunkPreview(chunkId) {
+  const chunk = _familyPanelState.chunksById[String(chunkId)];
+  if (!chunk) return;
+  const modal = document.getElementById('family-chunk-modal');
+  document.getElementById('family-chunk-modal-title').textContent =
+    `${chunk.filename || chunkId} — ${chunk.product_name || ''}`;
+  document.getElementById('family-chunk-modal-body').innerHTML =
+    mdToHtml(chunk.content || chunk.excerpt || '(no content)');
+  modal.style.display = 'flex';
+}
+
+function closeFamilyChunkModal() {
+  document.getElementById('family-chunk-modal').style.display = 'none';
 }
 
 function renderFamilyCards() {
@@ -3341,6 +3360,23 @@ function renderFamilyCards() {
       : '<div class="family-card-empty">No product families created yet for this PDF.</div>';
     return;
   }
+
+  const unassigned = (_familyPanelState.chunks || []).filter(c => !c.family_id);
+  const unassignedCard = unassigned.length ? `
+    <div class="family-card${_familySelectedId === '__unassigned__' ? ' active' : ''}" onclick="loadUnassignedCard()" style="border-left: 3px solid #94a3b8;">
+      <div class="family-card-top">
+        <div>
+          <div class="family-card-title" style="color:#64748b;">Unassigned</div>
+          <div class="family-card-sub">Chunks not yet in a family</div>
+        </div>
+        <span class="family-badge muted">Unassigned</span>
+      </div>
+      <div class="family-card-meta">
+        <span class="badge badge-grey">${unassigned.length} chunk${unassigned.length === 1 ? '' : 's'}</span>
+        <span class="badge badge-grey">${unassigned.slice(0,3).map(c => `C${String(c.ordinal||0).padStart(3,'0')}`).join(', ')}${unassigned.length > 3 ? ` +${unassigned.length-3} more` : ''}</span>
+      </div>
+    </div>
+  ` : '';
 
   list.innerHTML = filtered.map(family => {
     const active = _familySelectedId === family.id;
@@ -3369,7 +3405,17 @@ function renderFamilyCards() {
         </div>
       </div>
     `;
-  }).join('');
+  }).join('') + unassignedCard;
+}
+
+function loadUnassignedCard() {
+  _familySelectedId = '__unassigned__';
+  const unassigned = (_familyPanelState.chunks || []).filter(c => !c.family_id);
+  _familySelectedChunkIds = new Set(unassigned.map(c => String(c.id)));
+  _familyResetForm();
+  renderFamilyCards();
+  renderFamilyChunks();
+  renderFamilySelectionSummary();
 }
 
 function renderFamilyWorkspace() {
@@ -3554,7 +3600,7 @@ async function loadFamilyPanel(force = false) {
   } catch (error) {
     body.innerHTML = `
       <tr>
-        <td colspan="7" class="index-table-empty" style="color:var(--orange)">
+        <td colspan="8" class="index-table-empty" style="color:var(--orange)">
           <i class="fa fa-exclamation-triangle" style="font-size: 32px; display: block; margin-bottom: 10px;"></i>
           ${escHtml(error.message)}
         </td>
@@ -3718,6 +3764,8 @@ function mdToHtml(md) {
   h = h.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
   h = h.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  h = h.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  h = h.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
 
   // Inline
   h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
