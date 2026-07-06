@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet"/>
-  <link rel="stylesheet" href="{% static 'css/home.css' %}?v=202606301730"/>
+  <link rel="stylesheet" href="{% static 'css/home.css' %}?v=202607063"/>
 </head>
 <body>
 
@@ -21,17 +21,14 @@
     <div class="h-nav-top-links">
       <a href="#">About</a>
       <a href="#">Careers</a>
-      <a href="#">InfoCart <span class="cart-badge">0</span></a>
+      <span class="h-region"><i class="fa fa-globe"></i> India</span>
+    </div>
+    <div class="h-nav-actions">
       {% if user.is_authenticated and not user.is_staff %}
       <a href="/logout/" class="h-login"><i class="fa fa-sign-out-alt" style="margin-right:4px"></i>LOGOUT</a>
       {% else %}
       <a href="/admin-panel/login/" class="h-login">LOGIN</a>
       {% endif %}
-      <span class="h-region"><i class="fa fa-globe"></i> India</span>
-    </div>
-    <div class="h-search">
-      <input type="text" placeholder="Search entire store here..."/>
-      <button><i class="fa fa-search"></i></button>
     </div>
   </div>
   <div class="h-nav-border"></div>
@@ -232,6 +229,6 @@
   </div>
 </div>
 
-<script src="{% static 'js/home.js' %}?v=202606301730"></script>
+<script src="{% static 'js/home.js' %}?v=202607061"></script>
 </body>
 </html>

@@ -13,31 +13,48 @@ body { font-family: 'Inter', sans-serif; background: var(--white); color: var(--
 /* ── Navbar ── */
 .h-nav { position: sticky; top: 0; z-index: 200; background: var(--white); }
 
-.h-nav-top {
-  background: var(--white); border-bottom: 1px solid var(--border);
-  padding: 6px 40px; display: flex; justify-content: flex-end;
-}
 .h-nav-top-links {
   display: flex; align-items: center; gap: 0; font-size: 12px;
+  flex: 1; min-width: 0;
 }
 .h-nav-top-links a, .h-region {
   color: var(--grey); text-decoration: none; padding: 0 12px;
   border-right: 1px solid var(--border); transition: color .15s; font-weight: 500;
 }
-.h-nav-top-links a:last-of-type { border-right: none; }
 .h-nav-top-links a:hover { color: var(--orange); }
-.h-login { color: var(--orange) !important; font-weight: 700 !important; }
-.cart-badge {
-  background: var(--orange); color: #fff;
-  font-size: 10px; font-weight: 700; padding: 1px 5px;
-  border-radius: 10px; margin-left: 3px;
+.h-login {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid rgba(232, 80, 10, 0.16);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff 0%, #fff7f2 100%);
+  color: var(--orange) !important;
+  text-decoration: none !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.4px;
+  box-shadow: 0 1px 4px rgba(232, 80, 10, 0.08);
+  transition: transform .15s, box-shadow .15s, border-color .15s, background .15s;
+}
+.h-login:hover {
+  color: var(--orange-dark) !important;
+  border-color: rgba(232, 80, 10, 0.28);
+  background: #fff;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(232, 80, 10, 0.12);
+}
+.h-login:focus-visible {
+  outline: 2px solid rgba(232, 80, 10, 0.35);
+  outline-offset: 2px;
+}
+.h-nav-actions {
+  display: flex; align-items: center; gap: 14px; flex-shrink: 0; margin-left: auto;
 }
 .h-region { color: var(--grey); font-size: 12px; padding-left: 12px; border-right: none; }
 .h-region i { margin-right: 4px; }
 
 .h-nav-main {
   padding: 10px 40px;
-  display: flex; align-items: center; justify-content: space-between; gap: 32px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 24px;
 }
 .h-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; }
 .h-logo { height: 40px; width: auto; }
@@ -50,23 +67,6 @@ body { font-family: 'Inter', sans-serif; background: var(--white); color: var(--
   letter-spacing: 0.5px; transition: color .15s; white-space: nowrap;
 }
 .h-nav-link:hover { color: var(--orange); }
-
-.h-search {
-  display: flex; align-items: center;
-  border: 1px solid var(--border); overflow: hidden; height: 38px;
-}
-.h-search input {
-  border: none; outline: none; padding: 0 16px;
-  font-size: 13px; width: 240px; font-family: inherit; color: var(--dark);
-  background: #fafafa;
-}
-.h-search input::placeholder { color: #bbb; }
-.h-search button {
-  background: var(--orange); color: #fff; border: none;
-  width: 44px; height: 100%; cursor: pointer; font-size: 14px;
-  transition: background .15s;
-}
-.h-search button:hover { background: var(--orange-dark); }
 
 .h-nav-border { height: 3px; background: var(--orange); }
 
@@ -305,9 +305,13 @@ body { font-family: 'Inter', sans-serif; background: var(--white); color: var(--
 
 /* ── Responsive ── */
 @media (max-width: 900px) {
-  .h-nav-main { padding: 10px 16px; gap: 16px; }
-  .h-nav-links { display: none; }
-  .h-search { display: none; }
+  .h-nav-main { padding: 10px 16px; gap: 12px; flex-wrap: wrap; }
+  .h-nav-top-links {
+    order: 3; flex: 1 1 100%; justify-content: flex-start;
+    overflow-x: auto; padding-bottom: 2px;
+  }
+  .h-nav-actions { order: 2; gap: 10px; margin-left: auto; }
+  .h-login { padding: 6px 11px; font-size: 12px; }
   .h-slide { padding: 40px 20px; flex-direction: column-reverse; min-height: auto; }
   .h-slide-text h1 { font-size: 36px; }
   .h-slide-img { width: 100%; }
@@ -317,7 +321,6 @@ body { font-family: 'Inter', sans-serif; background: var(--white); color: var(--
   .chatbot-fab { right: 16px; bottom: 16px; }
 }
 @media (max-width: 560px) {
-  .h-nav-top { display: none; }
   .h-cats-grid { grid-template-columns: repeat(2,1fr); }
   .fab-label { display: none; }
   .chatbot-fab { padding: 14px; border-radius: 50%; }
