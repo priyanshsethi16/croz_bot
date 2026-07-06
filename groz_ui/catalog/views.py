@@ -886,6 +886,7 @@ def list_pdfs(request):
                 doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
                 
             chunks_count = 0
+            product_families_count = 0
             status = 'Pending'
             doc_id = None
             has_embeddings = False
@@ -893,6 +894,7 @@ def list_pdfs(request):
             if doc:
                 doc_id = str(doc.id)
                 chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                product_families_count = doc.product_families.count()
                 
                 # Check for running ingestion job
                 running_job = IngestionJob.objects.filter(
@@ -932,6 +934,7 @@ def list_pdfs(request):
             pdf_details.append({
                 'name': pdf_name,
                 'chunks_count': chunks_count,
+                'product_families_count': product_families_count,
                 'status': status,
                 'document_id': doc_id,
                 'has_embeddings': has_embeddings

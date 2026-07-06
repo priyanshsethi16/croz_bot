@@ -255,7 +255,7 @@ async function loadExistingUploads() {
           <div class="fsize">${parts.length} split part${parts.length !== 1 ? 's' : ''}</div>
         </div>
         <span class="fstatus success">✓ Uploaded</span>
-        <button class="btn btn-sm btn-secondary file-preview-btn" onclick="previewParentGroup('${escHtml(parentStem)}', ${JSON.stringify(parts).replace(/"/g, '&quot;')})" title="Preview pages">
+        <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(parentStem + '.pdf')}')" title="Preview pages">
           <i class="fa fa-eye"></i> Preview
         </button>
         <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(parentStem + '.pdf')}', this)" title="Delete PDF">
@@ -844,7 +844,8 @@ async function loadPdfList() {
           const partNames = children.map(c => c.name);
           if (partNames.length) previewParentGroup(stem, partNames);
         });
-        parentTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:6px"><button class="pdf-group-expand-btn" id="ckg-btn-${escHtml(stem)}" onclick="event.stopPropagation();_toggleChunkGroup('${escHtml(stem)}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:600;font-size:13px">${escHtml(stem)}</span><span class="split-count-badge">${children.length} parts</span></div></td><td><span class="badge badge-blue">${totalChunks}</span></td><td>${psb}</td><td>${pa}</td>`;
+        const totalProducts = children.reduce((s, c) => s + (c.product_families_count || 0), 0);
+        parentTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:6px"><button class="pdf-group-expand-btn" id="ckg-btn-${escHtml(stem)}" onclick="event.stopPropagation();_toggleChunkGroup('${escHtml(stem)}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:600;font-size:13px">${escHtml(stem)}</span><span class="split-count-badge">${children.length} parts</span></div></td><td><span class="badge badge-blue">${totalChunks}</span></td><td><span class="badge ${totalProducts>0?'badge-green':'badge-grey'}">${totalProducts}</span></td><td>${psb}</td><td>${pa}</td>`;
         tbody.appendChild(parentTr);
 
         children.forEach(child => {
@@ -857,7 +858,7 @@ async function loadPdfList() {
           if (child.status === 'Ready') csb = `<span class="badge badge-green" style="font-size:10px"><i class="fa fa-check-circle"></i> Ready</span>`;
           else if (child.status === 'Processing') csb = `<span class="badge badge-yellow" style="font-size:10px"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
           else csb = `<span class="badge badge-grey" style="font-size:10px"><i class="fa fa-clock"></i> Pending</span>`;
-          childTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;font-weight:500">${escHtml(child.name)}</span></div></td><td><span class="badge badge-blue" style="font-size:10px">${child.chunks_count}</span></td><td>${csb}</td><td>${_buildChunkRowActions(child)}</td>`;
+          childTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;font-weight:500">${escHtml(child.name)}</span></div></td><td><span class="badge badge-blue" style="font-size:10px">${child.chunks_count}</span></td><td><span class="badge ${(child.product_families_count||0)>0?'badge-green':'badge-grey'} " style="font-size:10px">${child.product_families_count||0}</span></td><td>${csb}</td><td>${_buildChunkRowActions(child)}</td>`;
           tbody.appendChild(childTr);
         });
       }
@@ -1881,7 +1882,7 @@ function updateCatalogTable(processed, unprocessed) {
         <tr style="cursor:pointer" onclick="selectPdfFromOverview('${escHtml(item.name)}')">
           <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname" style="cursor:pointer" onclick="event.stopPropagation();openUploadPreview('${escHtml(item.name)}')">${escHtml(item.name)}</span></div></td>
           <td><span class="badge badge-blue">${item.chunks}</span></td>
-          <td><span class="badge badge-green">${item.products}</span></td>
+          <td><span class="badge ${item.products > 0 ? 'badge-green' : 'badge-grey'}">${item.products || 0}</span></td>
           <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
           <td onclick="event.stopPropagation()">
             <div class="table-actions">
@@ -1916,7 +1917,7 @@ function updateCatalogTable(processed, unprocessed) {
             </div>
           </td>
           <td><span class="badge badge-blue">${item.chunks}</span></td>
-          <td><span class="badge badge-green">${item.products}</span></td>
+          <td><span class="badge ${item.products > 0 ? 'badge-green' : 'badge-grey'}">${item.products || 0}</span></td>
           <td>${statusBadge}</td>
           <td onclick="event.stopPropagation()">
             <div class="table-actions">
@@ -1941,7 +1942,7 @@ function updateCatalogTable(processed, unprocessed) {
           <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
             <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;cursor:pointer" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
             <td><span class="badge badge-blue">${child.chunks || 0}</span></td>
-            <td><span class="badge badge-green">${child.products || 0}</span></td>
+            <td><span class="badge ${(child.products || 0) > 0 ? 'badge-green' : 'badge-grey'}">${child.products || 0}</span></td>
             <td>${childStatusBadge}</td>
             <td>
               <div class="table-actions">
@@ -2155,6 +2156,7 @@ let _trackedPdf     = null;
 let _trackedStage   = null;
 let _trackedPercent = null;  // custom percent for partial-split progress
 let _trackedSetAt   = 0;     // timestamp when _trackedPdf was last set locally
+let _approvedAt     = 0;     // timestamp when approve-pdf was last called
 let _userSelectedPdf = null; // PDF explicitly selected by user clicking a row
 
 const STAGE_CONFIG = {
