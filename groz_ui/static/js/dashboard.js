@@ -259,7 +259,7 @@ async function loadExistingUploads() {
           <i class="fa fa-eye"></i> Preview
         </button>
         <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(parentStem + '.pdf')}', this)" title="Delete PDF">
-          <i class="fa fa-trash"></i> Delete
+          <i class="fa fa-trash"></i>
         </button>
         <button class="btn btn-sm btn-secondary file-group-toggle" title="Show split parts">
           <i class="fa fa-chevron-right"></i>
@@ -286,7 +286,7 @@ async function loadExistingUploads() {
             <i class="fa fa-eye"></i> Preview
           </button>
           <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(partName)}', this)" title="Delete PDF">
-            <i class="fa fa-trash"></i> Delete
+            <i class="fa fa-trash"></i>
           </button>`;
         children.appendChild(child);
       });
@@ -457,7 +457,7 @@ function addFileItem(name, size, statusClass, statusText) {
       <i class="fa fa-eye"></i> Preview
     </button>
     <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(name)}', this)" title="Delete PDF">
-      <i class="fa fa-trash"></i> Delete
+      <i class="fa fa-trash"></i>
     </button>`;
   document.getElementById('upload-file-list').prepend(div);
   return div;
@@ -486,12 +486,12 @@ async function deleteUploadedPdf(filename, btn) {
       refreshStats();
     } else {
       btn.disabled = false;
-      btn.innerHTML = '<i class="fa fa-trash"></i> Delete';
+      btn.innerHTML = '<i class="fa fa-trash"></i>';
       showToast(data.error || 'Delete failed.', 'error');
     }
   } catch(e) {
     btn.disabled = false;
-    btn.innerHTML = '<i class="fa fa-trash"></i> Delete';
+    btn.innerHTML = '<i class="fa fa-trash"></i>';
     showToast('Delete failed.', 'error');
   }
 }
@@ -771,7 +771,7 @@ function _buildChunkRowActions(item) {
   } else {
     a += `<button class="btn btn-sm btn-primary" onclick="runChunkingForPdf('${escHtml(item.name)}',this)"><i class="fa fa-layer-group"></i> Create Chunks</button>`;
   }
-  a += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')"><i class="fa fa-trash"></i> Delete</button>`;
+  a += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')"><i class="fa fa-trash"></i></button>`;
   a += '</div>';
   return a;
 }
@@ -830,7 +830,7 @@ async function loadPdfList() {
             pa += `<button class="btn btn-sm btn-primary embed-btn" id="group-embed-btn-${escHtml(stem)}" onclick="triggerGroupEmbedding('${escHtml(stem)}', ${JSON.stringify(childDocIds)}, this)"><i class="fa fa-brain"></i> Create Embedding</button>`;
           }
         }
-        pa += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(stem)}')"><i class="fa fa-trash"></i> Delete</button></div>`;
+        pa += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(stem)}')"><i class="fa fa-trash"></i></button></div>`;
 
         const parentTr = document.createElement('tr');
         parentTr.className = 'pdf-group-parent';
@@ -1700,6 +1700,34 @@ async function deleteEmbeddingsOnly(filename) {
 }
 
 // -- Stats refresh -------------------------------------------------------------────────────
+async function openUploadPreview(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('.step-item').forEach(s => s.classList.remove('active'));
+  document.getElementById('panel-upload').classList.add('active');
+  document.querySelector('.sidebar-link[data-panel="upload"]')?.classList.add('active');
+  document.querySelector('.step-item[data-step="upload"]')?.classList.add('active');
+  closeSidebar();
+  await loadExistingUploads();
+  // Check if this is a parent stem (no split-part suffix) — if so, load all its parts
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  if (!splitRe.test(name)) {
+    const stem = name.replace(/\.pdf$/i, '');
+    try {
+      const r = await fetch('/admin-panel/api/pdfs/');
+      const d = await r.json();
+      const parts = (d.pdfs || []).filter(p => splitRe.test(p) && p.replace(splitRe, '') === stem);
+      if (parts.length) {
+        await previewParentGroup(stem, parts);
+        document.getElementById('pdf-preview-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+    } catch(e) {}
+  }
+  await loadPdfPreview(name);
+  document.getElementById('pdf-preview-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 function selectPdfFromOverview(pdfName) {
   // Immediately remove highlight from all rows and highlight clicked row (no delay)
   document.querySelectorAll('.catalog-table tbody tr').forEach(row => {
@@ -1851,7 +1879,7 @@ function updateCatalogTable(processed, unprocessed) {
       const item = row.item;
       tableHtml += `
         <tr style="cursor:pointer" onclick="selectPdfFromOverview('${escHtml(item.name)}')">
-          <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname">${escHtml(item.name)}</span></div></td>
+          <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname" style="cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${escHtml(item.name)}')">${escHtml(item.name)}</span></div></td>
           <td><span class="badge badge-blue">${item.chunks}</span></td>
           <td><span class="badge badge-green">${item.products}</span></td>
           <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
@@ -1860,8 +1888,7 @@ function updateCatalogTable(processed, unprocessed) {
               <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
                 <i class="fa fa-layer-group"></i> Chunks</button>
               ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
-              <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')"><i class="fa fa-comments"></i> Test</button>
-              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" onclick="event.stopPropagation()"><i class="fa fa-trash"></i> Delete</button>` : ''}
+              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" onclick="event.stopPropagation()"><i class="fa fa-trash"></i></button>` : ''}
             </div>
           </td>
         </tr>`;
@@ -1884,7 +1911,7 @@ function updateCatalogTable(processed, unprocessed) {
                 <i class="fa fa-chevron-right"></i>
               </button>
               <i class="fa fa-file-pdf"></i>
-              <span class="pname">${safeStem}</span>
+              <span class="pname" style="cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${safeStem}.pdf')">${safeStem}</span>
               <span class="split-count-badge">${children.length} parts</span>
             </div>
           </td>
@@ -1896,8 +1923,7 @@ function updateCatalogTable(processed, unprocessed) {
               <button class="btn btn-sm btn-secondary" onclick="openChunks('${safeStem}')">
                 <i class="fa fa-layer-group"></i> Chunks</button>
               ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(stem)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
-              <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')"><i class="fa fa-comments"></i> Test</button>
-              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i> Delete</button>` : ''}
+              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>` : ''}
             </div>
           </td>
         </tr>`;
@@ -1913,7 +1939,7 @@ function updateCatalogTable(processed, unprocessed) {
           : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
         tableHtml += `
           <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
-            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555">${escHtml(child.name)}</span></div></td>
+            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
             <td><span class="badge badge-blue">${child.chunks || 0}</span></td>
             <td><span class="badge badge-green">${child.products || 0}</span></td>
             <td>${childStatusBadge}</td>
@@ -1922,11 +1948,10 @@ function updateCatalogTable(processed, unprocessed) {
                 ${childReady ? `
                   <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Chunks</button>
                   ${IS_ADMIN && child.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(child.name)})' style="font-size:11px;padding:5px 10px"><i class="fa fa-sitemap"></i> Families</button>` : ''}
-                  <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')" style="font-size:11px;padding:5px 10px"><i class="fa fa-comments"></i> Test</button>
                 ` : `
                   ${IS_ADMIN ? `<button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>` : ''}
                 `}
-                ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i> Delete</button>` : ''}
+                ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i></button>` : ''}
               </div>
             </td>
           </tr>`;
@@ -1951,7 +1976,7 @@ function updateCatalogTable(processed, unprocessed) {
           <td>${statusBadge}</td>
           <td>${IS_ADMIN ? `<div class="table-actions">
             <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(item.name)}',this)"><i class="fa fa-layer-group"></i> Create Chunks</button>
-            <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" ><i class="fa fa-trash"></i> Delete</button>
+            <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" ><i class="fa fa-trash"></i></button>
           </div>` : ''}</td>
         </tr>`;
     } else {
@@ -1979,7 +2004,7 @@ function updateCatalogTable(processed, unprocessed) {
           <td>${statusBadge}</td>
           <td>${IS_ADMIN ? `<div class="table-actions">
             <button class="btn btn-sm btn-primary" onclick="showPanel('chunk')"><i class="fa fa-layer-group"></i> Create Chunks</button>
-            <button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i> Delete</button>
+            <button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>
           </div>` : ''}</td>
         </tr>`;
       children.forEach(child => {
@@ -1990,13 +2015,13 @@ function updateCatalogTable(processed, unprocessed) {
           : `<span class="badge" style="background:#f1f5f9;color:#64748b"><i class="fa fa-clock"></i> Pending</span>`;
         tableHtml += `
           <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
-            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555">${escHtml(child.name)}</span></div></td>
+            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
             <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
             <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
             <td>${cStatus}</td>
             <td>${IS_ADMIN ? `<div class="table-actions">
               <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>
-              <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i> Delete</button>
+              <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i></button>
             </div>` : ''}</td>
           </tr>`;
       });
@@ -2796,12 +2821,8 @@ function renderChunks(pdfName, chunks) {
   ).join('');
 
   // Build content panes
-  // Resolve the parent PDF name for the View PDF button
-  // If pdfName is a split part (e.g. WOD-68_..._p0001-0002.pdf), use the parent stem
-  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-  const viewPdfName = splitRe.test(pdfName)
-    ? pdfName.replace(splitRe, '.pdf')
-    : pdfName;
+  // Use the actual pdfName (split part or full) for View PDF — show only that file's pages
+  const viewPdfName = pdfName;
 
   body.innerHTML = chunks.map((c, i) => `
     <div class="chunk-content${i===0?' visible':''}" id="chunk-pane-${i}">

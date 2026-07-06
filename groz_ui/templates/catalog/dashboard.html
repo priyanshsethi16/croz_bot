@@ -281,12 +281,9 @@
                       <button class="btn btn-sm btn-secondary" onclick="openChunks('{{ item.name }}')">
                         <i class="fa fa-layer-group"></i> Chunks
                       </button>
-                      <button class="btn btn-sm btn-secondary" onclick="showPanel('chat')">
-                        <i class="fa fa-comments"></i> Test
-                      </button>
                       {% if is_admin %}
                       <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
-                        <i class="fa fa-trash"></i> Delete
+                        <i class="fa fa-trash"></i>
                       </button>
                       {% endif %}
                     </div>
@@ -319,7 +316,7 @@
                         <i class="fa fa-layer-group"></i> Create Chunks
                       </button>
                       <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
-                        <i class="fa fa-trash"></i> Delete
+                        <i class="fa fa-trash"></i>
                       </button>
                     </div>
                     {% endif %}
@@ -1121,5 +1118,5 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=group-embed-20260703"></script>
+<script src="{% static 'js/dashboard.js' %}?v=parent-preview-20260706"></script>
 {% endblock %}
