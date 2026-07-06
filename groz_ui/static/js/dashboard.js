@@ -1879,7 +1879,7 @@ function updateCatalogTable(processed, unprocessed) {
       const item = row.item;
       tableHtml += `
         <tr style="cursor:pointer" onclick="selectPdfFromOverview('${escHtml(item.name)}')">
-          <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname" style="cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${escHtml(item.name)}')">${escHtml(item.name)}</span></div></td>
+          <td><div class="pdf-name-cell"><i class="fa fa-file-pdf"></i><span class="pname" style="cursor:pointer" onclick="event.stopPropagation();openUploadPreview('${escHtml(item.name)}')">${escHtml(item.name)}</span></div></td>
           <td><span class="badge badge-blue">${item.chunks}</span></td>
           <td><span class="badge badge-green">${item.products}</span></td>
           <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
@@ -1939,7 +1939,7 @@ function updateCatalogTable(processed, unprocessed) {
           : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
         tableHtml += `
           <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
-            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
+            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;cursor:pointer" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
             <td><span class="badge badge-blue">${child.chunks || 0}</span></td>
             <td><span class="badge badge-green">${child.products || 0}</span></td>
             <td>${childStatusBadge}</td>
@@ -2015,7 +2015,7 @@ function updateCatalogTable(processed, unprocessed) {
           : `<span class="badge" style="background:#f1f5f9;color:#64748b"><i class="fa fa-clock"></i> Pending</span>`;
         tableHtml += `
           <tr class="pdf-child-row ovg-child-${escHtml(stem)}">
-            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
+            <td><div class="pdf-name-cell"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;cursor:pointer" onclick="event.stopPropagation();openUploadPreview('${escHtml(child.name)}')">${escHtml(child.name)}</span></div></td>
             <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
             <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
             <td>${cStatus}</td>
