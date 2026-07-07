@@ -772,6 +772,7 @@ function _buildChunkRowActions(item) {
     a += `<button class="btn btn-sm btn-primary" onclick="runChunkingForPdf('${escHtml(item.name)}',this)"><i class="fa fa-layer-group"></i> Create Chunks</button>`;
   }
   a += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(item.name)}')"><i class="fa fa-trash"></i></button>`;
+  a += `<button class="btn btn-sm btn-secondary" onclick="openUploadPreview('${escHtml(item.name)}')" title="View PDF preview"><i class="fa fa-eye"></i></button>`;
   a += '</div>';
   return a;
 }
@@ -830,7 +831,8 @@ async function loadPdfList() {
             pa += `<button class="btn btn-sm btn-primary embed-btn" id="group-embed-btn-${escHtml(stem)}" onclick="triggerGroupEmbedding('${escAttr(stem)}', JSON.parse('${escAttr(JSON.stringify(childDocIds))}'), this)"><i class="fa fa-brain"></i> Create Embedding</button>`;
           }
         }
-        pa += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(stem)}')"><i class="fa fa-trash"></i></button></div>`;
+        pa += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(stem)}')"><i class="fa fa-trash"></i></button>`;
+        pa += `<button class="btn btn-sm btn-secondary" onclick="openUploadPreview('${escHtml(stem + '.pdf')}')" title="View PDF preview"><i class="fa fa-eye"></i></button></div>`;
 
         const parentTr = document.createElement('tr');
         parentTr.className = 'pdf-group-parent';
