@@ -1191,8 +1191,12 @@ def admin_chat(request):
 
         memory_turn = load_turn(request.session, ADMIN_CHAT_MEMORY_KEY)
         runtime = get_runtime_config()
-        if not runtime.openai_api_key:
-            return JsonResponse({'error': 'OPENAI_API_KEY is required for retrieval embeddings.'}, status=400)
+        if not runtime.embedding_api_key:
+            provider_label = 'Gemini' if runtime.embedding_provider == 'gemini' else 'OpenAI'
+            return JsonResponse(
+                {'error': f'{provider_label} API key is required for retrieval embeddings.'},
+                status=400,
+            )
         if not runtime.chat_api_key:
             return JsonResponse({'error': f'{runtime.chat_provider.title()} API key is not configured.'}, status=400)
         catalog_ids = body.get('catalog_ids', [])
@@ -2539,6 +2543,7 @@ def save_chunk(request):
         body = json.loads(request.body)
         pdf_name = Path(str(body.get('pdf', '')).strip()).name
         chunk_name = Path(str(body.get('filename', '')).strip()).name
+        chunk_id = str(body.get('chunk_id', '')).strip()
         content = str(body.get('content', ''))
     except Exception:
         return JsonResponse({'error': 'Invalid request body.'}, status=400)
@@ -2550,22 +2555,27 @@ def save_chunk(request):
     from .models import CatalogDocument, DocumentChunk
     import hashlib
     
-    ordinal = _parse_ordinal_from_filename(chunk_name)
     db_updated = False
-    
-    pdf_stem = Path(pdf_name).stem
-    doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
-    if not doc:
-        doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
-        
-    if doc:
-        chunk = DocumentChunk.objects.filter(document=doc, ordinal=ordinal).first()
-        if chunk:
-            chunk.text = content
-            chunk.content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
-            chunk.index_status = DocumentChunk.IndexStatus.STALE
-            chunk.save(update_fields=['text', 'content_hash', 'index_status', 'updated_at'])
-            db_updated = True
+
+    chunk = None
+    if chunk_id:
+        chunk = DocumentChunk.objects.select_related('document').filter(id=chunk_id).first()
+
+    if chunk is None:
+        ordinal = _parse_ordinal_from_filename(chunk_name)
+        pdf_stem = Path(pdf_name).stem
+        doc = CatalogDocument.objects.filter(original_filename=pdf_stem).order_by('-version').first()
+        if not doc:
+            doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
+        if doc:
+            chunk = DocumentChunk.objects.filter(document=doc, ordinal=ordinal).first()
+
+    if chunk:
+        chunk.text = content
+        chunk.content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+        chunk.index_status = DocumentChunk.IndexStatus.STALE
+        chunk.save(update_fields=['text', 'content_hash', 'index_status', 'updated_at'])
+        db_updated = True
 
     if not db_updated:
         return JsonResponse({'error': 'Chunk database record not found.'}, status=404)

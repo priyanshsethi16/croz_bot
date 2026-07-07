@@ -889,12 +889,55 @@
           </div>
 
           <div class="model-settings-grid">
+            <section class="model-settings-card embeddings-card">
+              <div class="model-card-head">
+                <div class="provider-logo embedding-logo"><i class="fa fa-brain"></i></div>
+                <div>
+                  <h4>Embeddings</h4>
+                  <p>Choose the dense vector model used for indexing and retrieval</p>
+                </div>
+              </div>
+              <div class="model-field">
+                <label for="embedding-model">Embedding model</label>
+                <select id="embedding-model"></select>
+                <small>OpenAI and Gemini embeddings both use 1536 dimensions here. Switching models requires a fresh Qdrant reindex.</small>
+              </div>
+              <div class="model-field">
+                <label for="gemini-api-key">Gemini API key</label>
+                <div class="secret-input-wrap">
+                  <input type="password" id="gemini-api-key" autocomplete="new-password" placeholder="Enter a new Gemini key"/>
+                  <button type="button" onclick="toggleSecretVisibility('gemini-api-key', this)" title="Show or hide key"><i class="fa fa-eye"></i></button>
+                </div>
+                <label class="clear-key-option"><input type="checkbox" id="clear-gemini-key"/> Remove saved Gemini key</label>
+                <small>Used for Gemini embeddings, Gemini chat, and PDF extraction.</small>
+              </div>
+              <span class="key-status" id="gemini-key-status" style="display:inline-flex;margin-top:2px">Checking…</span>
+            </section>
+
             <section class="model-settings-card">
+              <div class="model-card-head">
+                <div class="provider-logo gemini-logo"><i class="fa fa-gem"></i></div>
+                <div>
+                  <h4>Google Gemini</h4>
+                  <p>Vision-language model for PDF chunk extraction and Gemini chat</p>
+                </div>
+              </div>
+              <div class="model-field">
+                <label for="vision-model">PDF extraction VLM</label>
+                <select id="vision-model" onchange="onVisionModelChange()"></select>
+                <small>Used by Create Chunks for page-image understanding.</small>
+              </div>
+              <div class="model-field">
+                <small><i class="fa fa-link"></i> Uses the shared Gemini key configured in the Embeddings card above.</small>
+              </div>
+            </section>
+
+            <section class="model-settings-card openai-settings-card">
               <div class="model-card-head">
                 <div class="provider-logo openai-logo">AI</div>
                 <div>
                   <h4>OpenAI</h4>
-                  <p>Semantic search embeddings and optional chat</p>
+                  <p>API key for OpenAI chat and OpenAI embeddings</p>
                 </div>
                 <span class="key-status" id="openai-key-status">Checking…</span>
               </div>
@@ -906,38 +949,9 @@
                 </div>
                 <label class="clear-key-option"><input type="checkbox" id="clear-openai-key"/> Remove saved OpenAI key</label>
               </div>
-              <div class="model-field">
-                <label for="embedding-model">Embedding model</label>
-                <input type="text" id="embedding-model" value="text-embedding-3-small" readonly/>
-                <small>Fixed OpenAI model · 1536 dimensions · requires a fresh Qdrant index.</small>
-              </div>
             </section>
 
-            <section class="model-settings-card">
-              <div class="model-card-head">
-                <div class="provider-logo gemini-logo"><i class="fa fa-gem"></i></div>
-                <div>
-                  <h4>Google Gemini</h4>
-                  <p>Vision-language model for PDF chunk extraction</p>
-                </div>
-                <span class="key-status" id="gemini-key-status">Checking…</span>
-              </div>
-              <div class="model-field">
-                <label for="gemini-api-key">Gemini API key</label>
-                <div class="secret-input-wrap">
-                  <input type="password" id="gemini-api-key" autocomplete="new-password" placeholder="Enter a new Gemini key"/>
-                  <button type="button" onclick="toggleSecretVisibility('gemini-api-key', this)" title="Show or hide key"><i class="fa fa-eye"></i></button>
-                </div>
-                <label class="clear-key-option"><input type="checkbox" id="clear-gemini-key"/> Remove saved Gemini key</label>
-              </div>
-              <div class="model-field">
-                <label for="vision-model">PDF extraction VLM</label>
-                <select id="vision-model" onchange="onVisionModelChange()"></select>
-                <small>Used by Create Chunks for page-image understanding.</small>
-              </div>
-            </section>
-
-            <section class="model-settings-card" id="mistral-settings-card" style="display:none">
+            <section class="model-settings-card mistral-settings-card" id="mistral-settings-card" style="display:none">
               <div class="model-card-head">
                 <div class="provider-logo" style="background:#f97316;color:#fff"><i class="fa fa-bolt"></i></div>
                 <div>
@@ -985,7 +999,7 @@
           </div>
 
           <div class="model-save-bar">
-            <span id="model-config-message">Changes affect new chunking, indexing, and chat requests.</span>
+            <span id="model-config-message">Changes affect new chunking, indexing, and chat requests. Switching the embedding model requires a fresh Qdrant reindex.</span>
             <button class="btn btn-primary" id="btn-save-model-config" onclick="saveModelConfiguration()">
               <i class="fa fa-save"></i> Save Models &amp; Keys
             </button>
@@ -1119,7 +1133,7 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=styling-fix-20260706"></script>
+<script src="{% static 'js/dashboard.js' %}?v=group-embed-fix-20260707"></script>
 
 
 {% endblock %}

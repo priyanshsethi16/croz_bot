@@ -827,7 +827,7 @@ async function loadPdfList() {
           if (allEmbedded) {
             pa += `<button class="btn btn-sm embed-btn" id="group-embed-btn-${escHtml(stem)}" disabled style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed"><i class="fa fa-check-circle"></i> Embedded</button>`;
           } else {
-            pa += `<button class="btn btn-sm btn-primary embed-btn" id="group-embed-btn-${escHtml(stem)}" onclick="triggerGroupEmbedding('${escHtml(stem)}', ${JSON.stringify(childDocIds)}, this)"><i class="fa fa-brain"></i> Create Embedding</button>`;
+            pa += `<button class="btn btn-sm btn-primary embed-btn" id="group-embed-btn-${escHtml(stem)}" onclick="triggerGroupEmbedding('${escAttr(stem)}', JSON.parse('${escAttr(JSON.stringify(childDocIds))}'), this)"><i class="fa fa-brain"></i> Create Embedding</button>`;
           }
         }
         pa += `<button class="btn btn-sm btn-danger" onclick="deleteEmbeddingsOnly('${escHtml(stem)}')"><i class="fa fa-trash"></i></button></div>`;
@@ -1511,7 +1511,7 @@ async function loadModelConfiguration(force = false) {
     _modelOptions = data.options;
     _visionModel = data.configuration.vision_model || 'gemini-2.5-flash';
     _savedChatModel = data.configuration.chat_model;
-    document.getElementById('embedding-model').value = data.configuration.embedding_model;
+    fillModelSelect('embedding-model', data.options.embedding_models, data.configuration.embedding_model);
     fillModelSelect('vision-model', data.options.vision_models, data.configuration.vision_model);
     onVisionModelChange();
     document.getElementById('chat-provider').value = data.configuration.chat_provider;
@@ -1560,6 +1560,7 @@ async function saveModelConfiguration() {
   const button = document.getElementById('btn-save-model-config');
   const message = document.getElementById('model-config-message');
   const payload = {
+    embedding_model: document.getElementById('embedding-model').value,
     openai_api_key: document.getElementById('openai-api-key').value.trim(),
     gemini_api_key: document.getElementById('gemini-api-key').value.trim(),
     mistral_api_key: (document.getElementById('mistral-api-key')?.value || '').trim(),
@@ -2892,7 +2893,12 @@ async function saveChunk(idx) {
     const res = await fetch('/admin-panel/api/chunks/save/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ pdf: pdfName, filename: chunk.filename, content })
+      body: JSON.stringify({
+        pdf: pdfName,
+        filename: chunk.filename,
+        chunk_id: chunk.id,
+        content,
+      })
     });
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'Save failed.');

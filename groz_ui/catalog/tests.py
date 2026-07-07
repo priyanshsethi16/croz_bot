@@ -115,6 +115,34 @@ class ModelConfigurationApiTests(TestCase):
         self.assertNotIn("sk-openai-secret-1234", serialized)
         self.assertNotIn("gemini-secret-5678", serialized)
         self.assertTrue(body["keys"]["openai"]["configured"])
+        self.assertEqual(body["configuration"]["embedding_model"], "text-embedding-3-small")
+        self.assertIn("embedding_models", body["options"])
+        self.assertIn(
+            {"value": "gemini-embedding-001", "label": "Google Gemini gemini-embedding-001"},
+            body["options"]["embedding_models"],
+        )
+
+    def test_staff_can_save_gemini_embedding_model(self):
+        self._force_admin_panel_login()
+        response = self.client.post(
+            "/admin-panel/api/model-config/save/",
+            data=json.dumps({
+                "embedding_model": "gemini-embedding-001",
+                "openai_api_key": "sk-openai-secret-1234",
+                "gemini_api_key": "gemini-secret-5678",
+                "vision_model": "gemini-2.5-pro",
+                "chat_provider": "gemini",
+                "chat_model": "gemini-2.5-flash",
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config = ModelConfiguration.objects.get(singleton_id=1)
+        self.assertEqual(config.embedding_model, "gemini-embedding-001")
+        body = response.json()
+        self.assertEqual(body["configuration"]["embedding_model"], "gemini-embedding-001")
+        self.assertEqual(body["keys"]["gemini"]["configured"], True)
 
     def test_rejects_model_from_wrong_provider(self):
         self._force_admin_panel_login()
@@ -124,6 +152,20 @@ class ModelConfigurationApiTests(TestCase):
                 "vision_model": "gemini-2.5-flash",
                 "chat_provider": "gemini",
                 "chat_model": "gpt-5.4-mini",
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_rejects_unknown_embedding_model(self):
+        self._force_admin_panel_login()
+        response = self.client.post(
+            "/admin-panel/api/model-config/save/",
+            data=json.dumps({
+                "embedding_model": "bogus-embedding-model",
+                "vision_model": "gemini-2.5-flash",
+                "chat_provider": "gemini",
+                "chat_model": "gemini-2.5-flash",
             }),
             content_type="application/json",
         )
@@ -397,6 +439,75 @@ class CatalogDeletePdfApiTests(TestCase):
             'Cordless_Drill_custom_p0002-0003.pdf',
             {item['name'] for item in stats_after['processed']},
         )
+
+
+class CatalogChunkEditApiTests(TestCase):
+    def setUp(self):
+        self.staff = get_user_model().objects.create_user(
+            username='chunk-admin',
+            password='test-password',
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+        session = self.client.session
+        session['admin_access_token'] = 'test-admin-token'
+        session.save()
+        self.catalog = Catalog.objects.create(name='Chunk Catalog', slug='chunk-catalog')
+        self.first_document = CatalogDocument.objects.create(
+            catalog=self.catalog,
+            original_filename='Cordless_Drill_custom_p0001-0001',
+            file=SimpleUploadedFile('Cordless_Drill_custom_p0001-0001.pdf', b'%PDF-test'),
+            checksum_sha256='a' * 64,
+            version=1,
+            page_count=1,
+        )
+        self.second_document = CatalogDocument.objects.create(
+            catalog=self.catalog,
+            original_filename='Cordless_Drill_custom_p0002-0003',
+            file=SimpleUploadedFile('Cordless_Drill_custom_p0002-0003.pdf', b'%PDF-test'),
+            checksum_sha256='b' * 64,
+            version=2,
+            page_count=1,
+        )
+        self.first_chunk = DocumentChunk.objects.create(
+            document=self.first_document,
+            chunk_type=DocumentChunk.ChunkType.PRODUCT_FAMILY,
+            text='first chunk',
+            page_start=1,
+            page_end=1,
+            content_hash=hashlib.sha256(b'first chunk').hexdigest(),
+            ordinal=0,
+            index_status=DocumentChunk.IndexStatus.INDEXED,
+        )
+        self.second_chunk = DocumentChunk.objects.create(
+            document=self.second_document,
+            chunk_type=DocumentChunk.ChunkType.PRODUCT_FAMILY,
+            text='second chunk',
+            page_start=1,
+            page_end=1,
+            content_hash=hashlib.sha256(b'second chunk').hexdigest(),
+            ordinal=0,
+            index_status=DocumentChunk.IndexStatus.INDEXED,
+        )
+
+    def test_save_chunk_uses_chunk_id_for_split_part_groups(self):
+        response = self.client.post(
+            '/admin-panel/api/chunks/save/',
+            data=json.dumps({
+                'pdf': 'Cordless_Drill',
+                'filename': 'chunk_0001.md',
+                'chunk_id': str(self.second_chunk.id),
+                'content': 'updated second chunk',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.second_chunk.refresh_from_db()
+        self.first_chunk.refresh_from_db()
+        self.assertEqual(self.second_chunk.text, 'updated second chunk')
+        self.assertEqual(self.second_chunk.index_status, DocumentChunk.IndexStatus.STALE)
+        self.assertEqual(self.first_chunk.text, 'first chunk')
 
 
 @override_settings(CATALOG_RAG_V2_INGEST=True)

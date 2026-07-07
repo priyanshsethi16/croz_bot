@@ -1,13 +1,15 @@
-"""Qdrant, HuggingFace dense, and BM25 sparse providers for hybrid search."""
+"""Qdrant dense, provider-aware embeddings, and BM25 sparse providers for hybrid search."""
 
 from __future__ import annotations
 
 import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from qdrant_client import QdrantClient, models
 
@@ -23,33 +25,91 @@ COLLECTION_ALIAS = os.getenv("QDRANT_ALIAS", "catalog_chunks_current")
 DENSE_VECTOR = "dense"
 SPARSE_VECTOR = "bm25"
 EMBED_MODEL = "text-embedding-3-small"
+GEMINI_EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIMENSIONS = 1536
 SPARSE_MODEL = "Qdrant/bm25"
+_EMBEDDING_PROVIDER_BY_MODEL = {
+    EMBED_MODEL: "openai",
+    GEMINI_EMBED_MODEL: "gemini",
+}
+_EMBEDDING_DIMENSIONS_BY_MODEL = {
+    EMBED_MODEL: EMBED_DIMENSIONS,
+    GEMINI_EMBED_MODEL: EMBED_DIMENSIONS,
+}
 
 
-@lru_cache(maxsize=1)
-def build_embeddings(api_key: str | None = None) -> OpenAIEmbeddings:
-    # Try retrieving key from Django model config database first
-    key = api_key or ""
-    if not key:
-        try:
-            from catalog.model_config import get_secret, SECRET_OPENAI
-            key = get_secret(SECRET_OPENAI).strip()
-        except Exception:
-            pass
+def _embedding_model_from_env() -> str:
+    for env_name in ("EMBEDDING_MODEL", "OPENAI_EMBEDDING_MODEL"):
+        model = os.getenv(env_name, "").strip()
+        if model:
+            return model
+    return ""
 
-    # Fallback to environment variable
-    if not key:
-        key = os.getenv("OPENAI_API_KEY", "").strip()
 
-    if not key:
-        raise ValueError("OPENAI_API_KEY is required for embeddings. Save it in Models & Keys tab.")
+def _embedding_model_from_runtime() -> str:
+    try:
+        from catalog.model_config import get_runtime_config
+
+        return get_runtime_config().embedding_model.strip()
+    except Exception:
+        return ""
+
+
+def _resolve_embedding_model() -> str:
+    model = _embedding_model_from_env() or _embedding_model_from_runtime() or EMBED_MODEL
+    return model if model in _EMBEDDING_PROVIDER_BY_MODEL else EMBED_MODEL
+
+
+def _embedding_key_from_runtime(provider: str) -> str:
+    try:
+        from catalog.model_config import SECRET_GEMINI, SECRET_OPENAI, get_secret
+
+        secret_name = SECRET_GEMINI if provider == "gemini" else SECRET_OPENAI
+        return get_secret(secret_name).strip()
+    except Exception:
+        return ""
+
+
+def _resolve_embedding_key(provider: str, api_key: str | None = None) -> str:
+    key = str(api_key or "").strip()
+    if key:
+        return key
+    key = _embedding_key_from_runtime(provider)
+    if key:
+        return key
+    if provider == "gemini":
+        return (
+            os.getenv("GOOGLE_API_KEY", "").strip()
+            or os.getenv("GEMINI_API_KEY", "").strip()
+        )
+    return os.getenv("OPENAI_API_KEY", "").strip()
+
+
+@lru_cache(maxsize=8)
+def _build_embeddings_cached(provider: str, model: str, api_key: str) -> Any:
+    if provider == "gemini":
+        return GoogleGenerativeAIEmbeddings(
+            model=model,
+            google_api_key=api_key,
+            output_dimensionality=_EMBEDDING_DIMENSIONS_BY_MODEL.get(model, EMBED_DIMENSIONS),
+        )
     return OpenAIEmbeddings(
-        model=EMBED_MODEL,
-        api_key=key,
+        model=model,
+        api_key=api_key,
         chunk_size=100,
         max_retries=3,
     )
+
+
+def build_embeddings(api_key: str | None = None) -> Any:
+    model = _resolve_embedding_model()
+    provider = _EMBEDDING_PROVIDER_BY_MODEL.get(model, "openai")
+    key = _resolve_embedding_key(provider, api_key)
+    if not key:
+        if provider == "gemini":
+            raise ValueError("Gemini API key is required for embeddings. Save it in Models & Keys tab.")
+        raise ValueError("OpenAI API key is required for embeddings. Save it in Models & Keys tab.")
+    return _build_embeddings_cached(provider, model, key)
 
 
 @lru_cache(maxsize=1)

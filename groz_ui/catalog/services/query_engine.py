@@ -631,7 +631,7 @@ class CatalogQueryEngine:
         )
 
     def _semantic_retrieve(self, query: str, scope: QueryScope, *, top_k: int = 5) -> list[dict]:
-        retriever = HybridRetriever(top_k=top_k)  # HuggingFace embeddings need no API key
+        retriever = HybridRetriever(top_k=top_k)
         return retriever.retrieve(query, query_filter=_scope_filter(scope))
 
     def _normalize_planned_tasks(self, plan: QueryPlan) -> QueryPlan:

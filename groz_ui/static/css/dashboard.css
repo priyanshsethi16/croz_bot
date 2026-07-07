@@ -1096,7 +1096,11 @@
   padding: 18px; border: 1.5px solid var(--border);
   border-radius: 10px; background: #fff;
 }
-.model-settings-card.chat-routing-card { grid-column: 1 / -1; }
+.model-settings-card.embeddings-card,
+.model-settings-card.chat-routing-card,
+.model-settings-card.mistral-settings-card {
+  grid-column: 1 / -1;
+}
 .model-card-head {
   display: flex; align-items: center; gap: 11px;
   padding-bottom: 14px; margin-bottom: 14px;
@@ -1112,6 +1116,7 @@
 }
 .openai-logo { background: #111; color: #fff; }
 .gemini-logo { background: linear-gradient(135deg, #4285f4, #a855f7); color: #fff; }
+.embedding-logo { background: linear-gradient(135deg, #0f766e, #2563eb); color: #fff; }
 .chat-logo { background: var(--orange-light); color: var(--orange); }
 .key-status {
   padding: 4px 8px; border-radius: 12px;
@@ -1168,7 +1173,9 @@
 
 @media (max-width: 800px) {
   .model-settings-grid { grid-template-columns: 1fr; }
-  .model-settings-card.chat-routing-card { grid-column: auto; }
+  .model-settings-card.embeddings-card,
+  .model-settings-card.chat-routing-card,
+  .model-settings-card.mistral-settings-card { grid-column: auto; }
   .chat-routing-fields { grid-template-columns: 1fr; gap: 0; }
   .model-save-bar { align-items: stretch; flex-direction: column; }
   .model-save-bar .btn { justify-content: center; }

@@ -12,6 +12,15 @@ from django.conf import settings
 
 
 EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_MODELS = (
+    ("text-embedding-3-small", "OpenAI text-embedding-3-small"),
+    ("gemini-embedding-001", "Google Gemini gemini-embedding-001"),
+)
+_EMBEDDING_MODEL_VALUES = {value for value, _ in EMBEDDING_MODELS}
+_EMBEDDING_PROVIDER_BY_MODEL = {
+    "text-embedding-3-small": "openai",
+    "gemini-embedding-001": "gemini",
+}
 
 VISION_MODELS = (
     # Mistral OCR-4
@@ -125,6 +134,7 @@ def get_secret(name: str) -> str:
     if name == SECRET_GEMINI:
         return (
             os.getenv(SECRET_GEMINI, "").strip()
+            or os.getenv("GOOGLE_API_KEY", "").strip()
             or os.getenv("GEMINI_API_KEY_1", "").strip()
         )
     return os.getenv(name, "").strip()
@@ -160,6 +170,23 @@ def get_model_configuration():
     return config
 
 
+def _normalize_embedding_model(value: str | None, *, fallback: str = EMBEDDING_MODEL) -> str:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return fallback
+    if candidate in _EMBEDDING_MODEL_VALUES:
+        return candidate
+    return fallback
+
+
+def _validate_embedding_model(value: str) -> str:
+    candidate = str(value or "").strip()
+    if candidate not in _EMBEDDING_MODEL_VALUES:
+        allowed = ", ".join(model for model, _ in EMBEDDING_MODELS)
+        raise ValueError(f"Unsupported embedding model. Choose one of: {allowed}.")
+    return candidate
+
+
 @dataclass(frozen=True)
 class RuntimeModelConfig:
     openai_api_key: str
@@ -177,6 +204,16 @@ class RuntimeModelConfig:
             return self.openai_api_key
         return self.gemini_api_key
 
+    @property
+    def embedding_provider(self) -> str:
+        return _EMBEDDING_PROVIDER_BY_MODEL.get(self.embedding_model, "openai")
+
+    @property
+    def embedding_api_key(self) -> str:
+        if self.embedding_provider == "gemini":
+            return self.gemini_api_key
+        return self.openai_api_key
+
 
 def get_runtime_config() -> RuntimeModelConfig:
     config = get_model_configuration()
@@ -185,7 +222,7 @@ def get_runtime_config() -> RuntimeModelConfig:
         groq_api_key=get_secret(SECRET_GROQ),
         gemini_api_key=get_secret(SECRET_GEMINI),
         mistral_api_key=get_secret(SECRET_MISTRAL),
-        embedding_model=EMBEDDING_MODEL,
+        embedding_model=_normalize_embedding_model(config.embedding_model),
         vision_model=config.vision_model,
         chat_provider=config.chat_provider,
         chat_model=config.chat_model,
@@ -200,7 +237,7 @@ def configuration_payload() -> dict:
     mistral_key = get_secret(SECRET_MISTRAL)
     return {
         "configuration": {
-            "embedding_model": EMBEDDING_MODEL,
+            "embedding_model": _normalize_embedding_model(config.embedding_model),
             "vision_model": config.vision_model,
             "chat_provider": config.chat_provider,
             "chat_model": config.chat_model,
@@ -212,6 +249,7 @@ def configuration_payload() -> dict:
             "mistral": {"configured": bool(mistral_key), "masked": mask_secret(mistral_key)},
         },
         "options": {
+            "embedding_models": [{"value": value, "label": label} for value, label in EMBEDDING_MODELS],
             "vision_models": [{"value": value, "label": label} for value, label in VISION_MODELS],
             "chat_models": {
                 provider: [{"value": value, "label": label} for value, label in models]
@@ -223,6 +261,12 @@ def configuration_payload() -> dict:
 
 def update_configuration(payload: dict, user=None) -> dict:
     config = get_model_configuration()
+
+    embedding_model_raw = str(payload.get("embedding_model", "")).strip()
+    if embedding_model_raw:
+        embedding_model = _validate_embedding_model(embedding_model_raw)
+    else:
+        embedding_model = _normalize_embedding_model(config.embedding_model)
 
     vision_model = str(payload.get("vision_model", config.vision_model)).strip()
     allowed_vision = {value for value, _ in VISION_MODELS}
@@ -257,7 +301,7 @@ def update_configuration(payload: dict, user=None) -> dict:
     elif str(payload.get("mistral_api_key", "")).strip():
         save_secret(SECRET_MISTRAL, str(payload["mistral_api_key"]))
 
-    config.embedding_model = EMBEDDING_MODEL
+    config.embedding_model = embedding_model
     config.vision_model = vision_model
     config.chat_provider = chat_provider
     config.chat_model = chat_model
@@ -275,8 +319,11 @@ def subprocess_environment() -> dict[str, str]:
         env[SECRET_GROQ] = runtime.groq_api_key
     if runtime.gemini_api_key:
         env[SECRET_GEMINI] = runtime.gemini_api_key
+        env["GOOGLE_API_KEY"] = runtime.gemini_api_key
     if runtime.mistral_api_key:
         env[SECRET_MISTRAL] = runtime.mistral_api_key
+    env["EMBEDDING_MODEL"] = runtime.embedding_model
+    env["EMBEDDING_PROVIDER"] = runtime.embedding_provider
     env["OPENAI_EMBEDDING_MODEL"] = runtime.embedding_model
     env["GEMINI_VISION_MODEL"] = runtime.vision_model
     env["CHAT_PROVIDER"] = runtime.chat_provider
