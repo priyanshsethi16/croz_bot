@@ -20,6 +20,7 @@ urlpatterns = [
     path('api/chunks/save/',  views.save_chunk,         name='save_chunk'),
     path('api/families/',     views.list_product_families, name='list_product_families'),
     path('api/families/save/', views.save_product_family, name='save_product_family'),
+    path('api/families/approval-status/', views.product_families_approval_status, name='product_families_approval_status'),
     path('api/pdf-pages/',     views.pdf_page_count,     name='pdf_page_count'),
     path('api/split-pdf/',      views.split_pdf,          name='split_pdf'),
     path('api/split-pdf-custom/', views.split_pdf_custom,   name='split_pdf_custom'),

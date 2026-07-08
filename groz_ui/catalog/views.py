@@ -2304,6 +2304,60 @@ def list_product_families(request):
 
 
 @login_required
+def product_families_approval_status(request):
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    pdf_name = request.GET.get('pdf', '').strip()
+    if not pdf_name:
+        return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
+
+    from .models import ProductFamily, CatalogDocument
+    import re
+
+    doc = _resolve_catalog_document(pdf_name)
+    if not doc:
+        return JsonResponse({'error': f'PDF document not found for "{pdf_name}".'}, status=404)
+
+    pdf_stem = Path(pdf_name).stem
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+    docs_to_query = [doc]
+
+    if split_re.search(doc.original_filename) or not split_re.search(pdf_stem):
+        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
+        if splits_dir.exists():
+            split_stems = [p.stem for p in sorted(splits_dir.glob('*.pdf'))]
+            split_docs = list(CatalogDocument.objects.filter(original_filename__in=split_stems).order_by('original_filename'))
+            if split_docs:
+                docs_to_query = split_docs
+
+    families = []
+    for current_doc in docs_to_query:
+        for fam in ProductFamily.objects.filter(document=current_doc).order_by('product_name', 'product_code'):
+            families.append({
+                'id': str(fam.id),
+                'product_name': fam.product_name,
+                'product_code': fam.product_code,
+                'review_status': fam.review_status,
+                'page_start': fam.page_start,
+                'page_end': fam.page_end,
+            })
+
+    total = len(families)
+    approved = sum(1 for f in families if f['review_status'] == ProductFamily.ReviewStatus.APPROVED)
+    needs_review = sum(1 for f in families if f['review_status'] == ProductFamily.ReviewStatus.NEEDS_REVIEW)
+    rejected = sum(1 for f in families if f['review_status'] == ProductFamily.ReviewStatus.REJECTED)
+
+    return JsonResponse({
+        'pdf': pdf_name,
+        'total': total,
+        'approved': approved,
+        'needs_review': needs_review,
+        'rejected': rejected,
+        'families': families,
+    })
+
+
+@login_required
 @require_POST
 def save_product_family(request):
     if not request.user.is_staff:

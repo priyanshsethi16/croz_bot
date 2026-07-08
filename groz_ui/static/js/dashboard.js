@@ -230,8 +230,8 @@ async function loadExistingUploads() {
 
     pdfs.forEach(name => {
       if (splitRe.test(name)) {
-        const parentStem = name.replace(splitRe, '');
-        (groups[parentStem] = groups[parentStem] || []).push(name);
+        const root = _rootStem(name);
+        (groups[root] = groups[root] || []).push(name);
       } else {
         plain.push(name);
       }
@@ -712,14 +712,24 @@ function adjustZoom(delta) {
 let _activeChunkingBtn = null;
 let _pipelineRunning = false;
 
+function _rootStem(name) {
+  // Repeatedly strip split suffixes to find the ultimate root stem
+  const splitRe = /_(custom_)?p\d{4}-\d{4}(\.pdf)?$/i;
+  let stem = name.replace(/\.pdf$/i, '');
+  while (splitRe.test(stem)) {
+    stem = stem.replace(splitRe, '');
+  }
+  return stem;
+}
+
 function _chunkGroupRows(pdfDetails) {
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-  const groups  = {};
+  const groups  = {};  // rootStem -> [item, ...]
   const plain   = [];
   pdfDetails.forEach(item => {
     if (splitRe.test(item.name)) {
-      const stem = item.name.replace(splitRe, '');
-      (groups[stem] = groups[stem] || []).push(item);
+      const root = _rootStem(item.name);
+      (groups[root] = groups[root] || []).push(item);
     } else {
       plain.push(item);
     }
@@ -1720,7 +1730,7 @@ async function openUploadPreview(name) {
     try {
       const r = await fetch('/admin-panel/api/pdfs/');
       const d = await r.json();
-      const parts = (d.pdfs || []).filter(p => splitRe.test(p) && p.replace(splitRe, '') === stem);
+      const parts = (d.pdfs || []).filter(p => splitRe.test(p) && _rootStem(p) === stem);
       if (parts.length) {
         await previewParentGroup(stem, parts);
         document.getElementById('pdf-preview-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1766,13 +1776,13 @@ function selectPdfFromOverview(pdfName) {
 
 function _overviewGroupRows(items, isProcessed) {
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-  const groups = {};   // parentStem -> [item, ...]
+  const groups = {};   // rootStem -> [item, ...]
   const plain  = [];
 
   items.forEach(item => {
     if (splitRe.test(item.name)) {
-      const stem = item.name.replace(splitRe, '');
-      (groups[stem] = groups[stem] || []).push(item);
+      const root = _rootStem(item.name);
+      (groups[root] = groups[root] || []).push(item);
     } else {
       plain.push(item);
     }
@@ -2776,6 +2786,11 @@ async function runAllSplits() {
 let _chunksCache = {};
 
 async function openChunks(pdfName) {
+  // For a nested split part (two levels of suffixes), pass the exact filename so the backend
+  // looks up only that specific document — NOT the root stem (which would aggregate everything).
+  // For a first-level split part, also pass exact filename — backend handles it via _resolve_catalog_document.
+  const lookupName = pdfName;
+
   const drawer  = document.getElementById('chunks-drawer');
   const overlay = document.getElementById('chunks-overlay');
   const title   = document.getElementById('chunks-drawer-title');
@@ -2792,16 +2807,30 @@ async function openChunks(pdfName) {
   overlay.classList.add('visible');
   document.body.style.overflow = 'hidden';
 
-  if (_chunksCache[pdfName]) {
-    renderChunks(pdfName, _chunksCache[pdfName]);
+  if (_chunksCache[lookupName]) {
+    renderChunks(pdfName, _chunksCache[lookupName]);
     return;
   }
 
   try {
-    const res  = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(pdfName)}`);
+    const res  = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupName)}`);
     const data = await res.json();
-    if (data.error) { body.innerHTML = `<p style="color:var(--orange)">${data.error}</p>`; return; }
-    _chunksCache[pdfName] = data.chunks;
+    if (data.error) {
+      // If exact lookup failed (e.g. no direct doc), fall back to parent stem
+      const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+      if (splitRe.test(lookupName)) {
+        const parentStem = lookupName.replace(splitRe, '') + '.pdf';
+        const res2 = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(parentStem)}`);
+        const data2 = await res2.json();
+        if (!data2.error) {
+          _chunksCache[lookupName] = data2.chunks;
+          renderChunks(pdfName, data2.chunks);
+          return;
+        }
+      }
+      body.innerHTML = `<p style="color:var(--orange)">${data.error}</p>`; return;
+    }
+    _chunksCache[lookupName] = data.chunks;
     renderChunks(pdfName, data.chunks);
   } catch(e) {
     body.innerHTML = '<p style="color:var(--orange)"><i class="fa fa-exclamation-triangle"></i> Failed to load chunks.</p>';
@@ -2826,7 +2855,7 @@ function renderChunks(pdfName, chunks) {
   ).join('');
 
   // Build content panes
-  // Use the actual pdfName (split part or full) for View PDF — show only that file's pages
+  // Use the exact pdfName for View PDF — backend resolves it correctly
   const viewPdfName = pdfName;
 
   body.innerHTML = chunks.map((c, i) => `
@@ -3545,7 +3574,7 @@ async function loadFamilyPanel(force = false) {
       let splitPart = null;
       if (pdfName) {
         const stem = pdfName.replace(/\.pdf$/i, '');
-        splitPart = _pdfDetails.find(d => splitRe.test(d.name) && d.name.replace(splitRe, '') === stem);
+        splitPart = _pdfDetails.find(d => splitRe.test(d.name) && _rootStem(d.name) === stem);
       }
       if (splitPart && splitPart.chunks_count > 0) {
         pdfName = splitPart.name;
