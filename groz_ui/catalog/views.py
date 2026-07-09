@@ -1099,7 +1099,7 @@ def approve_pdf(request):
                     document=doc,
                     index_status=DocumentChunk.IndexStatus.INDEXED
                 ).count()
-                families_count = ProductFamily.objects.filter(document=doc).count()
+                families_count = ProductFamily.objects.filter(document=doc, review_status=ProductFamily.ReviewStatus.APPROVED).count()
                 if indexed_count > 0:
                     detected_stage = 'indexed'
                 elif families_count > 0:
@@ -1397,14 +1397,14 @@ def catalog_stats(request):
                 # Pick highest stage between session and DB
                 _candidates = [s for s in [_stage_from_progress, _stage_from_db] if s in STAGE_ORDER]
                 tracked_stage = max(_candidates, key=lambda s: STAGE_ORDER.index(s)) if _candidates else 'uploaded'
-                # Upgrade chunked → families if families exist in DB
+                # Upgrade chunked → families only if user has approved at least one family
                 if tracked_stage == 'chunked':
                     try:
                         from .models import CatalogDocument
                         _doc = CatalogDocument.objects.filter(
                             original_filename__in=[fname, _stem]
                         ).order_by('-version').first()
-                        if _doc and ProductFamily.objects.filter(document=_doc).exists():
+                        if _doc and ProductFamily.objects.filter(document=_doc, review_status=ProductFamily.ReviewStatus.APPROVED).exists():
                             tracked_stage = 'families'
                     except Exception:
                         pass

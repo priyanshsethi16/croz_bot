@@ -42,6 +42,7 @@ def index_dry_run(document: CatalogDocument) -> IndexDryRun:
         pending_embeddings=approved.filter(index_status__in=(
             DocumentChunk.IndexStatus.PENDING,
             DocumentChunk.IndexStatus.STALE,
+            DocumentChunk.IndexStatus.FAILED,
         )).count(),
         indexed_chunks=base.filter(index_status=DocumentChunk.IndexStatus.INDEXED).count(),
         review_blocked=blocked.count(),
@@ -190,7 +191,11 @@ def index_document(
             'document', 'family', 'family__normalized_category',
             'family__normalized_category__parent', 'variant'
         ).filter(document=document).filter(
-            index_status__in=(DocumentChunk.IndexStatus.PENDING, DocumentChunk.IndexStatus.STALE)
+            index_status__in=(
+                DocumentChunk.IndexStatus.PENDING,
+                DocumentChunk.IndexStatus.STALE,
+                DocumentChunk.IndexStatus.FAILED,
+            )
         )
     )
 

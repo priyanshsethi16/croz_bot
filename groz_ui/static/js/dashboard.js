@@ -1323,7 +1323,18 @@ async function triggerEmbeddingInline(documentId, pdfName) {
     const count = audit.pending_embeddings;
     
     if (count === 0) {
-      showToast('All chunks are already indexed.', 'info');
+      if (audit.indexed_chunks > 0 && audit.failed_chunks === 0) {
+        showToast('All chunks are already indexed.', 'info');
+        const row = document.querySelector(`#pdf-selector-table-body tr[data-pdf="${pdfName}"]`);
+        const btn = row ? row.querySelector('.embed-btn') : null;
+        if (btn && !btn.disabled) {
+          btn.disabled = true;
+          btn.style.cssText = 'background:#22c55e;color:#fff;opacity:1;cursor:not-allowed';
+          btn.innerHTML = '<i class="fa fa-check-circle"></i> Embedded';
+        }
+      } else {
+        showToast('No chunks available to embed. Try re-running the pipeline.', 'error');
+      }
       return;
     }
     
@@ -1413,7 +1424,11 @@ async function triggerGroupEmbedding(stem, docIds, btnEl) {
     try {
       const auditRes = await fetch(`/admin-panel/api/v2/documents/${docId}/index-audit/`);
       const audit = await auditRes.json();
-      if (!auditRes.ok || audit.error || audit.pending_embeddings === 0) continue;
+      if (!auditRes.ok || audit.error) { failed++; continue; }
+      if (audit.pending_embeddings === 0) continue;  // already fully indexed
+      if (audit.review_blocked > 0) {
+        // Force-index anyway — review_blocked is informational in this pipeline
+      }
 
       const res = await fetch(`/admin-panel/api/v2/documents/${docId}/index/`, {
         method: 'POST',
