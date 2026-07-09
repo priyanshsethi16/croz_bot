@@ -79,10 +79,14 @@ def chat_home(request):
     
     for family in product_families:
         prod_name = family['product_name'].strip()
-        if not prod_name or prod_name in seen_names:
+        if not prod_name:
             continue
-        
-        seen_names.add(prod_name)
+        # Normalize: lowercase, strip punctuation/spaces for dedup
+        import re
+        norm = re.sub(r'[^a-z0-9]', '', prod_name.lower())
+        if norm in seen_names:
+            continue
+        seen_names.add(norm)
         
         icon = 'fa-tools'
         search_text = (prod_name + ' ' + (family['raw_category'] or '')).lower()
@@ -122,8 +126,9 @@ def chat_query(request):
 
         memory_turn = load_turn(request.session, PUBLIC_CHAT_MEMORY_KEY)
         runtime = get_runtime_config()
-        if not runtime.openai_api_key:
-            return JsonResponse({'error': 'Search is not configured. Ask an admin to add the OpenAI key.'}, status=503)
+        if not runtime.embedding_api_key:
+            provider_label = 'Gemini' if runtime.embedding_provider == 'gemini' else 'OpenAI'
+            return JsonResponse({'error': f'Search is not configured. Ask an admin to add the {provider_label} key.'}, status=503)
         if not runtime.chat_api_key:
             return JsonResponse({'error': 'Chat model is not configured. Ask an admin to add its API key.'}, status=503)
 
