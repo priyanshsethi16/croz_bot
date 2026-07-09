@@ -262,25 +262,30 @@
                   <th>Products</th>
                   <th>Status</th>
                   <th>Actions</th>
-                </tr>
+                  </tr>
               </thead>
               <tbody>
               {% for item in stats.processed %}
-                <tr>
+                <tr style="cursor:pointer" onclick="selectPdfFromOverview('{{ item.name }}')">
                   <td>
                     <div class="pdf-name-cell">
                       <i class="fa fa-file-pdf"></i>
-                      <span class="pname">{{ item.name }}</span>
+                      <span class="pname" style="cursor:pointer" onclick="event.stopPropagation();openUploadPreview('{{ item.name }}')">{{ item.name }}</span>
                     </div>
                   </td>
                   <td><span class="badge badge-blue">{{ item.chunks }}</span></td>
-                  <td><span class="badge badge-green">{{ item.products }}</span></td>
+                  <td><span class="badge {% if item.products > 0 %}badge-green{% else %}badge-grey{% endif %}">{{ item.products|default:0 }}</span></td>
                   <td><span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span></td>
-                  <td>
+                  <td onclick="event.stopPropagation()">
                     <div class="table-actions">
                       <button class="btn btn-sm btn-secondary" onclick="openChunks('{{ item.name }}')">
                         <i class="fa fa-layer-group"></i> Chunks
                       </button>
+                      {% if is_admin and item.chunks > 0 %}
+                      <button class="btn btn-sm btn-secondary" onclick="openFamilies('{{ item.name }}')">
+                        <i class="fa fa-sitemap"></i> Families
+                      </button>
+                      {% endif %}
                       {% if is_admin %}
                       <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
                         <i class="fa fa-trash"></i>
@@ -298,8 +303,8 @@
                       <span class="pname">{{ item.name }}</span>
                     </div>
                   </td>
-                  <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">—</span></td>
-                  <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">—</span></td>
+                  <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
+                  <td><span class="badge" style="background:#f1f5f9;color:#94a3b8">&mdash;</span></td>
                   <td>
                     {% if item.status == 'Processing' %}
                       <span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>
@@ -312,7 +317,7 @@
                   <td>
                     {% if is_admin %}
                     <div class="table-actions">
-                      <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">
+                      <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('{{ item.name }}',this)">
                         <i class="fa fa-layer-group"></i> Create Chunks
                       </button>
                       <button class="btn btn-sm btn-danger" onclick="deletePdf('{{ item.name }}')">
@@ -605,7 +610,7 @@
                   <th>Products</th>
                   <th>Status</th>
                   <th>Actions</th>
-                </tr>
+                  </tr>
               </thead>
               <tbody id="pdf-selector-table-body">
                 <tr>
@@ -680,7 +685,7 @@
                 <table class="family-review-table">
                   <thead>
                     <tr>
-                      <th style="width: 44px;"></th>
+                      <th></th>
                       <th style="width: 90px;">CHUNK</th>
                       <th style="width: 240px;">PRODUCT</th>
                       <th style="width: 190px;">FAMILY</th>

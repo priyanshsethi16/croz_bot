@@ -1005,8 +1005,11 @@ def approve_pdf(request):
                             document=doc, index_status=DocumentChunk.IndexStatus.INDEXED
                         ).count()
                         chunks_count = DocumentChunk.objects.filter(document=doc).count()
+                        families_count = ProductFamily.objects.filter(document=doc).count()
                         if indexed_count > 0:
                             part_stages.append('indexed')
+                        elif families_count > 0:
+                            part_stages.append('families')
                         elif chunks_count > 0:
                             part_stages.append('chunked')
                         else:
@@ -1030,8 +1033,11 @@ def approve_pdf(request):
                     document=doc,
                     index_status=DocumentChunk.IndexStatus.INDEXED
                 ).count()
+                families_count = ProductFamily.objects.filter(document=doc).count()
                 if indexed_count > 0:
                     detected_stage = 'indexed'
+                elif families_count > 0:
+                    detected_stage = 'families'
                 elif chunks_count > 0:
                     detected_stage = 'chunked'
         except Exception:
@@ -1325,6 +1331,17 @@ def catalog_stats(request):
                 # Pick highest stage between session and DB
                 _candidates = [s for s in [_stage_from_progress, _stage_from_db] if s in STAGE_ORDER]
                 tracked_stage = max(_candidates, key=lambda s: STAGE_ORDER.index(s)) if _candidates else 'uploaded'
+                # Upgrade chunked → families if families exist in DB
+                if tracked_stage == 'chunked':
+                    try:
+                        from .models import CatalogDocument
+                        _doc = CatalogDocument.objects.filter(
+                            original_filename__in=[fname, _stem]
+                        ).order_by('-version').first()
+                        if _doc and ProductFamily.objects.filter(document=_doc).exists():
+                            tracked_stage = 'families'
+                    except Exception:
+                        pass
             break
     if not tracked_stage or tracked_stage not in STAGE_ORDER:
         tracked_stage = 'uploaded'

@@ -432,7 +432,23 @@
 .pdf-name-cell { display: flex; align-items: center; gap: 8px; }
 .pdf-name-cell i { color: var(--orange); }
 .pdf-name-cell .pname { font-weight: 600; }
-.table-actions { display: flex; gap: 6px; }
+.table-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+/* ── Chunk panel table responsive ── */
+@media (max-width: 860px) {
+  .catalog-table { font-size: 12px; min-width: 480px; }
+  .catalog-table th, .catalog-table td { padding: 9px 10px; }
+  .table-actions .btn { font-size: 11px; padding: 4px 8px; }
+  .split-count-badge { font-size: 10px; padding: 1px 6px; }
+}
+@media (max-width: 640px) {
+  .catalog-table th, .catalog-table td { padding: 8px 8px; }
+  .table-actions { gap: 4px; }
+  .table-actions .btn { font-size: 11px; padding: 4px 7px; }
+  .table-actions .btn i + * { display: none; } /* icon-only on very small screens */
+  .pdf-name-cell .pname { font-size: 12px; }
+  .pdf-child-row td:first-child { padding-left: 20px; }
+}
 
 /* ── Admin chat ── */
 /* ── Admin chat with category sidebar ── */

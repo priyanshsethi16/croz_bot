@@ -798,7 +798,7 @@ async function loadPdfList() {
 
     const pdfDetails = _pdfDetails.filter(item => item.status === 'Ready');
     if (!pdfDetails.length) {
-      tbody.innerHTML = `<tr><td colspan="4" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">Upload one →</button></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">Upload one →</button></td></tr>`;
       return;
     }
 
@@ -815,7 +815,7 @@ async function loadPdfList() {
         else if (item.status === 'Processing') sb = `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
         else if (item.status === 'Failed') sb = `<span class="badge badge-red"><i class="fa fa-exclamation-circle"></i> Failed</span>`;
         else sb = `<span class="badge badge-grey"><i class="fa fa-clock"></i> Not chunked</span>`;
-        tr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:500;font-size:13px">${escHtml(item.name)}</span></div></td><td><span class="badge badge-blue">${item.chunks_count}</span></td><td>${sb}</td><td>${_buildChunkRowActions(item)}</td>`;
+        tr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:500;font-size:13px">${escHtml(item.name)}</span></div></td><td><span class="badge badge-blue">${item.chunks_count}</span></td><td><span class="badge ${(item.product_families_count||0)>0?'badge-green':'badge-grey'}">${item.product_families_count||0}</span></td><td>${sb}</td><td>${_buildChunkRowActions(item)}</td>`;
         tbody.appendChild(tr);
 
       } else {
@@ -857,7 +857,7 @@ async function loadPdfList() {
           if (partNames.length) previewParentGroup(stem, partNames);
         });
         const totalProducts = children.reduce((s, c) => s + (c.product_families_count || 0), 0);
-        parentTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:6px"><button class="pdf-group-expand-btn" id="ckg-btn-${escHtml(stem)}" onclick="event.stopPropagation();_toggleChunkGroup('${escHtml(stem)}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:600;font-size:13px">${escHtml(stem)}</span><span class="split-count-badge">${children.length} parts</span></div></td><td><span class="badge badge-blue">${totalChunks}</span></td><td><span class="badge ${totalProducts>0?'badge-green':'badge-grey'}">${totalProducts}</span></td><td>${psb}</td><td>${pa}</td>`;
+        parentTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:6px"><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:600;font-size:13px">${escHtml(stem)}</span><span class="split-count-badge">${children.length} parts</span></div></td><td><span class="badge badge-blue">${totalChunks}</span></td><td><span class="badge ${totalProducts>0?'badge-green':'badge-grey'}">${totalProducts}</span></td><td>${psb}</td><td><div class="table-actions">${pa}<button class="pdf-group-expand-btn" id="ckg-btn-${escHtml(stem)}" onclick="event.stopPropagation();_toggleChunkGroup('${escHtml(stem)}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button></div></td>`;
         tbody.appendChild(parentTr);
 
         children.forEach(child => {
@@ -1921,9 +1921,6 @@ function updateCatalogTable(processed, unprocessed) {
         <tr class="pdf-group-parent" style="cursor:pointer" onclick="selectPdfFromOverview('${safeStem}')">
           <td>
             <div class="pdf-name-cell" style="gap:6px">
-              <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts">
-                <i class="fa fa-chevron-right"></i>
-              </button>
               <i class="fa fa-file-pdf"></i>
               <span class="pname" style="cursor:pointer;color:var(--orange);text-decoration:underline" onclick="event.stopPropagation();openUploadPreview('${safeStem}.pdf')">${safeStem}</span>
               <span class="split-count-badge">${children.length} parts</span>
@@ -1938,6 +1935,7 @@ function updateCatalogTable(processed, unprocessed) {
                 <i class="fa fa-layer-group"></i> Chunks</button>
               ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(stem)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
               ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>` : ''}
+              <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button>
             </div>
           </td>
         </tr>`;
@@ -2005,9 +2003,6 @@ function updateCatalogTable(processed, unprocessed) {
         <tr class="pdf-group-parent" style="opacity:0.85">
           <td>
             <div class="pdf-name-cell" style="gap:6px">
-              <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts">
-                <i class="fa fa-chevron-right"></i>
-              </button>
               <i class="fa fa-file-pdf" style="color:#aaa"></i>
               <span class="pname">${safeStem}</span>
               <span class="split-count-badge">${children.length} parts</span>
@@ -2019,6 +2014,7 @@ function updateCatalogTable(processed, unprocessed) {
           <td>${IS_ADMIN ? `<div class="table-actions">
             <button class="btn btn-sm btn-primary" onclick="showPanel('chunk')"><i class="fa fa-layer-group"></i> Create Chunks</button>
             <button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>
+            <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button>
           </div>` : ''}</td>
         </tr>`;
       children.forEach(child => {
@@ -3929,15 +3925,11 @@ async function loadIndexPanel() {
     return;
   }
 
-  // 3. Resolve the PDF name to use for chunks lookup:
-  //    If selectedPdf is a split part, use the parent stem so we aggregate all parts' chunks.
+  // 3. Use the exact selectedPdf for chunks lookup (show only that split part's chunks).
+  //    Fall back to parent stem only if the exact lookup fails.
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-  const chunksPdf = splitRe.test(selectedPdf)
-    ? selectedPdf.replace(splitRe, '') + '.pdf'
-    : selectedPdf;
-  const displayName = splitRe.test(selectedPdf)
-    ? selectedPdf.replace(splitRe, '')
-    : selectedPdf;
+  const chunksPdf = selectedPdf;
+  const displayName = selectedPdf;
 
   pdfTitleEl.textContent = displayName;
   updateChatContextDisplay();
@@ -3952,8 +3944,14 @@ async function loadIndexPanel() {
   `;
 
   try {
-    const res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}&index=1`);
-    const data = await res.json();
+    let res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}&index=1`);
+    let data = await res.json();
+    // If exact split part lookup fails, fall back to parent stem
+    if (data.error && splitRe.test(chunksPdf)) {
+      const parentPdf = chunksPdf.replace(splitRe, '') + '.pdf';
+      res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(parentPdf)}&index=1`);
+      data = await res.json();
+    }
     if (data.error) {
       tableBody.innerHTML = `
         <tr>
