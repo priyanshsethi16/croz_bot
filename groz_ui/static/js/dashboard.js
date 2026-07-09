@@ -203,7 +203,47 @@ async function previewParentGroup(parentStem, parts) {
     }
   } catch(e) {}
 
-  renderSplitParts(splits);
+  renderSplitParts(splits, true);
+
+  // Load the full parent PDF pages in the viewer
+  const strip  = document.getElementById('pdf-thumb-strip');
+  const viewer = document.getElementById('pdf-page-viewer');
+  const countEl = document.getElementById('preview-page-count');
+  const subEl   = document.getElementById('preview-sub');
+  strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
+  viewer.innerHTML = '';
+  try {
+    const parentPdfName = parentStem + '.pdf';
+    // Try parent PDF first; if it doesn't exist (was re-split), use first child part
+    let previewUrl = '/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(parentPdfName);
+    let res  = await fetch(previewUrl);
+    let data = await res.json();
+    if (data.error && splits.length > 0) {
+      // Parent PDF not on disk — load first child part instead
+      const firstPart = splits[0];
+      previewUrl = `/admin-panel/api/pdf-preview/?stem=${encodeURIComponent(parentStem)}&part=${encodeURIComponent(firstPart.filename)}`;
+      res  = await fetch(previewUrl);
+      data = await res.json();
+    }
+    if (!data.error) {
+      countEl.textContent = `${data.total} pages`;
+      subEl.textContent   = `${parts.length} split parts · ${data.total} pages total`;
+      window._previewPages    = data.pages;
+      window._previewFilename = parentStem + '.pdf';
+      window._previewTotal    = data.total;
+      window._previewLoaded   = data.pages.length;
+      strip.innerHTML = data.pages.map((p, i) => `
+        <div class="pdf-thumb-item${i === 0 ? ' active' : ''}" onclick="selectPreviewPage(${i})" id="thumb-${i}">
+          <img src="${p.thumb}" alt="Page ${p.num}" loading="lazy">
+          <span>${p.num}</span>
+        </div>`).join('');
+      if (data.pages.length) renderContinuousPreview(data.pages);
+    } else {
+      strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Could not load parent PDF preview.</div>';
+    }
+  } catch(e) {
+    strip.innerHTML = '<div class="pdf-preview-loading"><i class="fa fa-exclamation-triangle"></i> Failed to load preview.</div>';
+  }
 }
 
 async function loadExistingUploads() {
@@ -245,6 +285,13 @@ async function loadExistingUploads() {
       const group = document.createElement('div');
       group.className = 'file-group';
 
+      // Compute parent status from children chunk counts
+      const childDetails = parts.map(p => _pdfDetails.find(d => d.name === p));
+      const anyChunked = childDetails.some(d => d && d.chunks_count > 0);
+      const allChunked = childDetails.length > 0 && childDetails.every(d => d && d.chunks_count > 0);
+      const parentStatusCls = allChunked ? 'success' : anyChunked ? 'partial' : 'success';
+      const parentStatusText = allChunked ? '✓ Chunked' : anyChunked ? `✓ ${childDetails.filter(d => d && d.chunks_count > 0).length}/${parts.length} Chunked` : '✓ Uploaded';
+
       // Parent row — same structure as .file-item
       const header = document.createElement('div');
       header.className = 'file-item';
@@ -254,7 +301,7 @@ async function loadExistingUploads() {
           <div class="fname">${escHtml(parentStem)}</div>
           <div class="fsize">${parts.length} split part${parts.length !== 1 ? 's' : ''}</div>
         </div>
-        <span class="fstatus success">✓ Uploaded</span>
+        <span class="fstatus ${parentStatusCls}">${parentStatusText}</span>
         <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(parentStem + '.pdf')}')" title="Preview pages">
           <i class="fa fa-eye"></i> Preview
         </button>
@@ -276,12 +323,16 @@ async function loadExistingUploads() {
       children.className = 'file-group-children';
       children.style.display = 'none';
       parts.forEach(partName => {
+        const detail = _pdfDetails.find(d => d.name === partName);
+        const isChunked = detail && detail.chunks_count > 0;
+        const childStatusCls = isChunked ? 'success' : 'success';
+        const childStatusText = isChunked ? '✓ Chunked' : '✓ Uploaded';
         const child = document.createElement('div');
         child.className = 'file-item';
         child.innerHTML = `
           <div class="file-item-icon"><i class="fa fa-file-pdf"></i></div>
           <div class="file-item-info"><div class="fname">${escHtml(partName)}</div></div>
-          <span class="fstatus success">✓ Uploaded</span>
+          <span class="fstatus ${childStatusCls}">${childStatusText}</span>
           <button class="btn btn-sm btn-secondary file-preview-btn" onclick="loadPdfPreview('${escHtml(partName)}')" title="Preview pages">
             <i class="fa fa-eye"></i> Preview
           </button>
@@ -504,6 +555,22 @@ function formatBytes(b) {
 
 // ── PDF Page Preview ─────────────────────────────────────────────────────────────
 async function loadPdfPreview(filename) {
+  // If this is a parent PDF with existing split parts, show the split parts list
+  if (!_pdfDetails.length) {
+    try {
+      const r = await fetch('/admin-panel/api/pdfs/');
+      const d = await r.json();
+      _pdfDetails = d.pdf_details || [];
+    } catch(e) {}
+  }
+  const stem = filename.replace(/\.pdf$/i, '');
+  const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  const splitChildren = _pdfDetails.filter(d => splitRe.test(d.name) && d.name.replace(splitRe, '') === stem);
+  if (splitChildren.length > 0) {
+    await previewParentGroup(stem, splitChildren.map(d => d.name));
+    return;
+  }
+
   const section = document.getElementById('pdf-preview-section');
   const strip   = document.getElementById('pdf-thumb-strip');
   const viewer  = document.getElementById('pdf-page-viewer');
@@ -768,7 +835,7 @@ function _buildChunkRowActions(item) {
   if (IS_ADMIN && item.chunks_count > 0 && item.document_id) {
     a += `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})' title="Families"><i class="fa fa-sitemap"></i> Families</button>`;
   }
-  if (item.status === 'Ready') {
+  if (item.status === 'Ready' || item.chunks_count > 0) {
     if (item.has_embeddings) {
       a += `<button class="btn btn-sm embed-btn" disabled style="background:#22c55e;color:#fff;opacity:1;cursor:not-allowed"><i class="fa fa-check-circle"></i> Embedded</button>`;
     } else if (item.document_id) {
@@ -811,10 +878,9 @@ async function loadPdfList() {
         if (selectedPdf === item.name) tr.classList.add('selected');
         tr.addEventListener('click', (e) => { if (e.target.closest('button,a,i')) return; selectPdfRow(tr, item.name); });
         let sb = '';
-        if (item.status === 'Ready') sb = `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`;
-        else if (item.status === 'Processing') sb = `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
-        else if (item.status === 'Failed') sb = `<span class="badge badge-red"><i class="fa fa-exclamation-circle"></i> Failed</span>`;
-        else sb = `<span class="badge badge-grey"><i class="fa fa-clock"></i> Not chunked</span>`;
+        if (item.status === 'Processing') sb = `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
+        else if (item.has_embeddings) sb = `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`;
+        else sb = `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
         tr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#ef4444;font-size:16px"></i><span class="pname" style="font-weight:500;font-size:13px">${escHtml(item.name)}</span></div></td><td><span class="badge badge-blue">${item.chunks_count}</span></td><td><span class="badge ${(item.product_families_count||0)>0?'badge-green':'badge-grey'}">${item.product_families_count||0}</span></td><td>${sb}</td><td>${_buildChunkRowActions(item)}</td>`;
         tbody.appendChild(tr);
 
@@ -823,9 +889,10 @@ async function loadPdfList() {
         const totalChunks = children.reduce((s, c) => s + (c.chunks_count || 0), 0);
         const anyChunks = children.some(c => c.chunks_count > 0);
         const anyProcessing = children.some(c => c.status === 'Processing');
+        const allEmbeddedForStatus = children.length > 0 && children.every(c => c.has_embeddings === true);
         const psb = anyProcessing
           ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
-          : anyChunks
+          : allEmbeddedForStatus
           ? `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`
           : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
         const allEmbedded = anyChunks && children.filter(c => c.chunks_count > 0).every(c => c.has_embeddings === true);
@@ -866,8 +933,8 @@ async function loadPdfList() {
           if (selectedPdf === child.name) childTr.classList.add('selected');
           childTr.addEventListener('click', (e) => { if (e.target.closest('button,a,i')) return; selectPdfRow(childTr, child.name); });
           let csb = '';
-          if (child.status === 'Ready') csb = `<span class="badge badge-green" style="font-size:10px"><i class="fa fa-check-circle"></i> Ready</span>`;
-          else if (child.status === 'Processing') csb = `<span class="badge badge-yellow" style="font-size:10px"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
+          if (child.status === 'Processing') csb = `<span class="badge badge-yellow" style="font-size:10px"><i class="fa fa-spinner fa-spin"></i> Processing</span>`;
+          else if (child.has_embeddings) csb = `<span class="badge badge-green" style="font-size:10px"><i class="fa fa-check-circle"></i> Ready</span>`;
           else csb = `<span class="badge badge-grey" style="font-size:10px"><i class="fa fa-clock"></i> Pending</span>`;
           childTr.innerHTML = `<td><div class="pdf-name-cell" style="display:flex;align-items:center;gap:8px"><i class="fa fa-file-pdf" style="color:#f97316;font-size:13px"></i><span style="font-size:12px;color:#555;font-weight:500">${escHtml(child.name)}</span></div></td><td><span class="badge badge-blue" style="font-size:10px">${child.chunks_count}</span></td><td><span class="badge ${(child.product_families_count||0)>0?'badge-green':'badge-grey'} " style="font-size:10px">${child.product_families_count||0}</span></td><td>${csb}</td><td>${_buildChunkRowActions(child)}</td>`;
           tbody.appendChild(childTr);
@@ -1959,9 +2026,7 @@ function updateCatalogTable(processed, unprocessed) {
                 ${childReady ? `
                   <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Chunks</button>
                   ${IS_ADMIN && child.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(child.name)})' style="font-size:11px;padding:5px 10px"><i class="fa fa-sitemap"></i> Families</button>` : ''}
-                ` : `
-                  ${IS_ADMIN ? `<button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>` : ''}
-                `}
+                ` : ''}
                 ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i></button>` : ''}
               </div>
             </td>
@@ -2605,7 +2670,7 @@ async function splitPdf() {
   finally { btn.disabled = false; btn.innerHTML = '<i class="fa fa-cut"></i> Split PDF'; }
 }
 
-function renderSplitParts(parts) {
+function renderSplitParts(parts, skipAutoPreview = false) {
   const wrap  = document.getElementById('split-parts-wrap');
   const list  = document.getElementById('split-parts-list');
   const title = document.getElementById('split-parts-title');
@@ -2639,7 +2704,7 @@ function renderSplitParts(parts) {
       ${runBtn}
     </div>`;
   }).join('');
-  if (parts.length) loadSplitPartPreview(0);
+  if (parts.length && !skipAutoPreview) loadSplitPartPreview(0);
 }
 
 async function runSingleSplit(idx, options = {}) {
@@ -3971,9 +4036,10 @@ async function loadIndexPanel() {
     } else {
       _cachedIndexChunks = data.chunks || [];
       _indexSelectedDocId = data.document_id;
-      renderIndexChunks(_cachedIndexChunks);
+      const embeddedChunks = _cachedIndexChunks.filter(c => c.status === 'Embedded');
+      renderIndexChunks(embeddedChunks);
       // Show approve button immediately if there are embedded chunks (no query required)
-      if (_cachedIndexChunks.some(c => c.status === 'Embedded')) {
+      if (embeddedChunks.some(c => c.status === 'Embedded')) {
         showMarkAsTestedButton();
       }
     }
@@ -4049,11 +4115,12 @@ function handleIndexSearch() {
   const q = searchInput.value.toLowerCase().trim();
   
   if (!q) {
-    renderIndexChunks(_cachedIndexChunks);
+    renderIndexChunks(_cachedIndexChunks.filter(c => c.status === 'Embedded'));
     return;
   }
 
   const filtered = _cachedIndexChunks.filter(c => {
+    if (c.status !== 'Embedded') return false;
     const chunkId = `C${String(c.ordinal || 0).padStart(3, '0')}`.toLowerCase();
     const prodName = (c.product_name || '').toLowerCase();
     const content = (c.content || '').toLowerCase();

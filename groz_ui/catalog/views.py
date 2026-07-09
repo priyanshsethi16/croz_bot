@@ -240,7 +240,7 @@ def _get_catalog_stats():
 
     # DB-only: processed documents with chunks in Postgres
     try:
-        from .models import CatalogDocument, DocumentChunk
+        from .models import CatalogDocument, DocumentChunk, ProductFamily
         import hashlib
         # Build checksum → disk file map for all effective PDFs
         disk_checksum_to_file: dict = {}
@@ -265,7 +265,7 @@ def _get_catalog_stats():
             processed.append({
                 'name': display,
                 'chunks': chunk_count,
-                'products': doc.product_families.count()
+                'products': doc.product_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
             })
     except Exception:
         pass
@@ -932,7 +932,7 @@ def list_pdfs(request):
     pdf_details = []
     import re
     try:
-        from .models import CatalogDocument, DocumentChunk, IngestionJob
+        from .models import CatalogDocument, DocumentChunk, IngestionJob, ProductFamily
         for pdf_name in all_pdfs:
             pdf_path = _resolve_pdf_path(pdf_name)
             stem = pdf_path.stem
@@ -960,7 +960,7 @@ def list_pdfs(request):
             if doc:
                 doc_id = str(doc.id)
                 chunks_count = DocumentChunk.objects.filter(document=doc).count()
-                product_families_count = doc.product_families.count()
+                product_families_count = doc.product_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
                 
                 # Check for running ingestion job
                 running_job = IngestionJob.objects.filter(
