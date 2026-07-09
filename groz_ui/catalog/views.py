@@ -160,6 +160,52 @@ def _resolve_catalog_document(pdf_name: str):
     return None
 
 
+def _resolve_split_docs_for_parent(pdf_stem: str):
+    """Find all CatalogDocuments for a parent PDF stem that has no direct DB record.
+
+    Handles two layouts:
+      1. splits/<pdf_stem>/<parts>.pdf          (standard single-level split)
+      2. splits/<pdf_stem>_p*/  sibling dirs    (Hand_Tool style: intermediate splits)
+    """
+    from .models import CatalogDocument
+    splits_root = PROJECT_ROOT / 'input' / 'splits'
+    if not splits_root.exists():
+        return []
+
+    # Layout 1: direct subdir named after the stem
+    direct_dir = splits_root / pdf_stem
+    if direct_dir.exists():
+        leaf_parts = [p for p in sorted(direct_dir.rglob('*.pdf'))
+                      if not (splits_root / p.stem).exists()]
+        if leaf_parts:
+            stems = [p.stem for p in leaf_parts]
+            docs = list(CatalogDocument.objects.filter(
+                original_filename__in=stems
+            ).order_by('original_filename'))
+            if docs:
+                return docs
+
+    # Layout 2: sibling dirs whose name starts with <pdf_stem>_ (e.g. Hand_Tool_..._p0051-0055)
+    sibling_dirs = sorted(
+        d for d in splits_root.iterdir()
+        if d.is_dir() and d.name.startswith(pdf_stem + '_')
+    )
+    if sibling_dirs:
+        all_leaf_stems = []
+        for sib in sibling_dirs:
+            leaves = [p for p in sorted(sib.rglob('*.pdf'))
+                      if not (splits_root / p.stem).exists()]
+            all_leaf_stems.extend(p.stem for p in leaves)
+        if all_leaf_stems:
+            docs = list(CatalogDocument.objects.filter(
+                original_filename__in=all_leaf_stems
+            ).order_by('original_filename'))
+            if docs:
+                return docs
+
+    return []
+
+
 def _chunk_excerpt(text: str, limit: int = 180) -> str:
     cleaned = ' '.join(str(text or '').split())
     if len(cleaned) <= limit:
@@ -851,7 +897,27 @@ def list_pdfs(request):
     
     # Combine filtered main PDFs and split PDFs
     all_pdfs = filtered_pdfs + split_pdfs
-    
+
+    # Also include intermediate split parts that have their own chunks in DB,
+    # even if their sub-parts also have chunks (both sets of chunks are valid).
+    disk_pdf_stems = {Path(p).stem for p in all_pdfs}
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        import re as _re2
+        _split_re = _re2.compile(r'_(custom_)?p\d{4}-\d{4}$', _re2.I)
+        for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED):
+            fn = doc.original_filename
+            if fn in disk_pdf_stems:
+                continue
+            if not _split_re.search(fn):
+                continue
+            if not DocumentChunk.objects.filter(document=doc).exists():
+                continue
+            all_pdfs.append(fn + '.pdf')
+            disk_pdf_stems.add(fn)
+    except Exception:
+        pass
+
     # Build set of stems that already have chunks (DB only)
     chunked = set()
     try:
@@ -1932,46 +1998,65 @@ def delete_embeddings_only(request):
     stem = Path(filename).stem
     sanitized_stem = re.sub(r'[^a-zA-Z0-9_\-]', '_', stem)[:60].strip('_') or 'catalog'
 
+    # Collect all stems to process: include split children at every nesting level
+    all_stems = [stem]
+    splits_root = PROJECT_ROOT / 'input' / 'splits'
+    splits_dir = splits_root / stem
+    if splits_dir.exists():
+        # Standard case: parent has its own subdir
+        all_stems.extend(p.stem for p in sorted(splits_dir.rglob('*.pdf')))
+        all_stems.extend(sub.name for sub in splits_dir.rglob('*') if sub.is_dir())
+    else:
+        # Flat case: split parts live as top-level dirs in splits_root named <stem>_p...
+        # e.g. Hand_Tool_Catalogue_low_res_with_cover_p0146-0150/
+        if splits_root.exists():
+            for part_dir in sorted(splits_root.iterdir()):
+                if part_dir.is_dir() and part_dir.name.startswith(stem + '_'):
+                    all_stems.append(part_dir.name)  # intermediate stem
+                    all_stems.extend(p.stem for p in sorted(part_dir.rglob('*.pdf')))
+
     try:
         from qdrant_client import models
         from rag_pipeline.providers import COLLECTION, build_qdrant_client
         client = build_qdrant_client()
         if client.collection_exists(COLLECTION):
-            for source_stem in [stem, sanitized_stem]:
-                try:
-                    client.delete(
-                        collection_name=COLLECTION,
-                        points_selector=models.FilterSelector(
-                            filter=models.Filter(
-                                must=[models.FieldCondition(
-                                    key='metadata.source_pdf',
-                                    match=models.MatchValue(value=source_stem),
-                                )]
-                            )
-                        ),
-                    )
-                except Exception:
-                    pass
+            for s in all_stems:
+                san = re.sub(r'[^a-zA-Z0-9_\-]', '_', s)[:60].strip('_') or 'catalog'
+                for source_stem in {s, san}:
+                    try:
+                        client.delete(
+                            collection_name=COLLECTION,
+                            points_selector=models.FilterSelector(
+                                filter=models.Filter(
+                                    must=[models.FieldCondition(
+                                        key='metadata.source_pdf',
+                                        match=models.MatchValue(value=source_stem),
+                                    )]
+                                )
+                            ),
+                        )
+                    except Exception:
+                        pass
     except Exception:
         pass
 
     try:
         from .models import CatalogDocument, DocumentChunk
-        for doc in CatalogDocument.objects.filter(original_filename__in=[filename, stem]):
-            DocumentChunk.objects.filter(document=doc).update(
-                index_status=DocumentChunk.IndexStatus.STALE
-            )
+        docs = CatalogDocument.objects.filter(original_filename__in=all_stems)
+        DocumentChunk.objects.filter(document__in=docs).update(
+            index_status=DocumentChunk.IndexStatus.PENDING
+        )
     except Exception as e:
         import logging
-        logging.warning(f'Error marking chunks stale for {filename}: {e}')
+        logging.warning(f'Error resetting chunk index status for {filename}: {e}')
 
-    # Downgrade stage from indexed/tested → chunked so progress bar reflects reality
+    # Downgrade stage from indexed/tested → chunked for parent and all children
     import json as _j
     from .models import ApiKey
-    STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
+    all_keys = list(dict.fromkeys(all_stems + [s + '.pdf' for s in all_stems]))
     try:
         _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
-        for key in [filename, stem]:
+        for key in all_keys:
             if _stage_map.get(key) in ('indexed', 'tested'):
                 _stage_map[key] = 'chunked'
         ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
@@ -1980,7 +2065,7 @@ def delete_embeddings_only(request):
 
     # Also downgrade session stage
     pdf_progress = request.session.get('pdf_progress', {})
-    for key in [filename, stem]:
+    for key in all_keys:
         if pdf_progress.get(key) in ('indexed', 'tested'):
             pdf_progress[key] = 'chunked'
     request.session['pdf_progress'] = pdf_progress
@@ -2247,31 +2332,28 @@ def list_product_families(request):
     from .models import DocumentChunk, ProductFamily, CatalogDocument
     import re
 
-    doc = _resolve_catalog_document(pdf_name)
-    if not doc:
-        import logging
-        logging.error(f"list_product_families: PDF not found for name '{pdf_name}'. Checked stems and splits.")
-        return JsonResponse({'error': f'PDF document not found for "{pdf_name}". Please ensure chunks have been created for this PDF.'}, status=404)
-
-    # Check if this is a parent stem with multiple split parts
     pdf_stem = Path(pdf_name).stem
     split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
-    docs_to_query = [doc]
-    
-    # If the resolved doc is a split part OR if pdf_stem looks like a parent, gather ALL split parts
-    if split_re.search(doc.original_filename) or not split_re.search(pdf_stem):
-        # Check for splits directory
-        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
-        if splits_dir.exists():
-            split_part_files = sorted(splits_dir.glob('*.pdf'))
-            if len(split_part_files) > 1:  # Multiple parts exist
-                # Find all documents for these split parts
-                split_stems = [p.stem for p in split_part_files]
-                docs_to_query = list(CatalogDocument.objects.filter(
-                    original_filename__in=split_stems
-                ).order_by('original_filename'))
-                if not docs_to_query:
-                    docs_to_query = [doc]  # Fallback to original
+
+    doc = _resolve_catalog_document(pdf_name)
+
+    # Build docs_to_query: for parent stems with no direct DB doc, resolve via split parts
+    docs_to_query = []
+    if not doc or (not split_re.search(pdf_stem)):
+        # Try both layout 1 (splits/<stem>/) and layout 2 (splits/<stem>_p*/ siblings)
+        split_docs = _resolve_split_docs_for_parent(pdf_stem)
+        if split_docs:
+            docs_to_query = split_docs
+
+    if not docs_to_query:
+        if not doc:
+            import logging
+            logging.error(f"list_product_families: PDF not found for name '{pdf_name}'. Checked stems and splits.")
+            return JsonResponse({'error': f'PDF document not found for "{pdf_name}". Please ensure chunks have been created for this PDF.'}, status=404)
+        docs_to_query = [doc]
+
+    if not doc:
+        doc = docs_to_query[0]
 
     # Aggregate chunks from all documents
     all_chunks = []

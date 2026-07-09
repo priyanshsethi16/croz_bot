@@ -127,7 +127,7 @@ async function loadSplitPartPreviewByName(partFilename, parentStem) {
 }
 
 async function previewParentGroup(parentStem, parts) {
-  selectedPdf = parts[0];
+  selectedPdf = parentStem;
   _splitStem  = parentStem;
 
   // Immediately switch progress bar to this PDF before any async calls
@@ -796,7 +796,7 @@ async function loadPdfList() {
     _pdfDetails = data.pdf_details || [];
     tbody.innerHTML = '';
 
-    const pdfDetails = _pdfDetails.filter(item => item.status === 'Ready');
+    const pdfDetails = _pdfDetails.filter(item => item.status === 'Ready' || item.chunks_count > 0);
     if (!pdfDetails.length) {
       tbody.innerHTML = `<tr><td colspan="5" style="color:var(--grey);font-size:13px;text-align:center;padding:24px 0">No PDFs uploaded yet. <button class="btn btn-sm btn-primary" onclick="showPanel('upload')">Upload one →</button></td></tr>`;
       return;
@@ -821,15 +821,14 @@ async function loadPdfList() {
       } else {
         const { stem, children } = row;
         const totalChunks = children.reduce((s, c) => s + (c.chunks_count || 0), 0);
-        const allReady = children.every(c => c.status === 'Ready');
-        const anyProcessing = children.some(c => c.status === 'Processing');
-        const psb = allReady
-          ? `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`
-          : anyProcessing
-          ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
-          : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
         const anyChunks = children.some(c => c.chunks_count > 0);
-        const allEmbedded = anyChunks && children.every(c => c.has_embeddings === true);
+        const anyProcessing = children.some(c => c.status === 'Processing');
+        const psb = anyProcessing
+          ? `<span class="badge badge-yellow"><i class="fa fa-spinner fa-spin"></i> Processing</span>`
+          : anyChunks
+          ? `<span class="badge badge-green"><i class="fa fa-check-circle"></i> Ready</span>`
+          : `<span class="badge badge-grey"><i class="fa fa-clock"></i> Pending</span>`;
+        const allEmbedded = anyChunks && children.filter(c => c.chunks_count > 0).every(c => c.has_embeddings === true);
         const childDocIds = children.map(c => c.document_id).filter(Boolean);
         let pa = '<div class="table-actions">';
         pa += `<button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(stem)}')" ${!anyChunks ? 'disabled' : ''}><i class="fa fa-layer-group"></i> Chunks</button>`;
@@ -1688,7 +1687,7 @@ async function deletePdf(filename) {
 }
 
 async function deleteEmbeddingsOnly(filename) {
-  if (!confirm(`Delete "${filename}" and all its associated data?`)) return;
+  if (!confirm(`Delete all embeddings for "${filename}"? Chunks and data will be kept.`)) return;
   try {
     const res  = await fetch('/admin-panel/api/delete-embeddings/', {
       method: 'POST',
@@ -3857,22 +3856,28 @@ async function loadIndexPanel() {
   const tableBody = document.getElementById('index-chunks-table-body');
   if (!pdfTitleEl || !tableBody) return;
 
-  // 1. If selectedPdf is not set, try to select the first PDF from PDF list
-  if (!selectedPdf || !_findPdfDetail(selectedPdf)?.chunks_count) {
-    try {
-      if (!_pdfDetails.length) {
-        const res = await fetch('/admin-panel/api/pdfs/');
-        const data = await res.json();
-        _pdfDetails = data.pdf_details || [];
-      }
-      const pdfs = _pdfDetails || [];
-      const picked = _findPdfDetail(selectedPdf) || _defaultChunkedPdf() || pdfs[0];
-      if (picked) {
-        selectedPdf = picked.name;
-        _highlightPdfRow(selectedPdf);
-      }
-    } catch (e) {
-      console.error('Failed to load PDF list in index panel', e);
+  // 1. Ensure _pdfDetails is loaded, then resolve selectedPdf
+  try {
+    if (!_pdfDetails.length) {
+      const res = await fetch('/admin-panel/api/pdfs/');
+      const data = await res.json();
+      _pdfDetails = data.pdf_details || [];
+    }
+  } catch (e) {
+    console.error('Failed to load PDF list in index panel', e);
+  }
+  const _splitPartRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+  function _isParentStem(name) {
+    if (!name || _splitPartRe.test(name)) return false;
+    const stem = name.replace(/\.pdf$/i, '');
+    return _pdfDetails.some(d => _splitPartRe.test(d.name) && d.name.replace(_splitPartRe, '') === stem);
+  }
+  if (!selectedPdf || (!_isParentStem(selectedPdf) && !_findPdfDetail(selectedPdf)?.chunks_count)) {
+    const pdfs = _pdfDetails || [];
+    const picked = _findPdfDetail(selectedPdf) || _defaultChunkedPdf() || pdfs[0];
+    if (picked) {
+      selectedPdf = picked.name;
+      _highlightPdfRow(selectedPdf);
     }
   }
   
