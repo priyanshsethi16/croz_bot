@@ -3086,23 +3086,55 @@ async function viewChunkPdf(pdfName) {
     const data = await res.json();
     
     if (data.error) {
-      // If parent PDF not found, try loading the first split part
+      // Parent PDF not on disk — load ALL split parts and concatenate pages
       const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
       if (!splitRe2.test(pdfName)) {
-        // Try fetching split parts list
         try {
           const pdfsRes = await fetch('/admin-panel/api/pdfs/');
           const pdfsData = await pdfsRes.json();
           const allPdfs = pdfsData.pdfs || [];
           const stem = pdfName.replace(/\.pdf$/i, '');
-          const firstPart = allPdfs.find(p => splitRe2.test(p) && p.replace(splitRe2, '') === stem);
-          if (firstPart) {
-            // Recurse with the first split part
-            await viewChunkPdf(firstPart);
-            // Update the name display to show parent
-            const nameEl = document.getElementById('floating-pdf-name');
-            if (nameEl) nameEl.textContent = pdfName;
-            return;
+          const parts = allPdfs.filter(p => splitRe2.test(p) && _rootStem(p) === stem).sort();
+          if (parts.length) {
+            strip.innerHTML = '<div style="padding:40px 10px;text-align:center;color:#888;font-size:13px;"><i class="fa fa-spinner fa-spin" style="font-size:24px;display:block;margin-bottom:10px;"></i>Loading all parts...</div>';
+            const allPages = [];
+            for (const part of parts) {
+              try {
+                const pRes = await fetch('/admin-panel/api/pdf-preview/?pdf=' + encodeURIComponent(part));
+                const pData = await pRes.json();
+                if (!pData.error) {
+                  const offset = allPages.length;
+                  pData.pages.forEach((pg, i) => allPages.push({ ...pg, num: offset + i + 1 }));
+                }
+              } catch(e3) {}
+            }
+            if (allPages.length) {
+              countEl.textContent = allPages.length + ' pages';
+              // Re-render thumbnails and viewer with all pages
+              strip.innerHTML = allPages.map((p, i) => `
+                <div class="floating-thumb" onclick="selectFloatingPage(${i})" id="floating-thumb-${i}" style="padding:10px 8px;cursor:pointer;border-bottom:1px solid #e8e8e8;display:flex;flex-direction:column;align-items:center;gap:5px;transition:background .15s;${i===0?'background:var(--orange-light);border-left:3px solid var(--orange);':''}">
+                  <img src="${p.thumb}" style="width:88px;height:auto;border:1px solid #ddd;border-radius:3px;box-shadow:0 1px 4px rgba(0,0,0,0.08);display:block;"/>
+                  <span style="font-size:11px;color:var(--grey);font-weight:600;">${p.num}</span>
+                </div>`).join('');
+              viewer.innerHTML = `
+                <div style="width:100%;display:flex;align-items:center;gap:6px;padding:8px 12px;background:#fff;border-bottom:1px solid #e5e5e5;flex-shrink:0;">
+                  <button onclick="adjustFloatingZoom(-25)" style="width:30px;height:30px;border:1.5px solid #e5e5e5;border-radius:6px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;"><i class="fa fa-minus"></i></button>
+                  <span id="floating-zoom-level" style="font-size:12px;font-weight:600;color:var(--grey);min-width:40px;text-align:center;">100%</span>
+                  <button onclick="adjustFloatingZoom(25)" style="width:30px;height:30px;border:1.5px solid #e5e5e5;border-radius:6px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;"><i class="fa fa-plus"></i></button>
+                  <button onclick="adjustFloatingZoom(0)" style="width:30px;height:30px;border:1.5px solid #e5e5e5;border-radius:6px;background:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;"><i class="fa fa-compress-arrows-alt"></i></button>
+                  <span style="font-size:11px;color:var(--grey);margin-left:6px;"><i class="fa fa-mouse"></i> Scroll</span>
+                  <span id="floating-current-page" style="font-size:12px;color:var(--grey);font-weight:600;margin-left:auto;">Page 1 of ${allPages.length}</span>
+                </div>
+                <div id="floating-viewer-scroll" style="flex:1;overflow:auto;padding:16px;box-sizing:border-box;scroll-behavior:smooth;">
+                  <div id="floating-page-stack" style="width:100%;margin:0 auto;display:flex;flex-direction:column;gap:18px;transition:width .2s;">
+                    ${allPages.map((p, i) => `<figure id="floating-page-${i}" style="width:100%;margin:0;display:flex;flex-direction:column;align-items:center;"><img src="${p.full}" style="width:100%;height:auto;display:block;border:1px solid #e5e5e5;border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,0.12);background:#fff;"/><figcaption style="margin-top:7px;color:#777;font-size:11px;font-weight:600;">Page ${p.num}</figcaption></figure>`).join('')}
+                  </div>
+                </div>`;
+              window._floatingPages = allPages;
+              window._floatingZoom = 100;
+              document.getElementById('floating-viewer-scroll')?.addEventListener('scroll', syncFloatingPage, { passive: true });
+              return;
+            }
           }
         } catch(e2) {}
       }
@@ -3370,12 +3402,84 @@ function renderFamilySelectionSummary() {
   summary.innerHTML = bits.join(' &middot; ');
 }
 
+const _familyPageState = { page: 1, pageSize: 50 };
+
+function toggleSelectAllFamilyChunks(checked) {
+  const chunks = _familyPanelState.chunks || [];
+  const q = (_familyPanelState.search || '').toLowerCase();
+  const visible = q ? chunks.filter(c => [
+    c.id, c.filename, c.product_name, c.family_name, c.family_code, c.family_status, c.excerpt
+  ].join(' ').toLowerCase().includes(q)) : chunks;
+  visible.forEach(c => {
+    if (checked) _familySelectedChunkIds.add(c.id);
+    else _familySelectedChunkIds.delete(c.id);
+  });
+  renderFamilyChunks();
+  _updateFamilySelectionUI();
+}
+
+function _updateFamilySelectionUI() {
+  const count = _familySelectedChunkIds.size;
+  const countEl = document.getElementById('family-selected-count');
+  if (countEl) countEl.textContent = count > 0 ? `${count} selected` : '';
+  const badge = document.getElementById('family-editor-chunk-count');
+  if (badge) badge.textContent = `${count} selected`;
+  // Sync select-all checkbox state
+  const chunks = _familyPanelState.chunks || [];
+  const q = (_familyPanelState.search || '').toLowerCase();
+  const visible = q ? chunks.filter(c => [
+    c.id, c.filename, c.product_name, c.family_name, c.family_code, c.family_status, c.excerpt
+  ].join(' ').toLowerCase().includes(q)) : chunks;
+  const allChecked = visible.length > 0 && visible.every(c => _familySelectedChunkIds.has(c.id));
+  const cb = document.getElementById('family-select-all');
+  if (cb) { cb.checked = allChecked; cb.indeterminate = !allChecked && count > 0; }
+}
+
+function _renderFamilyPagination(total, filtered) {
+  const el = document.getElementById('family-pagination');
+  if (!el) return;
+  const { page, pageSize } = _familyPageState;
+  const totalPages = Math.ceil(filtered / pageSize);
+  if (totalPages <= 1) { el.innerHTML = `<span>${filtered} of ${total} chunks</span>`; return; }
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, filtered);
+  el.innerHTML = `
+    <span>${start}–${end} of ${filtered} chunks${filtered < total ? ` (filtered from ${total})` : ''}</span>
+    <div style="display:flex;gap:4px;align-items:center">
+      <button class="btn btn-sm btn-secondary" onclick="_familyGoPage(1)" ${page===1?'disabled':''} title="First">&laquo;</button>
+      <button class="btn btn-sm btn-secondary" onclick="_familyGoPage(${page-1})" ${page===1?'disabled':''} title="Prev">&lsaquo;</button>
+      <span style="padding:0 8px;font-weight:600">${page} / ${totalPages}</span>
+      <button class="btn btn-sm btn-secondary" onclick="_familyGoPage(${page+1})" ${page===totalPages?'disabled':''} title="Next">&rsaquo;</button>
+      <button class="btn btn-sm btn-secondary" onclick="_familyGoPage(${totalPages})" ${page===totalPages?'disabled':''} title="Last">&raquo;</button>
+      <select onchange="_familySetPageSize(+this.value)" style="font-size:12px;padding:2px 4px;border:1px solid #e2e8f0;border-radius:4px">
+        ${[25,50,100,200].map(n => `<option value="${n}" ${n===pageSize?'selected':''}>${n} / page</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+function _familyGoPage(p) {
+  const chunks = _familyPanelState.chunks || [];
+  const q = (_familyPanelState.search || '').toLowerCase();
+  const filtered = q ? chunks.filter(c => [
+    c.id, c.filename, c.product_name, c.family_name, c.family_code, c.family_status, c.excerpt
+  ].join(' ').toLowerCase().includes(q)) : chunks;
+  const totalPages = Math.ceil(filtered.length / _familyPageState.pageSize) || 1;
+  _familyPageState.page = Math.max(1, Math.min(p, totalPages));
+  renderFamilyChunks();
+}
+
+function _familySetPageSize(n) {
+  _familyPageState.pageSize = n;
+  _familyPageState.page = 1;
+  renderFamilyChunks();
+}
+
 function renderFamilyChunks() {
   const body = document.getElementById('family-chunks-table-body');
   if (!body) return;
 
-  const chunks = _familyPanelState.chunks || [];
-  if (!chunks.length) {
+  const allChunks = _familyPanelState.chunks || [];
+  if (!allChunks.length) {
     body.innerHTML = `
       <tr>
         <td colspan="8" class="index-table-empty">
@@ -3384,8 +3488,18 @@ function renderFamilyChunks() {
         </td>
       </tr>
     `;
+    _renderFamilyPagination(0, 0);
     return;
   }
+
+  const q = (_familyPanelState.search || '').toLowerCase();
+  const filtered = q ? allChunks.filter(c => [
+    c.id, c.filename, c.product_name, c.family_name, c.family_code, c.family_status, c.excerpt, c.page_start, c.page_end
+  ].join(' ').toLowerCase().includes(q)) : allChunks;
+
+  const { page, pageSize } = _familyPageState;
+  const start = (page - 1) * pageSize;
+  const chunks = filtered.slice(start, start + pageSize);
 
   body.innerHTML = chunks.map(chunk => {
     const selected = _familySelectedChunkIds.has(chunk.id);
@@ -3441,6 +3555,8 @@ function renderFamilyChunks() {
     `;
   }).join('');
 
+  _renderFamilyPagination(allChunks.length, filtered.length);
+  _updateFamilySelectionUI();
   handleFamilySearch();
 }
 
@@ -3560,6 +3676,7 @@ function toggleFamilyChunkSelection(chunkId, checked) {
   } else {
     _familySelectedChunkIds.delete(normalizedId);
   }
+  _updateFamilySelectionUI();
   renderFamilyChunks();
   renderFamilySelectionSummary();
 }
@@ -3594,11 +3711,11 @@ function handleFamilySearch() {
   const input = document.getElementById('family-chunk-search');
   if (!input) return;
   const q = input.value.trim().toLowerCase();
-  _familyPanelState.search = q;
-  document.querySelectorAll('#family-chunks-table-body tr[data-chunk-id]').forEach(row => {
-    const haystack = row.dataset.search || '';
-    row.style.display = !q || haystack.includes(q) ? '' : 'none';
-  });
+  if (q !== _familyPanelState.search) {
+    _familyPanelState.search = q;
+    _familyPageState.page = 1;
+    renderFamilyChunks();
+  }
   renderFamilyCards();
 }
 

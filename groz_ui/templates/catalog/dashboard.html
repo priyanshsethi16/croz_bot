@@ -678,12 +678,19 @@
 
           <div class="family-review-layout">
             <section class="family-review-table-panel">
-              <div class="family-review-hint">
-                Select one or more chunk rows, then save them into a product family on the right.
+              <div class="family-review-hint" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <span>Select one or more chunk rows, then save them into a product family on the right.</span>
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#64748b">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500">
+                    <input type="checkbox" id="family-select-all" onchange="toggleSelectAllFamilyChunks(this.checked)" style="width:15px;height:15px;cursor:pointer">
+                    Select all
+                  </label>
+                  <span id="family-selected-count" style="color:#f97316;font-weight:600"></span>
+                </div>
               </div>
-              <div class="table-wrap">
+              <div class="table-wrap" style="max-height:520px;overflow-y:auto;">
                 <table class="family-review-table">
-                  <thead>
+                  <thead style="position:sticky;top:0;z-index:2;background:#fff">
                     <tr>
                       <th></th>
                       <th style="width: 90px;">CHUNK</th>
@@ -691,7 +698,6 @@
                       <th style="width: 190px;">FAMILY</th>
                       <th style="width: 90px;">PAGES</th>
                       <th>EXCERPT</th>
-
                       <th style="width: 110px; text-align: center;">STATUS</th>
                     </tr>
                   </thead>
@@ -705,6 +711,7 @@
                   </tbody>
                 </table>
               </div>
+              <div id="family-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:8px 4px 0;font-size:13px;color:#64748b"></div>
             </section>
 
             <aside class="family-editor-card">
