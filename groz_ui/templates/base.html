@@ -66,7 +66,25 @@
 
 <div id="toast-container"></div>
 
-<script src="{% static 'js/base.js' %}"></script>
+<div id="confirm-modal" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;width:min(420px,90vw);box-shadow:0 8px 40px rgba(0,0,0,.25);overflow:hidden;">
+    <div style="padding:24px 24px 8px;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+        <span style="width:40px;height:40px;border-radius:50%;background:#fee2e2;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+          <i class="fa fa-trash" style="color:#ef4444;font-size:16px;"></i>
+        </span>
+        <span id="confirm-modal-title" style="font-weight:700;font-size:16px;color:#111827;"></span>
+      </div>
+      <p id="confirm-modal-msg" style="color:#6b7280;font-size:14px;margin:0 0 0 52px;line-height:1.5;"></p>
+    </div>
+    <div style="display:flex;gap:10px;padding:16px 24px 20px;justify-content:flex-end;">
+      <button id="confirm-modal-cancel" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#374151;font-size:14px;font-weight:500;cursor:pointer;">Cancel</button>
+      <button id="confirm-modal-ok" style="padding:8px 20px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-size:14px;font-weight:500;cursor:pointer;">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script src="{% static 'js/base.js' %}?v=2"></script>
 {% block extra_scripts %}{% endblock %}
 </body>
 </html>

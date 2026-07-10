@@ -12,6 +12,24 @@ function showToast(msg, type='info', duration=4000) {
   setTimeout(()=>{t.style.animation='slideOut .3s ease forwards';setTimeout(()=>t.remove(),300);},duration);
 }
 
+(function(){
+  let _resolve = null;
+  function _settle(result) {
+    document.getElementById('confirm-modal').style.display = 'none';
+    if (_resolve) { const r = _resolve; _resolve = null; r(result); }
+  }
+  document.getElementById('confirm-modal-ok').addEventListener('click', function() { _settle(true); });
+  document.getElementById('confirm-modal-cancel').addEventListener('click', function() { _settle(false); });
+  window.showConfirm = function(title, msg) {
+    return new Promise(function(resolve) {
+      document.getElementById('confirm-modal-title').textContent = title;
+      document.getElementById('confirm-modal-msg').textContent = msg;
+      document.getElementById('confirm-modal').style.display = 'flex';
+      _resolve = resolve;
+    });
+  };
+})();
+
 function renderMarkdown(text) {
   if (!text) return '';
   text = String(text)

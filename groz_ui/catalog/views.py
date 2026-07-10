@@ -1351,13 +1351,8 @@ def catalog_stats(request):
             db_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
         except Exception:
             db_map = {}
-        # On fresh page load with empty session, restore from DB stage map
-        if db_map:
-            # Pick the entry with the highest stage as the tracked PDF
-            STAGE_ORDER_LOCAL = ['uploaded', 'chunked', 'families', 'indexed', 'tested']
-            best_fname = max(db_map, key=lambda k: STAGE_ORDER_LOCAL.index(db_map[k]) if db_map[k] in STAGE_ORDER_LOCAL else -1)
-            approved_pdfs = [best_fname]
-            pdf_progress = {best_fname: db_map[best_fname]}
+        # Fresh page load — do NOT restore tracked PDF. Progress bar stays blank
+        # until user explicitly clicks a PDF row.
 
     request.session['pdf_progress'] = pdf_progress
     request.session['approved_pdfs'] = approved_pdfs
@@ -1473,17 +1468,19 @@ def catalog_stats(request):
 
                     # Compute overall progress
                     if indexed_count == total_parts:
-                        tracked_stage = 'indexed'   # 75%
-                    elif indexed_count > 0 or chunked_count == total_parts:
-                        # Between 50% and 75%: all chunked + some indexed
-                        tracked_percent = 50 + (indexed_count / total_parts) * 25
-                        tracked_stage = 'chunked'
+                        tracked_stage = 'indexed'   # 80%
+                    elif indexed_count > 0:
+                        # Between 60% and 80%: some parts indexed
+                        tracked_percent = 60 + (indexed_count / total_parts) * 20
+                        tracked_stage = 'families'
+                    elif chunked_count == total_parts:
+                        tracked_stage = 'families'  # 60%
                     elif chunked_count > 0:
-                        # Between 25% and 50%: some chunked, none indexed
-                        tracked_percent = 25 + (chunked_count / total_parts) * 25
-                        tracked_stage = 'uploaded'
+                        # Between 40% and 60%: some chunked, none indexed
+                        tracked_percent = 40 + (chunked_count / total_parts) * 20
+                        tracked_stage = 'chunked'
                     else:
-                        tracked_stage = 'uploaded'  # 25%
+                        tracked_stage = 'uploaded'  # 20%
 
                     # 'tested' cannot be inferred from chunk data — it requires explicit
                     # user approval. If DB stage map records 'tested' for the parent stem

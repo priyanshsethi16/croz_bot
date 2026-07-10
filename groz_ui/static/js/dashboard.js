@@ -521,7 +521,7 @@ function setFileStatus(item, cls, text) {
 }
 
 async function deleteUploadedPdf(filename, btn) {
-  if (!confirm(`Delete "${filename}" and all its associated data?`)) return;
+  if (!await showConfirm('Delete PDF', `Delete "${filename}" and all its associated data? This cannot be undone.`)) return;
   btn.disabled = true;
   btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
   try {
@@ -1384,13 +1384,8 @@ async function triggerEmbeddingInline(documentId, pdfName) {
         btn.innerHTML = '<i class="fa fa-check-circle"></i> Embedded';
       }
 
-      // Immediately render 80% — do not rely on refreshStats which may return stale 'tested'
       const displayPdf = _trackedPdf || pdfName.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || pdfName;
-      _trackedPdf   = displayPdf;
-      _trackedStage = 'indexed';
-      _trackedPercent = null;
-      _trackedSetAt = Date.now();
-      _renderProgress(displayPdf, 'indexed');
+      _trackedPdf = displayPdf;
       await refreshStats();
       await loadPdfList();
       if (document.getElementById('panel-index')?.classList.contains('active')) {
@@ -1468,11 +1463,6 @@ async function triggerGroupEmbedding(stem, docIds, btnEl) {
 
   const displayPdf = _trackedPdf || stem;
   _trackedPdf = displayPdf;
-  _trackedStage = 'indexed';
-  _trackedPercent = null;
-  _trackedSetAt = Date.now();
-  _renderProgress(displayPdf, 'indexed');
-
   await refreshStats();
   await loadPdfList();
 }
@@ -1754,7 +1744,7 @@ function appendAdminMsg(role, html) {
 
 // -- Delete PDF ------------------------------------------------------------------
 async function deletePdf(filename) {
-  if (!confirm(`Delete "${filename}" and ALL associated chunks, products and index data?\nThis cannot be undone.`)) return;
+  if (!await showConfirm('Delete PDF', `Delete "${filename}" and ALL associated chunks, products and index data? This cannot be undone.`)) return;
   try {
     const res  = await fetch('/admin-panel/api/delete-pdf/', {
       method: 'POST',
@@ -1769,7 +1759,7 @@ async function deletePdf(filename) {
 }
 
 async function deleteEmbeddingsOnly(filename) {
-  if (!confirm(`Delete all embeddings for "${filename}"? Chunks and data will be kept.`)) return;
+  if (!await showConfirm('Delete Embeddings', `Delete all embeddings for "${filename}"? Chunks and data will be kept.`)) return;
   try {
     const res  = await fetch('/admin-panel/api/delete-embeddings/', {
       method: 'POST',
@@ -1921,18 +1911,18 @@ function updateCatalogTable(processed, unprocessed) {
 
   unprocessed = unprocessed || [];
 
-  // Merge split parts from unprocessed into their processed group if same stem exists
+  // Merge split parts from unprocessed into their processed group if same root stem exists
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
   const processedStems = new Set(
     processed
       .filter(p => splitRe.test(p.name))
-      .map(p => p.name.replace(splitRe, ''))
+      .map(p => _rootStem(p.name))
   );
   const mergedUnprocessed = [];
   unprocessed.forEach(item => {
     if (splitRe.test(item.name)) {
-      const stem = item.name.replace(splitRe, '');
-      if (processedStems.has(stem)) {
+      const rootStem = _rootStem(item.name);
+      if (processedStems.has(rootStem)) {
         // inject into processed list so it appears as child of that group
         processed.push(item);
         return;
@@ -2370,11 +2360,11 @@ function updateWorkflowProgress(data = {}) {
       const totalParts = data.total_split_parts || null;
       if (totalParts) {
         let sub;
-        if (pct <= 50) {
-          const chunkedParts = Math.round((pct - 25) / 25 * totalParts);
+        if (pct <= 60) {
+          const chunkedParts = Math.round((pct - 40) / 20 * totalParts);
           sub = `${chunkedParts} of ${totalParts} parts chunked. Continue processing remaining parts.`;
         } else {
-          const indexedParts = Math.round((pct - 50) / 25 * totalParts);
+          const indexedParts = Math.round((pct - 60) / 20 * totalParts);
           sub = `${indexedParts} of ${totalParts} parts indexed. Continue embedding remaining parts.`;
         }
         document.getElementById('workflow-progress-sub').textContent = sub;
@@ -4047,6 +4037,19 @@ function escAttr(s) {
 let _cachedIndexChunks = [];
 let _indexChatGlobalContext = false;
 let _indexSelectedDocId = null;
+const _indexPageState = { page: 1, pageSize: 20 };
+
+function _indexSetPageSize(n) {
+  _indexPageState.pageSize = n;
+  _indexPageState.page = 1;
+  const q = (document.getElementById('index-chunk-search')?.value || '').toLowerCase().trim();
+  const base = _cachedIndexChunks.filter(c => c.status === 'Embedded');
+  const filtered = q ? base.filter(c => {
+    const id = `C${String(c.ordinal || 0).padStart(3, '0')}`.toLowerCase();
+    return id.includes(q) || (c.product_name || '').toLowerCase().includes(q) || (c.content || '').toLowerCase().includes(q);
+  }) : base;
+  renderIndexChunks(filtered);
+}
 
 async function loadIndexPanel() {
   const pdfTitleEl = document.getElementById('index-selected-pdf');
@@ -4069,7 +4072,25 @@ async function loadIndexPanel() {
     const stem = name.replace(/\.pdf$/i, '');
     return _pdfDetails.some(d => _splitPartRe.test(d.name) && d.name.replace(_splitPartRe, '') === stem);
   }
-  if (!selectedPdf || (!_isParentStem(selectedPdf) && !_findPdfDetail(selectedPdf)?.chunks_count)) {
+  // Always prefer the progress-bar tracked PDF — it reflects what the user is actively working on
+  if (_trackedPdf) {
+    const trackedStem = _trackedPdf.replace(/\.pdf$/i, '');
+    const trackedWithExt = trackedStem + '.pdf';
+    // Check if this is a parent stem that has split children
+    const hasChildren = _pdfDetails.some(d => _splitPartRe.test(d.name) && _rootStem(d.name) === trackedStem);
+    if (hasChildren) {
+      // Use parent stem — backend aggregates all split parts
+      selectedPdf = trackedWithExt;
+    } else {
+      const trackedDetail = _findPdfDetail(trackedWithExt) || _findPdfDetail(_trackedPdf);
+      if (trackedDetail) {
+        selectedPdf = trackedDetail.name;
+        _highlightPdfRow(selectedPdf);
+      } else {
+        selectedPdf = trackedWithExt;
+      }
+    }
+  } else if (!selectedPdf || (!_isParentStem(selectedPdf) && !_findPdfDetail(selectedPdf)?.chunks_count)) {
     const pdfs = _pdfDetails || [];
     const picked = _findPdfDetail(selectedPdf) || _defaultChunkedPdf() || pdfs[0];
     if (picked) {
@@ -4107,7 +4128,13 @@ async function loadIndexPanel() {
         const displayPdf = selectedPdf.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || selectedPdf;
         setTrackedPdf(displayPdf, currentStage);
       }
-      
+
+      // Pin _userSelectedPdf to the resolved PDF so refreshStats() can't overwrite
+      // the progress bar with a different server-tracked PDF (e.g. Fluid_Handling...)
+      if (_trackedPdf && !_userSelectedPdf) {
+        _userSelectedPdf = _trackedPdf;
+      }
+
       await refreshStats();
     } catch (e) {}
   }
@@ -4127,11 +4154,21 @@ async function loadIndexPanel() {
     return;
   }
 
-  // 3. Use the exact selectedPdf for chunks lookup (show only that split part's chunks).
-  //    Fall back to parent stem only if the exact lookup fails.
+  // 3. Determine the lookup PDF for the chunks API.
+  //    If selectedPdf is a parent stem (has split children), pass the stem so the backend aggregates all parts.
+  //    If selectedPdf is a split part, use its root stem to aggregate all siblings.
+  //    Otherwise use the exact file.
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-  const chunksPdf = selectedPdf;
-  const displayName = selectedPdf;
+  const selectedStem = selectedPdf.replace(/\.pdf$/i, '');
+  const isParentWithChildren = !splitRe.test(selectedPdf) &&
+    _pdfDetails.some(d => _splitPartRe.test(d.name) && _rootStem(d.name) === selectedStem);
+  const isSplitPart = splitRe.test(selectedPdf);
+  const chunksPdf = isParentWithChildren ? selectedStem
+    : isSplitPart ? _rootStem(selectedPdf)
+    : selectedPdf;
+  const displayName = isParentWithChildren ? selectedStem
+    : isSplitPart ? _rootStem(selectedPdf)
+    : selectedPdf;
 
   pdfTitleEl.textContent = displayName;
   updateChatContextDisplay();
@@ -4148,12 +4185,6 @@ async function loadIndexPanel() {
   try {
     let res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(chunksPdf)}&index=1`);
     let data = await res.json();
-    // If exact split part lookup fails, fall back to parent stem
-    if (data.error && splitRe.test(chunksPdf)) {
-      const parentPdf = chunksPdf.replace(splitRe, '') + '.pdf';
-      res = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(parentPdf)}&index=1`);
-      data = await res.json();
-    }
     if (data.error) {
       tableBody.innerHTML = `
         <tr>
@@ -4168,6 +4199,7 @@ async function loadIndexPanel() {
     } else {
       _cachedIndexChunks = data.chunks || [];
       _indexSelectedDocId = data.document_id;
+      _indexPageState.page = 1;
       const embeddedChunks = _cachedIndexChunks.filter(c => c.status === 'Embedded');
       renderIndexChunks(embeddedChunks);
       // Show approve button immediately if there are embedded chunks (no query required)
@@ -4192,9 +4224,7 @@ async function loadIndexPanel() {
 function renderIndexChunks(chunks) {
   const tableBody = document.getElementById('index-chunks-table-body');
   if (!tableBody) return;
-  
-  tableBody.innerHTML = '';
-  
+
   if (!chunks.length) {
     tableBody.innerHTML = `
       <tr>
@@ -4204,48 +4234,44 @@ function renderIndexChunks(chunks) {
         </td>
       </tr>
     `;
+    _renderPagination('index-pagination', 1, 1, () => {}, _indexPageState.pageSize, '_indexSetPageSize');
     return;
   }
 
-  chunks.forEach(c => {
+  const totalPages = Math.max(1, Math.ceil(chunks.length / _indexPageState.pageSize));
+  _indexPageState.page = Math.min(_indexPageState.page, totalPages);
+  const start = (_indexPageState.page - 1) * _indexPageState.pageSize;
+  const pageChunks = chunks.slice(start, start + _indexPageState.pageSize);
+
+  tableBody.innerHTML = '';
+  pageChunks.forEach(c => {
     const tr = document.createElement('tr');
-    
-    // Chunk ID format
     const chunkId = `C${String(c.ordinal || 0).padStart(3, '0')}`;
-    
-    // Excerpt snippet
-    let cleanText = String(c.content || '').trim();
-    cleanText = cleanText.replace(/\s+/g, ' '); // collapse spaces & newlines
-    let excerpt = cleanText;
-    if (cleanText.length > 90) {
-      excerpt = `...${cleanText.substring(0, 90)}...`;
-    } else if (cleanText.length > 0) {
-      excerpt = `...${cleanText}...`;
-    }
-
-    // Status Badge HTML
-    let badgeHtml = '';
-    if (c.status === 'Embedded') {
-      badgeHtml = `<span class="badge-status-embedded"><i class="fa fa-database"></i> Embedded</span>`;
-    } else {
-      badgeHtml = `<span class="badge-status-ready"><i class="fa fa-check-circle"></i> Ready</span>`;
-    }
-
+    let cleanText = String(c.content || '').trim().replace(/\s+/g, ' ');
+    const excerpt = cleanText.length > 90 ? `...${cleanText.substring(0, 90)}...` : cleanText.length > 0 ? `...${cleanText}...` : '';
+    const badgeHtml = c.status === 'Embedded'
+      ? `<span class="badge-status-embedded"><i class="fa fa-database"></i> Embedded</span>`
+      : `<span class="badge-status-ready"><i class="fa fa-check-circle"></i> Ready</span>`;
     tr.innerHTML = `
-      <td style="font-weight:700; color:var(--dark); font-family:monospace;">${escHtml(chunkId)}</td>
-      <td style="font-weight:600; color:#475569;">${escHtml(c.product_name || 'General Info')}</td>
-      <td style="color:#64748b; font-style:italic;">${escHtml(excerpt)}</td>
-      <td style="text-align:center;">${badgeHtml}</td>
+      <td style="font-weight:700;color:var(--dark);font-family:monospace">${escHtml(chunkId)}</td>
+      <td style="font-weight:600;color:#475569">${escHtml(c.product_name || 'General Info')}</td>
+      <td style="color:#64748b;font-style:italic">${escHtml(excerpt)}</td>
+      <td style="text-align:center">${badgeHtml}</td>
     `;
     tableBody.appendChild(tr);
   });
+
+  _renderPagination('index-pagination', _indexPageState.page, totalPages,
+    p => { _indexPageState.page = p; renderIndexChunks(chunks); },
+    _indexPageState.pageSize, '_indexSetPageSize');
 }
 
 function handleIndexSearch() {
   const searchInput = document.getElementById('index-chunk-search');
   if (!searchInput) return;
   const q = searchInput.value.toLowerCase().trim();
-  
+  _indexPageState.page = 1;
+
   if (!q) {
     renderIndexChunks(_cachedIndexChunks.filter(c => c.status === 'Embedded'));
     return;
@@ -4258,7 +4284,7 @@ function handleIndexSearch() {
     const content = (c.content || '').toLowerCase();
     return chunkId.includes(q) || prodName.includes(q) || content.includes(q);
   });
-  
+
   renderIndexChunks(filtered);
 }
 
