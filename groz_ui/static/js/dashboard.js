@@ -4038,6 +4038,7 @@ let _cachedIndexChunks = [];
 let _indexChatGlobalContext = false;
 let _indexSelectedDocId = null;
 const _indexPageState = { page: 1, pageSize: 20 };
+let _indexCurrentChunks = [];
 
 function _indexSetPageSize(n) {
   _indexPageState.pageSize = n;
@@ -4261,8 +4262,9 @@ function renderIndexChunks(chunks) {
     tableBody.appendChild(tr);
   });
 
+  _indexCurrentChunks = chunks;
   _renderPagination('index-pagination', _indexPageState.page, totalPages,
-    p => { _indexPageState.page = p; renderIndexChunks(chunks); },
+    p => { _indexPageState.page = p; renderIndexChunks(_indexCurrentChunks); },
     _indexPageState.pageSize, '_indexSetPageSize');
 }
 
