@@ -5,7 +5,6 @@ urlpatterns = [
     path('',          views.dashboard,    name='admin_dashboard'),
     path('login/',    views.admin_login,  name='admin_login'),
     path('logout/',   views.admin_logout, name='admin_logout'),
-    path('api/upload/',   views.upload_pdf,    name='upload_pdf'),
     path('api/approve-pdf/', views.approve_pdf, name='approve_pdf'),
     path('api/update-pdf-stage/', views.update_pdf_stage, name='update_pdf_stage'),
     path('api/pdfs/',     views.list_pdfs,     name='list_pdfs'),

@@ -37,6 +37,7 @@ from .services.query_engine import (
     _strip_model_constraint_selections,
     _strip_empty_markdown_headings,
     _render_constraint_matches,
+    _render_verified_inventory_table,
     _render_verified_variant_table,
     _render_exhaustive_answer,
 )
@@ -510,7 +511,6 @@ class CatalogChunkEditApiTests(TestCase):
         self.assertEqual(self.first_chunk.text, 'first chunk')
 
 
-@override_settings(CATALOG_RAG_V2_INGEST=True)
 class CatalogV2IngestionApiTests(TestCase):
     def setUp(self):
         self.staff = get_user_model().objects.create_user(
@@ -554,12 +554,223 @@ class CatalogV2IngestionApiTests(TestCase):
         self.assertEqual(CatalogDocument.objects.count(), 1)
         self.assertEqual(IngestionJob.objects.count(), 1)
 
-    @override_settings(CATALOG_RAG_V2_INGEST=False)
-    def test_v2_upload_is_blocked_while_feature_flag_is_off(self):
-        response = self.client.post('/admin-panel/api/v2/upload/', {'pdf': self._pdf_upload()})
+    def test_upload_route_alias_is_removed(self):
+        response = self.client.post('/admin-panel/api/upload/', {
+            'pdf': self._pdf_upload('alias.pdf'),
+        })
 
-        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.status_code, 404)
         self.assertEqual(CatalogDocument.objects.count(), 0)
+        self.assertEqual(IngestionJob.objects.count(), 0)
+
+
+class CatalogPdfListApiTests(TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.settings_override = override_settings(
+            PROJECT_ROOT=Path(self.temp_dir.name),
+            MEDIA_ROOT=Path(self.temp_dir.name) / 'media',
+        )
+        self.settings_override.enable()
+        self.project_root_patch = patch('catalog.views.PROJECT_ROOT', Path(self.temp_dir.name))
+        self.project_root_patch.start()
+        self.staff = get_user_model().objects.create_user(
+            username='pdf-list-admin',
+            password='test-password',
+            is_staff=True,
+        )
+        self.client.force_login(self.staff)
+        session = self.client.session
+        session['admin_access_token'] = 'test-admin-token'
+        session.save()
+
+        self.catalog = Catalog.objects.create(name='PDF List Catalog', slug='pdf-list-catalog')
+        pdf_buffer = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.write(pdf_buffer)
+        self.document = CatalogDocument.objects.create(
+            catalog=self.catalog,
+            original_filename='db-only-document',
+            file=SimpleUploadedFile(
+                'db-only-document.pdf',
+                pdf_buffer.getvalue(),
+                content_type='application/pdf',
+            ),
+            checksum_sha256='a' * 64,
+            version=1,
+            page_count=1,
+            status=CatalogDocument.Status.READY,
+            is_active=True,
+        )
+        self.family = ProductFamily.objects.create(
+            document=self.document,
+            source_key='ui:db-only',
+            product_name='DB Only Product',
+            product_code='DB-001',
+            raw_category='DB Category',
+            review_status=ProductFamily.ReviewStatus.APPROVED,
+            page_start=1,
+            page_end=1,
+        )
+        DocumentChunk.objects.create(
+            document=self.document,
+            family=self.family,
+            chunk_type=DocumentChunk.ChunkType.PRODUCT_FAMILY,
+            text='DB only chunk',
+            page_start=1,
+            page_end=1,
+            content_hash='b' * 64,
+            ordinal=1,
+            index_status=DocumentChunk.IndexStatus.INDEXED,
+        )
+
+    def tearDown(self):
+        self.project_root_patch.stop()
+        self.settings_override.disable()
+        self.temp_dir.cleanup()
+
+    def test_pdf_list_includes_db_document_even_without_disk_file(self):
+        response = self.client.get('/admin-panel/api/pdfs/')
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn('db-only-document.pdf', body['pdfs'])
+        detail = next(item for item in body['pdf_details'] if item['name'] == 'db-only-document.pdf')
+        self.assertEqual(detail['document_id'], str(self.document.id))
+        self.assertEqual(detail['chunks_count'], 1)
+        self.assertEqual(detail['product_families_count'], 1)
+        self.assertEqual(detail['status'], 'Ready')
+        self.assertTrue(detail['has_embeddings'])
+
+    def test_pdf_list_keeps_input_only_pending_pdfs_visible(self):
+        pending_path = Path(self.temp_dir.name) / 'input' / 'pending-only.pdf'
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        pending_path.write_bytes(b'%PDF-1.4\n%pending-only\n')
+
+        response = self.client.get('/admin-panel/api/pdfs/')
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn('pending-only.pdf', body['pdfs'])
+        detail = next(item for item in body['pdf_details'] if item['name'] == 'pending-only.pdf')
+        self.assertIsNone(detail['document_id'])
+        self.assertEqual(detail['chunks_count'], 0)
+        self.assertEqual(detail['product_families_count'], 0)
+        self.assertEqual(detail['approved_families_count'], 0)
+        self.assertEqual(detail['needs_review_families_count'], 0)
+        self.assertEqual(detail['review_status'], 'pending')
+        self.assertEqual(detail['status'], 'Pending')
+
+    def test_chunk_api_aggregates_db_split_parts_for_parent_stem(self):
+        catalog = Catalog.objects.create(name='Chunks Catalog', slug='chunks-catalog')
+
+        def make_pdf(name: str, suffix: str, version: int, is_active: bool):
+            buffer = BytesIO()
+            writer = PdfWriter()
+            writer.add_blank_page(width=72, height=72)
+            writer.write(buffer)
+            return CatalogDocument.objects.create(
+                catalog=catalog,
+                original_filename=name,
+                file=SimpleUploadedFile(f'{name}.pdf', buffer.getvalue(), content_type='application/pdf'),
+                checksum_sha256=suffix * 64,
+                version=version,
+                page_count=1,
+                status=CatalogDocument.Status.READY,
+                is_active=is_active,
+            )
+
+        parent_doc = make_pdf('Parent_Stem', '1', 1, True)
+        child_a = make_pdf('Parent_Stem_custom_p0001-0001', '2', 2, False)
+        child_b = make_pdf('Parent_Stem_custom_p0002-0002', '3', 3, False)
+
+        DocumentChunk.objects.create(
+            document=parent_doc,
+            chunk_type=DocumentChunk.ChunkType.MANUAL_SECTION,
+            text='Parent chunk',
+            page_start=1,
+            page_end=1,
+            content_hash='c' * 64,
+            ordinal=1,
+            index_status=DocumentChunk.IndexStatus.INDEXED,
+        )
+        DocumentChunk.objects.create(
+            document=child_a,
+            chunk_type=DocumentChunk.ChunkType.MANUAL_SECTION,
+            text='Child A chunk',
+            page_start=1,
+            page_end=1,
+            content_hash='d' * 64,
+            ordinal=1,
+            index_status=DocumentChunk.IndexStatus.INDEXED,
+        )
+        DocumentChunk.objects.create(
+            document=child_b,
+            chunk_type=DocumentChunk.ChunkType.MANUAL_SECTION,
+            text='Child B chunk',
+            page_start=1,
+            page_end=1,
+            content_hash='e' * 64,
+            ordinal=1,
+            index_status=DocumentChunk.IndexStatus.PENDING,
+        )
+
+        response = self.client.get('/admin-panel/api/chunks/', {'pdf': 'Parent_Stem'})
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['document_id'], str(child_a.id))
+        self.assertEqual(len(body['chunks']), 2)
+        self.assertEqual([chunk['content'] for chunk in body['chunks']], ['Child A chunk', 'Child B chunk'])
+        self.assertEqual([chunk['status'] for chunk in body['chunks']], ['Embedded', 'Ready'])
+
+    def test_pdf_preview_and_page_count_resolve_db_backed_file_storage(self):
+        page_count_response = self.client.get('/admin-panel/api/pdf-pages/', {'pdf': 'db-only-document.pdf'})
+        self.assertEqual(page_count_response.status_code, 200)
+        self.assertEqual(page_count_response.json()['pages'], 1)
+
+        preview_response = self.client.get('/admin-panel/api/pdf-preview/', {'pdf': 'db-only-document.pdf'})
+        self.assertEqual(preview_response.status_code, 200)
+        preview_body = preview_response.json()
+        self.assertEqual(preview_body['total'], 1)
+        self.assertEqual(len(preview_body['pages']), 1)
+        self.assertTrue(preview_body['pages'][0]['thumb'].startswith('data:image/jpeg;base64,'))
+
+    def test_pdf_preview_reconstructs_missing_split_part_from_root_pdf(self):
+        source_pdf = Path(__file__).resolve().parents[2] / 'Hand_Tool_Catalogue_low_res_with_cover.pdf'
+        restored_source = Path(self.temp_dir.name) / source_pdf.name
+        restored_source.write_bytes(source_pdf.read_bytes())
+
+        document = CatalogDocument.objects.create(
+            catalog=self.catalog,
+            original_filename='Hand_Tool_Catalogue_low_res_with_cover_p0071-0075',
+            file=SimpleUploadedFile(
+                'Hand_Tool_Catalogue_low_res_with_cover_p0071-0075.pdf',
+                b'%PDF-1.4\n%placeholder\n',
+                content_type='application/pdf',
+            ),
+            checksum_sha256='d' * 64,
+            version=2,
+            page_count=5,
+            status=CatalogDocument.Status.READY,
+            is_active=False,
+        )
+        CatalogDocument.objects.filter(pk=document.pk).update(
+            file='input/splits/Hand_Tool_Catalogue_low_res_with_cover/Hand_Tool_Catalogue_low_res_with_cover_p0071-0075.pdf',
+            pdf_binary=b'',
+        )
+
+        preview_response = self.client.get(
+            '/admin-panel/api/pdf-preview/',
+            {'pdf': 'Hand_Tool_Catalogue_low_res_with_cover_p0071-0075.pdf'},
+        )
+
+        self.assertEqual(preview_response.status_code, 200)
+        preview_body = preview_response.json()
+        self.assertEqual(preview_body['total'], 5)
+        self.assertEqual(len(preview_body['pages']), 5)
+        self.assertTrue(preview_body['pages'][0]['thumb'].startswith('data:image/jpeg;base64,'))
 
 
 class CatalogV2WorkerTests(TestCase):
@@ -610,7 +821,7 @@ class CatalogV2WorkerTests(TestCase):
         (artifact / 'products.json').write_text(json.dumps([product]))
         run_mock.return_value = SimpleNamespace(returncode=0, stdout='', stderr='')
 
-        result = run_ingestion_job(str(self.job.id), allow_disabled=True)
+        result = run_ingestion_job(str(self.job.id))
 
         self.assertEqual(result['status'], 'succeeded')
         self.assertEqual(result['embedding_calls'], 0)
@@ -676,7 +887,6 @@ class CatalogV2IndexingTests(TestCase):
         result = index_document(
             self.document,
             confirmed_embedding_count=1,
-            allow_disabled=True,
         )
 
         self.assertEqual(result['indexed'], 1)
@@ -693,7 +903,6 @@ class CatalogV2IndexingTests(TestCase):
             index_document(
                 self.document,
                 confirmed_embedding_count=0,
-                allow_disabled=True,
             )
 
     def test_v2_payload_has_root_category_subcategory_and_legacy_schema(self):
@@ -931,6 +1140,57 @@ class CatalogV2QueryEngineTests(TestCase):
         intro_mock.assert_called_once()
         answer_mock.assert_not_called()
 
+    @patch('catalog.services.query_engine.deterministic_plan')
+    @patch('catalog.services.query_engine.AIQueryRouter')
+    @patch('catalog.services.query_engine.LLMAnswerer.answer', return_value='Dual power work light options are available.')
+    @patch.object(CatalogQueryEngine, '_semantic_retrieve', return_value=[
+        {
+            'text': 'Dual power work light options',
+            'metadata': {
+                'product_name': 'Work Light Dual Power',
+                'product_code': 'WLD-2',
+                'source_pdf': 'catalog.pdf',
+                'page_start': 3,
+                'page_end': 3,
+            },
+            'score': 0.91,
+        }
+    ])
+    def test_router_failure_falls_back_to_deterministic_planner(
+        self,
+        retrieve_mock,
+        answer_mock,
+        router_cls,
+        deterministic_mock,
+    ):
+        router_cls.return_value.plan.side_effect = AIQueryRouterError('router failed')
+        deterministic_mock.return_value = QueryPlan(
+            intent=QueryIntent.GENERAL_SEMANTIC,
+            scope=QueryScope(source_types=['catalog']),
+            entities=[],
+            constraints={},
+            subqueries=[],
+            tasks=[],
+        )
+
+        execution = CatalogQueryEngine(self.runtime).execute('work light dual power')
+
+        self.assertEqual(execution.plan.intent, QueryIntent.GENERAL_SEMANTIC)
+        self.assertEqual(execution.standalone_query, 'work light dual power')
+        self.assertEqual(execution.total_results, 1)
+        self.assertIn('Dual power work light options are available.', execution.answer)
+        router_cls.return_value.plan.assert_called_once()
+        deterministic_mock.assert_called_once_with(
+            'work light dual power',
+            QueryScope(catalog_ids=[], document_ids=[], source_types=['catalog']),
+        )
+        retrieve_mock.assert_called_once_with(
+            'work light dual power',
+            QueryScope(source_types=['catalog']),
+            top_k=5,
+        )
+        answer_mock.assert_called_once()
+
     @patch('catalog.services.query_engine.AIQueryRouter')
     @patch('catalog.services.query_engine.LLMAnswerer.answer')
     def test_aggregation_count_is_rendered_without_llm(self, answer_mock, router_cls):
@@ -996,6 +1256,30 @@ class CatalogV2QueryEngineTests(TestCase):
         ]
         self.assertEqual(len(rendered_rows), 35)
         self.assertIn('Showing 1-35 of 35 matching products.', answer)
+        self.assertNotIn('Source PDF', answer)
+        self.assertNotIn('Page', answer)
+        self.assertNotIn('More results are available on page', answer)
+
+    def test_verified_inventory_table_omits_source_columns(self):
+        products = [
+            {
+                'product_name': 'Hammer Family',
+                'product_code': 'H-1',
+                'category': 'Hammer',
+                'source': {
+                    'source_pdf': 'hand-tools.pdf',
+                    'page_start': 1,
+                    'page_end': 1,
+                },
+            }
+        ]
+
+        table = _render_verified_inventory_table(products)
+
+        self.assertIn('| # | Product Family | Product Code | Category |', table)
+        self.assertIn('| 1 | Hammer Family | H-1 | Hammer |', table)
+        self.assertNotIn('Source', table)
+        self.assertNotIn('Page', table)
 
     def test_answer_constraint_check_normalizes_hyphens_and_units(self):
         answer = 'Non sparking options include a lightest 2.5 lb model and 4 lbs model.'
@@ -1041,6 +1325,8 @@ class CatalogV2QueryEngineTests(TestCase):
         self.assertIn('| Lightest | CHID/2.5/12/CU | 34602 | 2.5 | 12 |', table)
         self.assertIn('| 4 lb | CHID/4/12/CU | 34600 | 4 | 12 |', table)
         self.assertIn('| Heaviest | SHID/14/30/CU | 34611 | 14 | 30 |', table)
+        self.assertNotIn('Source', table)
+        self.assertNotIn('Page', table)
 
     def test_weight_and_length_constraints_are_applied_as_pairs(self):
         chunks = [{
@@ -1086,6 +1372,8 @@ class CatalogV2QueryEngineTests(TestCase):
 
         self.assertIn('| light 12 inch | CHID/2.5/12/CU | 34602 | 2.5 | 12 |', table)
         self.assertIn('| heavy long-handle | SHID/8/30/BR | 34706 | 8 | 30 |', table)
+        self.assertNotIn('Source', table)
+        self.assertNotIn('Page', table)
 
     def test_verified_variant_table_removes_unsupported_model_code(self):
         chunks = [{
@@ -1110,6 +1398,8 @@ class CatalogV2QueryEngineTests(TestCase):
         self.assertIn('SHID/8/24/CU', cleaned)
         self.assertNotIn('SHID/8/30/CU', cleaned)
         self.assertIn('| Copper Head Sledge Hammers | SHID/14/30/CU | 34611 |', table)
+        self.assertNotIn('Source', table)
+        self.assertNotIn('Page', table)
 
     def test_requested_weight_and_materials_narrow_verified_rows_and_matches(self):
         chunks = [{
@@ -1137,6 +1427,10 @@ class CatalogV2QueryEngineTests(TestCase):
         self.assertIn('SHID/4/12/BR', variants)
         self.assertIn('| 4 lb copper | CHID/4/12/CU | 34600 |', matches)
         self.assertIn('| 4 lb brass | SHID/4/12/BR | 34702 |', matches)
+        self.assertNotIn('Source', variants)
+        self.assertNotIn('Page', variants)
+        self.assertNotIn('Source', matches)
+        self.assertNotIn('Page', matches)
 
     def test_model_selected_options_are_removed_before_deterministic_matches(self):
         answer = '''Copper and brass families were compared.
@@ -2207,7 +2501,13 @@ class CatalogV2FamilyWorkflowTests(TestCase):
         family.save(update_fields=('aliases',))
         ProductVariant.objects.create(
             family=family,
+            product_code='BLMD-358JST',
+            order_number='12',
             name='Standard kit',
+            size='13 mm',
+            unit='mm',
+            specifications={'torque': '65 Nm'},
+            ordering_data={'cat_no': 'BLMD-358JST'},
             source_row_hash='family-list-variant',
         )
         chunk = self._chunk(1, family=family, text='Cordless Impact Drill chunk')
@@ -2221,10 +2521,16 @@ class CatalogV2FamilyWorkflowTests(TestCase):
         self.assertEqual(body['families'][0]['product_name'], 'Cordless Impact Drill Driver')
         self.assertEqual(body['families'][0]['aliases'], ['impact drill', 'drill driver'])
         self.assertEqual(body['families'][0]['variants'][0]['name'], 'Standard kit')
+        self.assertEqual(body['families'][0]['variants'][0]['product_code'], 'BLMD-358JST')
+        self.assertEqual(body['families'][0]['variants'][0]['order_number'], '12')
+        self.assertEqual(body['families'][0]['variants'][0]['size'], '13 mm')
+        self.assertEqual(body['families'][0]['variants'][0]['unit'], 'mm')
+        self.assertEqual(body['families'][0]['variants'][0]['specifications']['torque'], '65 Nm')
+        self.assertEqual(body['families'][0]['variants'][0]['ordering_data']['cat_no'], 'BLMD-358JST')
         self.assertEqual(body['chunks'][0]['family_name'], 'Cordless Impact Drill Driver')
         self.assertEqual(body['chunks'][0]['id'], str(chunk.id))
 
-    def test_save_product_family_replaces_membership_and_cleans_up_empties(self):
+    def test_save_product_family_replaces_membership_without_deleting_empty_products(self):
         target_family = self._family(
             source_key='ui:target',
             product_name='Old Family',
@@ -2250,8 +2556,24 @@ class CatalogV2FamilyWorkflowTests(TestCase):
                 'raw_category': 'Cordless Impact Drill',
                 'aliases': 'impact drill, cordless drill, drill driver',
                 'variants': [
-                    {'name': 'Standard kit'},
-                    {'name': 'Bare tool'},
+                    {
+                        'name': 'Standard kit',
+                        'product_code': 'BLMD-358JST',
+                        'order_number': '12',
+                        'size': '13 mm',
+                        'unit': 'mm',
+                        'specifications': {'torque': '65 Nm'},
+                        'ordering_data': {'cat_no': 'BLMD-358JST'},
+                    },
+                    {
+                        'name': 'Bare tool',
+                        'product_code': 'BLMD-358JST-B',
+                        'order_number': '13',
+                        'size': '13 mm',
+                        'unit': 'mm',
+                        'specifications': {'torque': '55 Nm'},
+                        'ordering_data': {'cat_no': 'BLMD-358JST-B'},
+                    },
                 ],
                 'review_status': 'approved',
                 'chunk_ids': [str(chunk_one.id), str(chunk_three.id)],
@@ -2266,21 +2588,139 @@ class CatalogV2FamilyWorkflowTests(TestCase):
         chunk_three.refresh_from_db()
 
         self.assertEqual(target_family.product_name, 'Cordless Impact Drill Driver')
-        self.assertEqual(target_family.product_code, '')
+        self.assertEqual(target_family.product_code, 'OLD-1')
         self.assertEqual(target_family.aliases, ['impact drill', 'cordless drill', 'drill driver'])
         self.assertEqual(target_family.variants.count(), 2)
+        saved_variants = {variant.name: variant for variant in target_family.variants.all()}
+        self.assertEqual(saved_variants['Standard kit'].product_code, 'BLMD-358JST')
+        self.assertEqual(saved_variants['Standard kit'].order_number, '12')
+        self.assertEqual(saved_variants['Standard kit'].size, '13 mm')
+        self.assertEqual(saved_variants['Standard kit'].unit, 'mm')
+        self.assertEqual(saved_variants['Standard kit'].specifications['torque'], '65 Nm')
+        self.assertEqual(saved_variants['Standard kit'].ordering_data['cat_no'], 'BLMD-358JST')
+        self.assertEqual(saved_variants['Bare tool'].product_code, 'BLMD-358JST-B')
         self.assertEqual(chunk_one.family_id, target_family.id)
         self.assertIsNone(chunk_two.family_id)
         self.assertEqual(chunk_three.family_id, target_family.id)
-        self.assertFalse(ProductFamily.objects.filter(id=other_family.id).exists())
+        other_family.refresh_from_db()
+        self.assertEqual(other_family.chunks.count(), 0)
 
         body = response.json()
         self.assertEqual(body['family']['product_name'], 'Cordless Impact Drill Driver')
+        self.assertEqual(body['family']['product_code'], 'OLD-1')
         self.assertEqual(body['family']['aliases'], ['impact drill', 'cordless drill', 'drill driver'])
         self.assertEqual(len(body['family']['variants']), 2)
-        self.assertEqual([variant['name'] for variant in body['family']['variants']], ['Bare tool', 'Standard kit'])
+        response_variants = {variant['name']: variant for variant in body['family']['variants']}
+        self.assertEqual(response_variants['Standard kit']['product_code'], 'BLMD-358JST')
+        self.assertEqual(response_variants['Standard kit']['order_number'], '12')
+        self.assertEqual(response_variants['Standard kit']['size'], '13 mm')
+        self.assertEqual(response_variants['Standard kit']['unit'], 'mm')
+        self.assertEqual(response_variants['Standard kit']['specifications']['torque'], '65 Nm')
+        self.assertEqual(response_variants['Standard kit']['ordering_data']['cat_no'], 'BLMD-358JST')
+        self.assertEqual(response_variants['Bare tool']['product_code'], 'BLMD-358JST-B')
         self.assertEqual(body['family']['chunk_count'], 2)
-        self.assertEqual(len(body['families']), 1)
+        self.assertEqual(len(body['families']), 2)
+        returned_products = {item['product_name']: item for item in body['families']}
+        self.assertEqual(returned_products['Other Family']['chunk_count'], 0)
+
+    def test_save_product_family_keeps_existing_variants_when_not_resubmitted(self):
+        family = self._family(
+            source_key='ui:keep-variants',
+            product_name='Existing Product',
+            product_code='EX-1',
+            raw_category='Existing category',
+        )
+        ProductVariant.objects.create(
+            family=family,
+            product_code='EX-1-A',
+            order_number='100',
+            name='Existing variant',
+            source_row_hash='keep-existing-variant',
+        )
+        chunk = self._chunk(1, family=family, text='Chunk one')
+
+        response = self.client.post(
+            '/admin-panel/api/families/save/',
+            data=json.dumps({
+                'pdf': 'family.pdf',
+                'family_id': str(family.id),
+                'product_name': 'Existing Product',
+                'raw_category': 'Existing category',
+                'aliases': '',
+                'variants': [],
+                'review_status': 'approved',
+                'chunk_ids': [str(chunk.id)],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        family.refresh_from_db()
+        self.assertEqual(family.variants.count(), 1)
+        self.assertEqual(family.variants.get().name, 'Existing variant')
+
+    def test_save_product_family_preserves_existing_normalized_category_when_unresolved(self):
+        category = Category.objects.create(
+            name='Test Hammer',
+            slug='test-hammer',
+        )
+        family = self._family(
+            source_key='ui:category-preserve',
+            product_name='Old Family',
+            product_code='OLD-2',
+            raw_category='Old family',
+        )
+        family.normalized_category = category
+        family.save(update_fields=('normalized_category',))
+        chunk = self._chunk(1, family=family, text='Chunk one')
+
+        response = self.client.post(
+            '/admin-panel/api/families/save/',
+            data=json.dumps({
+                'pdf': 'family.pdf',
+                'family_id': str(family.id),
+                'product_name': 'Mystery Product',
+                'raw_category': 'Unmatched Source Label',
+                'aliases': '',
+                'variants': [],
+                'review_status': 'needs_review',
+                'chunk_ids': [str(chunk.id)],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        family.refresh_from_db()
+        self.assertEqual(family.normalized_category_id, category.id)
+
+    def test_save_product_family_updates_product_code_when_provided(self):
+        family = self._family(
+            source_key='ui:code-update',
+            product_name='Old Product',
+            product_code='OLD-CODE',
+            raw_category='Old category',
+        )
+        chunk = self._chunk(1, family=family, text='Chunk one')
+
+        response = self.client.post(
+            '/admin-panel/api/families/save/',
+            data=json.dumps({
+                'pdf': 'family.pdf',
+                'family_id': str(family.id),
+                'product_name': 'Old Product',
+                'product_code': 'NEW-CODE',
+                'raw_category': 'Old category',
+                'aliases': '',
+                'variants': [],
+                'review_status': 'approved',
+                'chunk_ids': [str(chunk.id)],
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        family.refresh_from_db()
+        self.assertEqual(family.product_code, 'NEW-CODE')
 
     def test_update_pdf_stage_accepts_families_stage(self):
         response = self.client.post(

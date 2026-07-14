@@ -57,7 +57,6 @@ class Command(BaseCommand):
                 index_document(
                     document,
                     confirmed_embedding_count=0,
-                    allow_disabled=True,
                 )
                 activated += 1
                 self.stdout.write(f'Activated {document.id} ({activated}/{len(documents)})')

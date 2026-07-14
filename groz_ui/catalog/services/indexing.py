@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
@@ -164,12 +163,9 @@ def index_document(
     document: CatalogDocument,
     *,
     confirmed_embedding_count: int,
-    allow_disabled: bool = False,
     batch_size: int = 64,
 ) -> dict:
     """Embed/index exactly the approved pending count and atomically activate on success."""
-    if not settings.CATALOG_RAG_V2_INGEST and not allow_disabled:
-        raise ValueError('CATALOG_RAG_V2_INGEST is disabled.')
     if document.status == CatalogDocument.Status.ARCHIVED:
         raise ValueError('Archived documents cannot be indexed.')
 

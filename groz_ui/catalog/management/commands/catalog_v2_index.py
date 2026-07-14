@@ -13,7 +13,6 @@ class Command(BaseCommand):
         parser.add_argument('document_id')
         parser.add_argument('--execute', action='store_true')
         parser.add_argument('--confirm-embeddings', type=int)
-        parser.add_argument('--allow-disabled', action='store_true')
 
     def handle(self, *args, **options):
         try:
@@ -32,7 +31,6 @@ class Command(BaseCommand):
             result = index_document(
                 document,
                 confirmed_embedding_count=options['confirm_embeddings'],
-                allow_disabled=options['allow_disabled'],
             )
         except Exception as exc:
             raise CommandError(str(exc)) from exc

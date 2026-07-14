@@ -15,7 +15,6 @@ function removeWelcome(){
   if(!welcomed){ document.getElementById('welcome-state')?.remove(); welcomed=true; }
 }
 
-function quickAsk(el){ inputEl.value=el.textContent.trim(); sendMessage(); }
 function quickAsk2(t){ inputEl.value=t; sendMessage(); }
 
 function askCat(cat,el){
@@ -41,16 +40,14 @@ function addMsg(role,html,sources=[],meta=null){
     srcHtml=`<div class="src-bar">${sources.map(s=>{
       const label=escapeHtml(s.name||s.code||'Catalog source');
       const code=s.code?` · ${escapeHtml(s.code)}`:'';
-      const pdf=s.pdf?` · ${escapeHtml(s.pdf)}`:'';
-      const page=s.page_start?` · p.${escapeHtml(s.page_start)}${s.page_end&&s.page_end!==s.page_start?`–${escapeHtml(s.page_end)}`:''}`:'';
-      return `<span class="src-tag"><i class="fa fa-tag"></i>${label}${code}${pdf}${page}</span>`;
+      return `<span class="src-tag"><i class="fa fa-tag"></i>${label}${code}</span>`;
     }).join('')}</div>`;
   }
   d.innerHTML=`${avatarHtml}<div class="bubble"><div class="msg-content">${html}</div>${srcHtml}</div>`;
   if(meta&&meta.total_results!==null&&meta.total_results!==undefined){
     const summary=document.createElement('div');
     summary.className='result-summary';
-    summary.textContent=`${meta.total_results} result${meta.total_results===1?'':'s'}${meta.complete_result?' · complete':' · paginated/partial'}`;
+    summary.textContent=`${meta.total_results} result${meta.total_results===1?'':'s'}`;
     d.querySelector('.bubble').appendChild(summary);
     const shown=(meta.page||1)*(meta.page_size||50);
     if(!meta.complete_result&&shown<meta.total_results&&meta.query){

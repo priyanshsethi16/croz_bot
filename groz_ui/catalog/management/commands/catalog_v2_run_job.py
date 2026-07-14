@@ -8,11 +8,10 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('job_id')
-        parser.add_argument('--allow-disabled', action='store_true')
 
     def handle(self, *args, **options):
         try:
-            result = run_ingestion_job(options['job_id'], allow_disabled=options['allow_disabled'])
+            result = run_ingestion_job(options['job_id'])
         except Exception as exc:
             raise CommandError(str(exc)) from exc
         self.stdout.write(self.style.SUCCESS(str(result)))

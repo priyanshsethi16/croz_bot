@@ -86,6 +86,14 @@ class CatalogDocument(models.Model):
     source_type = models.CharField(max_length=16, choices=SourceType.choices, default=SourceType.CATALOG)
     original_filename = models.CharField(max_length=255)
     file = models.FileField(upload_to=catalog_document_upload_path, max_length=500)
+    pdf_binary = models.BinaryField(blank=True, default=b'')
+    parent = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='split_parts',
+    )
     checksum_sha256 = models.CharField(max_length=64, unique=True)
     version = models.PositiveIntegerField(default=1)
     page_count = models.PositiveIntegerField(default=0)

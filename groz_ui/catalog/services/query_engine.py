@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 
@@ -17,7 +18,7 @@ from catalog.services.query_repository import (
     resolve_product_code_tokens,
     source_chunks_for_products,
 )
-from rag_pipeline.ai_router import AIQueryRouter
+from rag_pipeline.ai_router import AIQueryRouter, AIQueryRouterError
 from rag_pipeline.llm import LLMAnswerer
 from rag_pipeline.planner import (
     QueryIntent,
@@ -25,9 +26,13 @@ from rag_pipeline.planner import (
     QueryRoute,
     QueryScope,
     QueryTask,
+    deterministic_plan,
     extract_requested_constraints,
 )
 from rag_pipeline.retriever import HybridRetriever
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -163,27 +168,17 @@ def _render_exhaustive_answer(
     lines = [
         introduction,
         '',
-        '| # | Product Name | Product Code | Category | Source PDF | Page |',
-        '|---:|---|---|---|---|---:|',
+        '| # | Product Name | Product Code | Category |',
+        '|---:|---|---|---|',
     ]
     start = (page - 1) * page_size
     for offset, product in enumerate(products, 1):
-        source = product.get('source') or {}
-        page_start = source.get('page_start') or ''
-        page_end = source.get('page_end') or page_start
-        page_value = (
-            f'{page_start}-{page_end}'
-            if page_start and page_end and page_start != page_end
-            else page_start
-        )
         lines.append(
-            '| {number} | {name} | {code} | {category} | {pdf} | {page_value} |'.format(
+            '| {number} | {name} | {code} | {category} |'.format(
                 number=start + offset,
                 name=_markdown_cell(product.get('product_name')),
                 code=_markdown_cell(product.get('product_code')),
                 category=_markdown_cell(product.get('category')),
-                pdf=_markdown_cell(source.get('source_pdf')),
-                page_value=_markdown_cell(page_value),
             )
         )
 
@@ -192,8 +187,6 @@ def _render_exhaustive_answer(
     lines.extend(['', f'Showing {first}-{last} of {total_results} matching products.'])
     if complete_result:
         lines.append('Complete result for the selected catalog scope.')
-    else:
-        lines.append(f'More results are available on page {page + 1}.')
     return '\n'.join(lines)
 
 
@@ -203,15 +196,13 @@ def _render_verified_inventory_table(products: list[dict]) -> str:
     lines = [
         '### Verified PostgreSQL inventory',
         '',
-        '| # | Product Family | Product Code | Category | Source | Page |',
-        '|---:|---|---|---|---|---:|',
+        '| # | Product Family | Product Code | Category |',
+        '|---:|---|---|---|',
     ]
     for number, product in enumerate(products, 1):
-        source = product['source']
         lines.append(
             f"| {number} | {_markdown_cell(product['product_name'])} | "
-            f"{_markdown_cell(product['product_code'])} | {_markdown_cell(product['category'])} | "
-            f"{_markdown_cell(source['source_pdf'])} | {_markdown_cell(source['page_start'])} |"
+            f"{_markdown_cell(product['product_code'])} | {_markdown_cell(product['category'])} |"
         )
     return '\n'.join(lines)
 
@@ -418,15 +409,14 @@ def _render_verified_variant_table(chunks: list[dict], query: str = '') -> str:
     lines = [
         '### Verified variant and order data',
         '',
-        '| Product Family | CAT NR. | ORD NR. | Weight (lb) | Length (inch) | Source | Page |',
-        '|---|---|---:|---:|---:|---|---:|',
+        '| Product Family | CAT NR. | ORD NR. | Weight (lb) | Length (inch) |',
+        '|---|---|---:|---:|---:|',
     ]
     for row in rows:
         length_text = f"{row['length_in']:g}" if row['length_in'] is not None else ''
         lines.append(
             f"| {_markdown_cell(row['product_name'])} | {_markdown_cell(row['cat_no'])} | "
-            f"{_markdown_cell(row['order_no'])} | {row['weight_lb']:g} | {_markdown_cell(length_text)} | "
-            f"{_markdown_cell(row['source_pdf'])} | {_markdown_cell(row['page'])} |"
+            f"{_markdown_cell(row['order_no'])} | {row['weight_lb']:g} | {_markdown_cell(length_text)} |"
         )
     return '\n'.join(lines)
 
@@ -584,16 +574,15 @@ def _render_constraint_matches(
     lines = [
         '### Deterministic constraint matches',
         '',
-        '| Requirement | CAT NR. | ORD NR. | Weight (lb) | Length (inch) | Source | Page |',
-        '|---|---|---:|---:|---:|---|---:|',
+        '| Requirement | CAT NR. | ORD NR. | Weight (lb) | Length (inch) |',
+        '|---|---|---:|---:|---:|',
     ]
     for label, row in selected:
         length_text = f"{row['length_in']:g}" if row['length_in'] is not None else ''
         lines.append(
             f"| {_markdown_cell(label)} | {_markdown_cell(row['cat_no'])} | "
             f"{_markdown_cell(row['order_no'])} | {row['weight_lb']:g} | "
-            f"{_markdown_cell(length_text)} | "
-            f"{_markdown_cell(row['source_pdf'])} | {_markdown_cell(row['page'])} |"
+            f"{_markdown_cell(length_text)} |"
         )
     return '\n'.join(lines)
 
@@ -733,11 +722,20 @@ class CatalogQueryEngine:
             document_ids=document_ids or [],
             source_types=['catalog'],
         )
-        router_result = self.router.plan(query, scope=request_scope, memory=memory)
-        routed_plan = router_result.plan
-        plan = routed_plan.to_query_plan()
+        analysis_query = query.strip() or query
+        try:
+            router_result = self.router.plan(query, scope=request_scope, memory=memory)
+            routed_plan = router_result.plan
+            plan = routed_plan.to_query_plan()
+            analysis_query = routed_plan.standalone_query or analysis_query
+        except AIQueryRouterError as error:
+            logger.warning(
+                'AI query router failed; falling back to deterministic planner. query=%r error=%s',
+                query,
+                error,
+            )
+            plan = deterministic_plan(query, request_scope)
         scope = plan.scope
-        analysis_query = routed_plan.standalone_query or query
 
         if plan.needs_clarification:
             return QueryExecution(

@@ -72,10 +72,7 @@ def _record_pages(document: CatalogDocument, products: list[dict]) -> None:
         )
 
 
-def run_ingestion_job(job_id: str, *, allow_disabled: bool = False) -> dict:
-    if not settings.CATALOG_RAG_V2_INGEST and not allow_disabled:
-        raise IngestionJobError('CATALOG_RAG_V2_INGEST is disabled.')
-
+def run_ingestion_job(job_id: str) -> dict:
     with transaction.atomic():
         job = IngestionJob.objects.select_for_update().select_related('document').get(pk=job_id)
         if job.cancel_requested or job.status == IngestionJob.Status.CANCELLED:

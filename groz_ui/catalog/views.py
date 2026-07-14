@@ -25,7 +25,7 @@ from .services.chat_memory import (
 )
 from rag_pipeline.ai_router import AIQueryRouterError
 
-from .models import DocumentChunk, ProductFamily
+from .models import CatalogDocument, DocumentChunk, ProductFamily
 
 PROJECT_ROOT = settings.PROJECT_ROOT
 logger = logging.getLogger(__name__)
@@ -168,9 +168,29 @@ def _resolve_split_docs_for_parent(pdf_stem: str):
       2. splits/<pdf_stem>_p*/  sibling dirs    (Hand_Tool style: intermediate splits)
     """
     from .models import CatalogDocument
+    import re
     splits_root = PROJECT_ROOT / 'input' / 'splits'
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+
+    def _leaf_docs_from_candidates(candidates):
+        if not candidates:
+            return []
+        candidate_names = [Path(str(doc.original_filename or '').strip()).stem for doc in candidates]
+        leaf_docs = []
+        for doc in candidates:
+            name = Path(str(doc.original_filename or '').strip()).stem
+            if not name or not split_re.search(name):
+                continue
+            if any(other != name and other.startswith(name + '_') for other in candidate_names):
+                continue
+            leaf_docs.append(doc)
+        return leaf_docs
+
     if not splits_root.exists():
-        return []
+        db_candidates = list(CatalogDocument.objects.filter(
+            original_filename__startswith=pdf_stem + '_'
+        ).order_by('original_filename', '-version', '-id'))
+        return _leaf_docs_from_candidates(db_candidates)
 
     # Layout 1: direct subdir named after the stem
     direct_dir = splits_root / pdf_stem
@@ -202,6 +222,14 @@ def _resolve_split_docs_for_parent(pdf_stem: str):
             ).order_by('original_filename'))
             if docs:
                 return docs
+
+    # DB fallback: resolve leaf split docs even when input/splits/ is absent.
+    db_candidates = list(CatalogDocument.objects.filter(
+        original_filename__startswith=pdf_stem + '_'
+    ).order_by('original_filename', '-version', '-id'))
+    db_leaf_docs = _leaf_docs_from_candidates(db_candidates)
+    if db_leaf_docs:
+        return db_leaf_docs
 
     return []
 
@@ -265,26 +293,21 @@ def _get_catalog_stats():
             processed.append({
                 'name': display,
                 'chunks': chunk_count,
-                'products': doc.product_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
+                'products': doc.product_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count(),
+                'status': _catalog_document_display_status(doc, chunk_count=chunk_count),
             })
     except Exception:
         pass
 
     total_chunks = sum(p['chunks'] for p in processed)
 
-    # Use DB-based indexed chunk count as primary; fall back to Qdrant point count
+    # Dashboard status should reflect PostgreSQL workflow state, not stale vector-store leftovers.
     indexed = 0
     try:
         from .models import DocumentChunk as _DC
         indexed = _DC.objects.filter(index_status=_DC.IndexStatus.INDEXED).count()
     except Exception:
-        pass
-    if indexed == 0:
-        try:
-            from rag_pipeline.providers import indexed_document_count
-            indexed = indexed_document_count()
-        except Exception:
-            indexed = 0
+        indexed = 0
 
     # Build unprocessed list with status info from DB
     processed_names = {proc['name'] for proc in processed}
@@ -322,8 +345,24 @@ def _get_catalog_stats():
     except Exception:
         unprocessed = [{'name': p.name, 'status': 'Pending'} for p in unprocessed_raw]
 
+    try:
+        from .models import CatalogDocument, DocumentChunk
+        seen_unprocessed = {item['name'] for item in unprocessed}
+        for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
+            display_name = _display_pdf_name(doc.original_filename)
+            if not display_name or display_name in processed_names or display_name in seen_unprocessed:
+                continue
+            if DocumentChunk.objects.filter(document=doc).exists():
+                continue
+            unprocessed.append({'name': display_name, 'status': 'Pending'})
+            seen_unprocessed.add(display_name)
+    except Exception:
+        pass
+
     stats = {
-        'total_pdfs': len(effective_pdfs),
+        # Count everything the UI can actually surface: disk PDFs, DB-backed PDFs,
+        # and DB-only documents that do not have a matching filesystem file.
+        'total_pdfs': len(processed) + len(unprocessed),
         'processed': processed,
         'unprocessed': unprocessed,
         'indexed': indexed,
@@ -406,47 +445,241 @@ def dashboard(request):
     return render(request, 'catalog/dashboard.html', {
         'stats': stats,
         'is_admin': request.user.is_staff,
-        'v2_ingest_enabled': settings.CATALOG_RAG_V2_INGEST,
         'admin_access_token': request.session.get('admin_access_token', ''),
     })
 
 
-# ── API: Upload PDF ───────────────────────────────────────────────────────────
-
-@login_required
-@require_POST
-def upload_pdf(request):
-    if not request.user.is_staff:
-        return JsonResponse({'error': 'Permission denied.'}, status=403)
-    pdf = request.FILES.get('pdf')
-    if not pdf or not pdf.name.endswith('.pdf'):
-        return JsonResponse({'error': 'Please upload a valid PDF file.'}, status=400)
-
-    dest = PROJECT_ROOT / 'input' / pdf.name
-    if dest.exists():
-        return JsonResponse({'error': f'"{pdf.name}" already exists. Delete it first or rename the file.'}, status=409)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest, 'wb') as f:
-        for chunk in pdf.chunks():
-            f.write(chunk)
-
-    # Don't auto-track uploaded PDFs - only track when user approves after preview
-    return JsonResponse({'message': f'"{pdf.name}" uploaded successfully.', 'filename': pdf.name})
-
-
 def _resolve_pdf_path(filename: str) -> Path:
-    """Find a PDF file in input/ or recursively inside input/splits/ subfolders."""
+    """Find a PDF file in input/, DB-backed storage, or recursively inside input/splits/ subfolders."""
     filename = Path(filename).name
-    pdf_path = PROJECT_ROOT / 'input' / filename
-    if not pdf_path.exists():
-        splits_dir = PROJECT_ROOT / 'input' / 'splits'
-        if splits_dir.exists():
-            # Search all levels of nesting under splits/
-            for candidate in splits_dir.rglob(filename):
-                if candidate.is_file():
-                    pdf_path = candidate
-                    break
+    input_root = PROJECT_ROOT / 'input'
+    pdf_path = input_root / filename
+    if pdf_path.exists():
+        return pdf_path
+
+    project_pdf_path = PROJECT_ROOT / filename
+    if project_pdf_path.exists():
+        return project_pdf_path
+
+    # V2 uploads live under MEDIA_ROOT/catalog_documents/..., so prefer the
+    # registered CatalogDocument file path before falling back to filesystem scans.
+    try:
+        doc = _resolve_catalog_document(filename)
+        if doc and doc.file and doc.file.name:
+            doc_path = _catalog_document_file_path(doc)
+            if doc_path:
+                return doc_path
+    except Exception:
+        pass
+
+    splits_dir = input_root / 'splits'
+    if splits_dir.exists():
+        # Search all levels of nesting under splits/
+        for candidate in splits_dir.rglob(filename):
+            if candidate.is_file():
+                return candidate
+
+    if input_root.exists():
+        # Final fallback: search the whole media tree for a matching basename.
+        for candidate in input_root.rglob(filename):
+            if candidate.is_file():
+                return candidate
+
     return pdf_path
+
+
+def _catalog_document_file_path(doc):
+    if not doc or not getattr(doc, 'file', None):
+        return None
+
+    file_name = str(getattr(doc.file, 'name', '') or '').strip()
+    if not file_name:
+        return None
+
+    candidates = []
+    try:
+        candidates.append(Path(doc.file.path))
+    except Exception:
+        pass
+
+    relative = Path(file_name)
+    if relative.is_absolute():
+        candidates.append(relative)
+    else:
+        candidates.append(PROJECT_ROOT / relative)
+        candidates.append(PROJECT_ROOT / relative.name)
+
+    for candidate in candidates:
+        try:
+            if candidate.exists():
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
+def _catalog_document_pdf_bytes(doc):
+    if not doc:
+        return None
+    try:
+        pdf_binary = getattr(doc, 'pdf_binary', b'') or b''
+        if pdf_binary:
+            return bytes(pdf_binary)
+    except Exception:
+        pass
+
+    try:
+        doc_path = _catalog_document_file_path(doc)
+        if doc_path:
+            return doc_path.read_bytes()
+    except Exception:
+        pass
+    return None
+
+
+_SPLIT_PDF_RE = re.compile(r'^(?P<stem>.+)_(?:custom_)?p(?P<start>\d{4})-(?P<end>\d{4})(?:\.pdf)?$', re.I)
+
+
+def _split_pdf_match(filename: str):
+    name = Path(str(filename or '')).name
+    if not name:
+        return None
+    match = _SPLIT_PDF_RE.match(name)
+    if not match:
+        return None
+    return {
+        'name': name,
+        'stem': match.group('stem'),
+        'start': int(match.group('start')),
+        'end': int(match.group('end')),
+    }
+
+
+def _reconstruct_split_pdf_bytes(filename: str, *, _seen=None):
+    """Rebuild a split PDF from its parent source when the split file is missing."""
+    split_info = _split_pdf_match(filename)
+    if not split_info:
+        return None
+
+    name = split_info['name']
+    if _seen is None:
+        _seen = set()
+    if name in _seen:
+        return None
+    _seen.add(name)
+
+    parent_filename = f"{split_info['stem']}.pdf"
+    parent_path, parent_bytes, _doc = _resolve_pdf_source_direct(parent_filename)
+    if not ((parent_path and parent_path.exists()) or parent_bytes):
+        parent_bytes = _reconstruct_split_pdf_bytes(parent_filename, _seen=_seen)
+    if not ((parent_path and parent_path.exists()) or parent_bytes):
+        return None
+
+    try:
+        from io import BytesIO
+        from pypdf import PdfReader, PdfWriter
+
+        if parent_path and parent_path.exists():
+            reader = PdfReader(str(parent_path))
+        else:
+            reader = PdfReader(BytesIO(parent_bytes))
+        total = len(reader.pages)
+        start = split_info['start']
+        end = split_info['end']
+        if start < 1 or end > total or start > end:
+            return None
+
+        writer = PdfWriter()
+        for page_idx in range(start - 1, end):
+            writer.add_page(reader.pages[page_idx])
+        buffer = BytesIO()
+        writer.write(buffer)
+        return buffer.getvalue()
+    except Exception:
+        return None
+
+
+def _resolve_pdf_source_direct(filename: str, *, part_file: str = '', stem: str = ''):
+    """Return a filesystem path or DB bytes without any split reconstruction."""
+    filename = Path(filename or '').name
+    part_file = Path(part_file or '').name
+    stem = Path(stem or '').name
+
+    if part_file and stem:
+        pdf_path = PROJECT_ROOT / 'input' / 'splits' / stem / part_file
+        if pdf_path.exists():
+            return pdf_path, None, None
+        try:
+            doc = _resolve_catalog_document(part_file) or _resolve_catalog_document(Path(part_file).stem)
+        except Exception:
+            doc = None
+        pdf_bytes = _catalog_document_pdf_bytes(doc)
+        if pdf_bytes:
+            return None, pdf_bytes, doc
+        return pdf_path, None, doc
+
+    pdf_path = _resolve_pdf_path(filename)
+    if pdf_path.exists():
+        try:
+            doc = _resolve_catalog_document(filename)
+        except Exception:
+            doc = None
+        return pdf_path, None, doc
+
+    try:
+        doc = _resolve_catalog_document(filename)
+    except Exception:
+        doc = None
+    pdf_bytes = _catalog_document_pdf_bytes(doc)
+    if pdf_bytes:
+        return None, pdf_bytes, doc
+
+    return pdf_path, None, doc
+
+
+def _resolve_pdf_source(filename: str, *, part_file: str = '', stem: str = ''):
+    """Return a filesystem path or raw PDF bytes for a requested PDF."""
+    pdf_path, pdf_bytes, doc = _resolve_pdf_source_direct(filename, part_file=part_file, stem=stem)
+    if pdf_bytes or (pdf_path and pdf_path.exists()):
+        return pdf_path, pdf_bytes, doc
+
+    lookup_name = part_file or filename
+    reconstructed = _reconstruct_split_pdf_bytes(lookup_name)
+    if reconstructed:
+        return None, reconstructed, doc
+
+    return pdf_path, None, doc
+
+
+def _display_pdf_name(original_filename: str) -> str:
+    """Return a UI-friendly PDF name with a .pdf suffix when needed."""
+    name = Path(str(original_filename or '')).name.strip()
+    if not name:
+        return ''
+    return name if name.lower().endswith('.pdf') else f'{name}.pdf'
+
+
+def _catalog_document_display_status(doc, *, chunk_count: int = 0, running: bool = False) -> str:
+    """Map CatalogDocument state to the UI status labels used across dashboards."""
+    if not doc:
+        return 'Pending'
+
+    status = str(getattr(doc, 'status', '') or '').lower()
+    if status == CatalogDocument.Status.FAILED:
+        return 'Failed'
+    if running and chunk_count == 0 and status in {
+        CatalogDocument.Status.UPLOADED,
+        CatalogDocument.Status.EXTRACTING,
+        CatalogDocument.Status.INDEXING,
+    }:
+        return 'Processing'
+    if chunk_count > 0:
+        return 'Ready'
+    if status in {CatalogDocument.Status.EXTRACTING, CatalogDocument.Status.INDEXING}:
+        return 'Processing'
+    if status in {CatalogDocument.Status.READY, CatalogDocument.Status.REVIEW}:
+        return 'Ready'
+    return 'Pending'
 
 
 def _ensure_catalog_document(pdf_path):
@@ -866,6 +1099,7 @@ def run_pipeline(request):
 def list_pdfs(request):
     input_dir = PROJECT_ROOT / 'input'
     splits_dir = PROJECT_ROOT / 'input' / 'splits'
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
     
     pdfs = sorted(p.name for p in input_dir.glob('*.pdf')) if input_dir.exists() else []
     
@@ -898,109 +1132,168 @@ def list_pdfs(request):
     # Combine filtered main PDFs and split PDFs
     all_pdfs = filtered_pdfs + split_pdfs
 
-    # Also include intermediate split parts that have their own chunks in DB,
-    # even if their sub-parts also have chunks (both sets of chunks are valid).
-    disk_pdf_stems = {Path(p).stem for p in all_pdfs}
-    try:
-        from .models import CatalogDocument, DocumentChunk
-        import re as _re2
-        _split_re = _re2.compile(r'_(custom_)?p\d{4}-\d{4}$', _re2.I)
-        for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED):
-            fn = doc.original_filename
-            if fn in disk_pdf_stems:
-                continue
-            if not _split_re.search(fn):
-                continue
-            if not DocumentChunk.objects.filter(document=doc).exists():
-                continue
-            all_pdfs.append(fn + '.pdf')
-            disk_pdf_stems.add(fn)
-    except Exception:
-        pass
-
-    # Build set of stems that already have chunks (DB only)
-    chunked = set()
-    try:
-        from .models import CatalogDocument, DocumentChunk
-        for doc in CatalogDocument.objects.all():
-            if DocumentChunk.objects.filter(document=doc).exists():
-                chunked.add(doc.original_filename)
-    except Exception:
-        pass
-
     # Gather rich metadata for each PDF/part
     pdf_details = []
-    import re
     try:
+        from django.db.models import Count, Q
         from .models import CatalogDocument, DocumentChunk, IngestionJob, ProductFamily
+
+        docs = list(
+            CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED)
+            .order_by('original_filename', '-version', '-id')
+            .only('id', 'original_filename', 'checksum_sha256', 'status', 'version')
+        )
+
+        docs_by_name = {}
+        docs_by_checksum = {}
+        for doc in docs:
+            original_name = Path(str(doc.original_filename or '').strip()).name
+            display_name = _display_pdf_name(original_name)
+            stem = Path(original_name).stem
+            for key in (original_name, display_name, stem):
+                if key and key not in docs_by_name:
+                    docs_by_name[key] = doc
+            if doc.checksum_sha256 and doc.checksum_sha256 not in docs_by_checksum:
+                docs_by_checksum[doc.checksum_sha256] = doc
+
+        doc_ids = [doc.id for doc in docs]
+        chunk_stats = {}
+        if doc_ids:
+            for row in (
+                DocumentChunk.objects.filter(document_id__in=doc_ids)
+                .values('document_id')
+                .annotate(
+                    total=Count('id'),
+                    indexed=Count('id', filter=Q(index_status=DocumentChunk.IndexStatus.INDEXED)),
+                    stale=Count('id', filter=Q(index_status=DocumentChunk.IndexStatus.STALE)),
+                )
+            ):
+                chunk_stats[row['document_id']] = row
+
+        family_counts = {}
+        family_review_counts = {}
+        if doc_ids:
+            for row in (
+                ProductFamily.objects.filter(
+                    document_id__in=doc_ids,
+                )
+                .values('document_id')
+                .annotate(
+                    approved=Count('id', filter=Q(review_status=ProductFamily.ReviewStatus.APPROVED)),
+                    needs_review=Count('id', filter=Q(review_status=ProductFamily.ReviewStatus.NEEDS_REVIEW)),
+                    rejected=Count('id', filter=Q(review_status=ProductFamily.ReviewStatus.REJECTED)),
+                )
+            ):
+                family_counts[row['document_id']] = row.get('approved', 0) or 0
+                family_review_counts[row['document_id']] = row
+
+        running_job_ids = set(
+            IngestionJob.objects.filter(
+                document_id__in=doc_ids,
+                status__in=[IngestionJob.Status.PENDING, IngestionJob.Status.RUNNING],
+            ).values_list('document_id', flat=True)
+        )
+
+        # Add DB-backed documents even when there is no matching file in input/.
+        # This keeps the UI aligned with the actual CatalogDocument table instead of
+        # relying only on what happens to exist on disk.
+        seen_pdfs = set(all_pdfs)
+        for doc in docs:
+            display_name = _display_pdf_name(doc.original_filename)
+            if display_name and display_name not in seen_pdfs:
+                all_pdfs.append(display_name)
+                seen_pdfs.add(display_name)
+
+        # Also include intermediate split parts that have their own chunks in DB,
+        # even if their sub-parts also have chunks (both sets of chunks are valid).
+        disk_pdf_stems = {Path(p).stem for p in all_pdfs}
+        for doc in docs:
+            original_name = Path(str(doc.original_filename or '').strip()).name
+            if not original_name:
+                continue
+            stem = Path(original_name).stem
+            if stem in disk_pdf_stems:
+                continue
+            if not split_re.search(stem):
+                continue
+            if chunk_stats.get(doc.id, {}).get('total', 0) == 0:
+                continue
+            display_name = _display_pdf_name(original_name)
+            if display_name and display_name not in seen_pdfs:
+                all_pdfs.append(display_name)
+                seen_pdfs.add(display_name)
+                disk_pdf_stems.add(stem)
+
+        # Build set of stems that already have chunks (DB only)
+        chunked = {
+            doc.original_filename
+            for doc in docs
+            if chunk_stats.get(doc.id, {}).get('total', 0) > 0
+        }
+
         for pdf_name in all_pdfs:
-            pdf_path = _resolve_pdf_path(pdf_name)
-            stem = pdf_path.stem
-            
-            doc = None
-            if pdf_path.exists():
-                try:
-                    import hashlib
-                    checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
-                    doc = CatalogDocument.objects.filter(checksum_sha256=checksum).first()
-                except Exception:
-                    pass
-            
+            pdf_name = Path(pdf_name).name
+            stem = Path(pdf_name).stem
+            doc = docs_by_name.get(pdf_name) or docs_by_name.get(stem)
+
+            # Last resort: if a disk filename was renamed after upload, try a checksum
+            # match only for this one item instead of querying the database repeatedly.
             if not doc:
-                doc = CatalogDocument.objects.filter(original_filename=stem).order_by('-version').first()
-            if not doc:
-                doc = CatalogDocument.objects.filter(original_filename=pdf_name).order_by('-version').first()
-                
+                pdf_path = input_dir / pdf_name
+                if pdf_path.exists():
+                    try:
+                        import hashlib
+                        checksum = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+                        doc = docs_by_checksum.get(checksum)
+                    except Exception:
+                        pass
+
             chunks_count = 0
             product_families_count = 0
+            approved_families_count = 0
+            needs_review_families_count = 0
+            rejected_families_count = 0
+            review_status = 'pending'
             status = 'Pending'
             doc_id = None
             has_embeddings = False
-            
+
             if doc:
                 doc_id = str(doc.id)
-                chunks_count = DocumentChunk.objects.filter(document=doc).count()
-                product_families_count = doc.product_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
-                
-                # Check for running ingestion job
-                running_job = IngestionJob.objects.filter(
-                    document=doc,
-                    status__in=[IngestionJob.Status.PENDING, IngestionJob.Status.RUNNING]
-                ).first()
-                
-                if running_job:
-                    # Only show Processing if chunks don't exist yet
-                    # (avoids stale job showing Processing after chunks are already created)
-                    if chunks_count == 0:
-                        status = 'Processing'
-                    else:
-                        status = 'Ready'
+                stats = chunk_stats.get(doc.id, {})
+                chunks_count = stats.get('total', 0) or 0
+                review_stats = family_review_counts.get(doc.id, {})
+                approved_families_count = family_counts.get(doc.id, 0) or 0
+                needs_review_families_count = review_stats.get('needs_review', 0) or 0
+                rejected_families_count = review_stats.get('rejected', 0) or 0
+                if needs_review_families_count > 0:
+                    review_status = ProductFamily.ReviewStatus.NEEDS_REVIEW
+                elif approved_families_count > 0:
+                    review_status = ProductFamily.ReviewStatus.APPROVED
+                elif chunks_count > 0:
+                    review_status = ProductFamily.ReviewStatus.NEEDS_REVIEW
                 else:
-                    if doc.status == CatalogDocument.Status.UPLOADED:
-                        status = 'Pending'
-                    elif doc.status == CatalogDocument.Status.EXTRACTING:
-                        status = 'Processing'
-                    elif doc.status == CatalogDocument.Status.INDEXING:
-                        status = 'Processing'
-                    elif doc.status == CatalogDocument.Status.READY:
-                        status = 'Ready'
-                    elif doc.status == CatalogDocument.Status.REVIEW:
-                        status = 'Ready'
-                    elif doc.status == CatalogDocument.Status.FAILED:
-                        status = 'Failed'
-                    else:
-                        status = doc.status
-                
-                has_indexed = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.INDEXED).exists()
-                has_stale   = DocumentChunk.objects.filter(document=doc, index_status=DocumentChunk.IndexStatus.STALE).exists()
+                    review_status = 'pending'
+                product_families_count = approved_families_count
+
+                status = _catalog_document_display_status(
+                    doc,
+                    chunk_count=chunks_count,
+                    running=doc.id in running_job_ids,
+                )
+
+                has_indexed = (stats.get('indexed', 0) or 0) > 0
+                has_stale = (stats.get('stale', 0) or 0) > 0
                 has_embeddings = has_indexed and not has_stale
-            else:
-                status = 'Pending'
-            
+
             pdf_details.append({
                 'name': pdf_name,
                 'chunks_count': chunks_count,
                 'product_families_count': product_families_count,
+                'approved_families_count': approved_families_count,
+                'needs_review_families_count': needs_review_families_count,
+                'rejected_families_count': rejected_families_count,
+                'review_status': review_status,
                 'status': status,
                 'document_id': doc_id,
                 'has_embeddings': has_embeddings
@@ -1013,7 +1306,6 @@ def list_pdfs(request):
         'pdfs': all_pdfs, 
         'chunked': list(chunked),
         'pdf_details': pdf_details,
-        'v2_ingest_enabled': settings.CATALOG_RAG_V2_INGEST
     })
 
 
@@ -1200,20 +1492,26 @@ def pdf_preview(request):
     filename = request.GET.get('pdf', '').strip()
     part_file = request.GET.get('part', '').strip()
     stem = request.GET.get('stem', '').strip()
-    if part_file:
-        if not stem:
-            return JsonResponse({'error': 'Missing split stem.'}, status=400)
-        filename = Path(part_file).name
-        pdf_path = PROJECT_ROOT / 'input' / 'splits' / Path(stem).name / filename
-    else:
-        if not filename:
-            return JsonResponse({'error': 'No PDF specified.'}, status=400)
-        pdf_path = _resolve_pdf_path(filename)
-                            
-    if not pdf_path.exists():
+    if part_file and not stem:
+        return JsonResponse({'error': 'Missing split stem.'}, status=400)
+    if not filename and not part_file:
+        return JsonResponse({'error': 'No PDF specified.'}, status=400)
+
+    pdf_path, pdf_bytes, _doc = _resolve_pdf_source(
+        filename or part_file,
+        part_file=part_file,
+        stem=stem,
+    )
+
+    has_path = bool(pdf_path and pdf_path.exists())
+    has_bytes = bool(pdf_bytes)
+    if not has_path and not has_bytes:
         return JsonResponse({'error': 'PDF not found.'}, status=404)
     try:
-        doc   = fitz.open(str(pdf_path))
+        if has_path:
+            doc = fitz.open(str(pdf_path))
+        else:
+            doc = fitz.open(stream=pdf_bytes, filetype='pdf')
         total = len(doc)
         # Support paginated loading: ?page=1&per_page=50
         per_page = min(200, max(1, int(request.GET.get('per_page', total))))
@@ -1568,17 +1866,21 @@ def pdf_page_count(request):
     filename = request.GET.get('pdf', '').strip()
     if not filename:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
-    pdf_path = _resolve_pdf_path(filename)
-    if not pdf_path.exists():
+    pdf_path, pdf_bytes, _doc = _resolve_pdf_source(filename)
+    if not (pdf_path and pdf_path.exists()) and not pdf_bytes:
         return JsonResponse({'error': 'File not found.'}, status=404)
 
-    cache_key = f"{filename}:{pdf_path.stat().st_mtime}"
+    cache_key = f"{filename}:{pdf_path.stat().st_mtime}" if pdf_path and pdf_path.exists() else f"{filename}:binary:{len(pdf_bytes or b'')}"
     if cache_key in _page_count_cache:
         return JsonResponse({'pages': _page_count_cache[cache_key], 'filename': filename})
 
     try:
         from pypdf import PdfReader
-        pages = len(PdfReader(str(pdf_path)).pages)
+        if pdf_path and pdf_path.exists():
+            pages = len(PdfReader(str(pdf_path)).pages)
+        else:
+            from io import BytesIO
+            pages = len(PdfReader(BytesIO(pdf_bytes)).pages)
         _page_count_cache[cache_key] = pages
         return JsonResponse({'pages': pages, 'filename': filename})
     except Exception as e:
@@ -1602,15 +1904,20 @@ def split_pdf(request):
     if not filename or pages_per < 1:
         return JsonResponse({'error': 'Invalid parameters.'}, status=400)
 
-    pdf_path = _resolve_pdf_path(filename)
-    if not pdf_path.exists():
+    pdf_path, pdf_bytes, _doc = _resolve_pdf_source(filename)
+    if not (pdf_path and pdf_path.exists()) and not pdf_bytes:
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
     try:
         from pypdf import PdfReader, PdfWriter
-        reader   = PdfReader(str(pdf_path))
+        if pdf_path and pdf_path.exists():
+            reader = PdfReader(str(pdf_path))
+            stem = pdf_path.stem
+        else:
+            from io import BytesIO
+            reader = PdfReader(BytesIO(pdf_bytes))
+            stem = Path(filename).stem
         total    = len(reader.pages)
-        stem     = pdf_path.stem
         out_dir  = PROJECT_ROOT / 'input' / 'splits' / stem
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1755,15 +2062,20 @@ def split_pdf_custom(request):
     if not filename or not ranges:
         return JsonResponse({'error': 'Invalid parameters.'}, status=400)
 
-    pdf_path = _resolve_pdf_path(filename)
-    if not pdf_path.exists():
+    pdf_path, pdf_bytes, _doc = _resolve_pdf_source(filename)
+    if not (pdf_path and pdf_path.exists()) and not pdf_bytes:
         return JsonResponse({'error': f'File not found: {filename}'}, status=404)
 
     try:
         from pypdf import PdfReader, PdfWriter
-        reader  = PdfReader(str(pdf_path))
+        if pdf_path and pdf_path.exists():
+            reader = PdfReader(str(pdf_path))
+            stem = pdf_path.stem
+        else:
+            from io import BytesIO
+            reader = PdfReader(BytesIO(pdf_bytes))
+            stem = Path(filename).stem
         total   = len(reader.pages)
-        stem    = pdf_path.stem
         out_dir = PROJECT_ROOT / 'input' / 'splits' / stem
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2100,122 +2412,87 @@ def list_chunks(request):
     from .models import CatalogDocument, DocumentChunk
 
     pdf_stem = Path(pdf_name).stem
+    split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
     index_only = request.GET.get('index') == '1'  # True = Index & Embed panel, exclude STALE
     doc = _resolve_catalog_document(pdf_name)
 
     document_id = str(doc.id) if doc else None
 
-    # Check if this is a parent stem with a splits directory — if so, aggregate all leaf parts
-    splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
-    if splits_dir.exists():
-        leaf_parts = [p for p in sorted(splits_dir.rglob('*.pdf'))
-                      if not (PROJECT_ROOT / 'input' / 'splits' / p.stem).exists()]
-        split_stems = [p.stem for p in leaf_parts]
-        split_docs = CatalogDocument.objects.filter(
-            original_filename__in=split_stems
-        ).order_by('original_filename')
-        if split_docs.exists():
-            document_id = str(split_docs.first().id)
-            ordinal_offset = 0
-            for split_doc in split_docs:
-                qs = DocumentChunk.objects.filter(document=split_doc)
-                if index_only:
-                    qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
-                for c in qs.order_by('ordinal'):
-                    family = c.family
-                    prod_name = 'General Info'
-                    if family:
-                        prod_name = family.product_name
-                    elif c.variant and c.variant.family:
-                        prod_name = c.variant.family.product_name
-                    chunks.append({
-                        'id': str(c.id),
-                        'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
-                        'content': c.text,
-                        'excerpt': _chunk_excerpt(c.text),
-                        'ordinal': ordinal_offset + c.ordinal,
-                        'product_name': prod_name,
-                        'family_id': str(c.family_id) if c.family_id else '',
-                        'family_name': family.product_name if family else '',
-                        'family_code': family.product_code if family else '',
-                        'family_status': family.review_status if family else '',
-                        'page_start': c.page_start,
-                        'page_end': c.page_end,
-                        'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
-                    })
-                ordinal_offset += qs.count()
-            return JsonResponse({'document_id': document_id, 'chunks': chunks})
+    docs_to_query = []
+    if not doc or not split_re.search(pdf_stem):
+        split_docs = _resolve_split_docs_for_parent(pdf_stem)
+        if split_docs:
+          docs_to_query = split_docs
 
-    if doc:
-        qs = DocumentChunk.objects.filter(document=doc)
-        if index_only:
-            qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
-        db_chunks = qs.order_by('ordinal')
-        for c in db_chunks:
-            family = c.family
-            prod_name = 'General Info'
-            if family:
-                prod_name = family.product_name
-            elif c.variant and c.variant.family:
-                prod_name = c.variant.family.product_name
-            chunks.append({
-                'id': str(c.id),
-                'filename': f"chunk_{c.ordinal:04d}.md",
-                'content': c.text,
-                'excerpt': _chunk_excerpt(c.text),
-                'ordinal': c.ordinal,
-                'product_name': prod_name,
-                'family_id': str(c.family_id) if c.family_id else '',
-                'family_name': family.product_name if family else '',
-                'family_code': family.product_code if family else '',
-                'family_status': family.review_status if family else '',
-                'page_start': c.page_start,
-                'page_end': c.page_end,
-                'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
-            })
-    else:
-        # No direct doc — check if this is a parent stem with split part documents
-        splits_dir = PROJECT_ROOT / 'input' / 'splits' / pdf_stem
-        if splits_dir.exists():
-            leaf_parts = [p for p in sorted(splits_dir.rglob('*.pdf'))
-                          if not (PROJECT_ROOT / 'input' / 'splits' / p.stem).exists()]
-            split_stems = [p.stem for p in leaf_parts]
-            split_docs = CatalogDocument.objects.filter(
-                original_filename__in=split_stems
-            ).order_by('original_filename')
-            if split_docs.exists():
-                # Use first split doc's id for chat context (covers all splits)
-                document_id = str(split_docs.first().id)
-                ordinal_offset = 0
-                for split_doc in split_docs:
-                    qs = DocumentChunk.objects.filter(document=split_doc)
-                    if index_only:
-                        qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
-                    db_chunks = qs.order_by('ordinal')
-                    for c in db_chunks:
-                        family = c.family
-                        prod_name = 'General Info'
-                        if family:
-                            prod_name = family.product_name
-                        elif c.variant and c.variant.family:
-                            prod_name = c.variant.family.product_name
-                        chunks.append({
-                            'id': str(c.id),
-                            'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
-                            'content': c.text,
-                            'excerpt': _chunk_excerpt(c.text),
-                            'ordinal': ordinal_offset + c.ordinal,
-                            'product_name': prod_name,
-                            'family_id': str(c.family_id) if c.family_id else '',
-                            'family_name': family.product_name if family else '',
-                            'family_code': family.product_code if family else '',
-                            'family_status': family.review_status if family else '',
-                            'page_start': c.page_start,
-                            'page_end': c.page_end,
-                            'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
-                        })
-                    ordinal_offset += qs.count()
+    if not docs_to_query:
+        if not doc:
+            return JsonResponse({
+                'error': f'PDF document not found for "{pdf_name}". Please ensure chunks have been created for this PDF.'
+            }, status=404)
+        docs_to_query = [doc]
 
+    if not doc:
+        doc = docs_to_query[0]
+        document_id = str(doc.id)
+
+    if len(docs_to_query) > 1:
+        document_id = str(docs_to_query[0].id)
+        ordinal_offset = 0
+        for split_doc in docs_to_query:
+            qs = DocumentChunk.objects.filter(document=split_doc)
+            if index_only:
+                qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+            for c in qs.order_by('ordinal'):
+                family = c.family
+                prod_name = 'General Info'
+                if family:
+                    prod_name = family.product_name
+                elif c.variant and c.variant.family:
+                    prod_name = c.variant.family.product_name
+                chunks.append({
+                    'id': str(c.id),
+                    'filename': f"chunk_{ordinal_offset + c.ordinal:04d}.md",
+                    'content': c.text,
+                    'excerpt': _chunk_excerpt(c.text),
+                    'ordinal': ordinal_offset + c.ordinal,
+                    'product_name': prod_name,
+                    'family_id': str(c.family_id) if c.family_id else '',
+                    'family_name': family.product_name if family else '',
+                    'family_code': family.product_code if family else '',
+                    'family_status': family.review_status if family else '',
+                    'page_start': c.page_start,
+                    'page_end': c.page_end,
+                    'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
+                })
+            ordinal_offset += qs.count()
+        return JsonResponse({'document_id': document_id, 'chunks': chunks})
+
+    qs = DocumentChunk.objects.filter(document=doc)
+    if index_only:
+        qs = qs.exclude(index_status=DocumentChunk.IndexStatus.STALE)
+    db_chunks = qs.order_by('ordinal')
+    for c in db_chunks:
+        family = c.family
+        prod_name = 'General Info'
+        if family:
+            prod_name = family.product_name
+        elif c.variant and c.variant.family:
+            prod_name = c.variant.family.product_name
+        chunks.append({
+            'id': str(c.id),
+            'filename': f"chunk_{c.ordinal:04d}.md",
+            'content': c.text,
+            'excerpt': _chunk_excerpt(c.text),
+            'ordinal': c.ordinal,
+            'product_name': prod_name,
+            'family_id': str(c.family_id) if c.family_id else '',
+            'family_name': family.product_name if family else '',
+            'family_code': family.product_code if family else '',
+            'family_status': family.review_status if family else '',
+            'page_start': c.page_start,
+            'page_end': c.page_end,
+            'status': 'Embedded' if c.index_status == 'indexed' else 'Ready',
+        })
     return JsonResponse({'document_id': document_id, 'chunks': chunks})
 
 
@@ -2255,9 +2532,16 @@ def _serialize_family_editor_family(family):
         'variants': [
             {
                 'id': str(variant.id),
+                'variant_id': str(variant.id),
+                'product_code': variant.product_code,
+                'order_number': variant.order_number,
                 'name': variant.name,
+                'size': variant.size,
+                'unit': variant.unit,
+                'specifications': variant.specifications,
+                'ordering_data': variant.ordering_data,
             }
-            for variant in family.variants.all().order_by('name', 'id')
+            for variant in family.variants.all().order_by('product_code', 'order_number', 'name', 'id')
         ],
         'chunks': [
             {
@@ -2299,15 +2583,51 @@ def _clean_family_variants(value):
     for raw in value[:50]:
         if not isinstance(raw, dict):
             continue
+        variant_id = str(raw.get('variant_id') or raw.get('id') or '').strip()
+        product_code = re.sub(r'\s+', ' ', str(raw.get('product_code') or '').strip())[:160]
+        order_number = re.sub(r'\s+', ' ', str(raw.get('order_number') or '').strip())[:160]
         name = re.sub(r'\s+', ' ', str(raw.get('name') or '').strip())[:500]
-        if not name:
+        size = re.sub(r'\s+', ' ', str(raw.get('size') or '').strip())[:255]
+        unit = re.sub(r'\s+', ' ', str(raw.get('unit') or '').strip())[:80]
+        specifications = _clean_variant_json(raw.get('specifications'))
+        ordering_data = _clean_variant_json(raw.get('ordering_data'))
+        if not any((product_code, order_number, name, size, unit)) and not specifications and not ordering_data:
             continue
-        key = name.lower()
+        key = json.dumps({
+            'product_code': product_code,
+            'order_number': order_number,
+            'name': name,
+            'size': size,
+            'unit': unit,
+            'specifications': specifications,
+            'ordering_data': ordering_data,
+        }, sort_keys=True, ensure_ascii=True)
         if key in seen:
             continue
         seen.add(key)
-        variants.append({'name': name})
+        variants.append({
+            'variant_id': variant_id,
+            'product_code': product_code,
+            'order_number': order_number,
+            'name': name,
+            'size': size,
+            'unit': unit,
+            'specifications': specifications,
+            'ordering_data': ordering_data,
+        })
     return variants
+
+
+def _clean_variant_json(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _variant_row_hash(variant):
@@ -2465,6 +2785,7 @@ def save_product_family(request):
 
     pdf_name = str(body.get('pdf', '')).strip()
     product_name = str(body.get('product_name', '')).strip()
+    product_code = re.sub(r'\s+', ' ', str(body.get('product_code', '')).strip())[:160]
     raw_category = str(body.get('raw_category', '')).strip()
     aliases = _clean_family_aliases(body.get('aliases', []))
     variants = _clean_family_variants(body.get('variants', []))
@@ -2474,7 +2795,7 @@ def save_product_family(request):
     if not pdf_name:
         return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
     if not product_name:
-        return JsonResponse({'error': 'Actual product name is required.'}, status=400)
+        return JsonResponse({'error': 'Product name is required.'}, status=400)
     if review_status not in {ProductFamily.ReviewStatus.APPROVED, ProductFamily.ReviewStatus.NEEDS_REVIEW, ProductFamily.ReviewStatus.REJECTED}:
         return JsonResponse({'error': 'Invalid review status.'}, status=400)
     if not isinstance(chunk_ids, list):
@@ -2482,24 +2803,22 @@ def save_product_family(request):
 
     chunk_ids = [str(chunk_id).strip() for chunk_id in chunk_ids if str(chunk_id).strip()]
     if not chunk_ids:
-        return JsonResponse({'error': 'Select at least one chunk to save a family.'}, status=400)
+        return JsonResponse({'error': 'Select at least one chunk to save a product.'}, status=400)
     doc = _resolve_catalog_document(pdf_name)
     if not doc:
         return JsonResponse({'error': 'PDF not found.'}, status=404)
 
     from django.db import transaction
-    from django.db.models import Count
     from django.db.models import Prefetch
     from django.utils import timezone
     from .models import ProductVariant
     from .services.taxonomy import resolve_category
-    import re
 
     with transaction.atomic():
         if family_id:
             family = ProductFamily.objects.select_for_update().filter(id=family_id).first()
             if not family:
-                return JsonResponse({'error': 'Family not found.'}, status=404)
+                return JsonResponse({'error': 'Product not found.'}, status=404)
             # Use the family's actual document for chunk lookups
             doc = family.document
             current_family_chunks = list(
@@ -2530,10 +2849,12 @@ def save_product_family(request):
             raw_category=raw_category,
         )
         family.product_name = product_name
-        family.product_code = ''
+        if product_code or not family_id:
+            family.product_code = product_code
         family.raw_category = raw_category
         family.aliases = aliases
-        family.normalized_category = category
+        if category is not None or not family_id:
+            family.normalized_category = category
         family.review_status = review_status
         computed_page_start = min((chunk.page_start for chunk in chunks if chunk.page_start), default=0)
         computed_page_end = max((chunk.page_end for chunk in chunks if chunk.page_end), default=computed_page_start)
@@ -2541,19 +2862,52 @@ def save_product_family(request):
         family.page_end = int(body.get('page_end') or computed_page_end or family.page_end or family.page_start or 0)
         family.save()
 
-        DocumentChunk.objects.filter(variant__family=family).update(variant=None)
-        family.variants.all().delete()
+        locked_variants = list(family.variants.select_for_update().all())
+        existing_variants = {
+            str(variant.id): variant
+            for variant in locked_variants
+        }
+        existing_variants_by_hash = {
+            variant.source_row_hash: variant
+            for variant in locked_variants
+        }
         for variant in variants:
-            source_row_hash = _variant_row_hash(variant)
+            variant_id = variant.get('variant_id') or ''
+            row_hash = _variant_row_hash(variant)
+            existing_variant = existing_variants.get(variant_id) or existing_variants_by_hash.get(row_hash)
+            source_row_hash = existing_variant.source_row_hash if existing_variant else row_hash
+            if existing_variant:
+                existing_variant.product_code = variant['product_code']
+                existing_variant.order_number = variant['order_number']
+                existing_variant.name = variant['name']
+                existing_variant.size = variant['size']
+                existing_variant.unit = variant['unit']
+                existing_variant.specifications = variant['specifications']
+                existing_variant.ordering_data = variant['ordering_data']
+                existing_variant.page_start = family.page_start
+                existing_variant.page_end = family.page_end
+                existing_variant.save(update_fields=(
+                    'product_code',
+                    'order_number',
+                    'name',
+                    'size',
+                    'unit',
+                    'specifications',
+                    'ordering_data',
+                    'page_start',
+                    'page_end',
+                    'updated_at',
+                ))
+                continue
             ProductVariant.objects.create(
                 family=family,
-                product_code='',
-                order_number='',
+                product_code=variant['product_code'],
+                order_number=variant['order_number'],
                 name=variant['name'],
-                size='',
-                unit='',
-                specifications={},
-                ordering_data={},
+                size=variant['size'],
+                unit=variant['unit'],
+                specifications=variant['specifications'],
+                ordering_data=variant['ordering_data'],
                 page_start=family.page_start,
                 page_end=family.page_end,
                 source_row_hash=source_row_hash,
@@ -2575,16 +2929,6 @@ def save_product_family(request):
                     chunk.family = None
                     chunk.updated_at = updated_at
                 DocumentChunk.objects.bulk_update(deselected_chunks, ('family', 'updated_at'))
-
-        empty_family_ids = list(
-            ProductFamily.objects.filter(document=doc)
-            .exclude(id=family.id)
-            .annotate(chunk_total=Count('chunks'))
-            .filter(chunk_total=0)
-            .values_list('id', flat=True)
-        )
-        if empty_family_ids:
-            ProductFamily.objects.filter(id__in=empty_family_ids).delete()
 
         refresh_chunk_ids = {chunk.id for chunk in current_family_chunks} | selected_chunk_ids
         indexed_chunks = DocumentChunk.objects.filter(
@@ -2671,7 +3015,7 @@ def save_product_family(request):
         ).order_by('ordinal')
     ]
     return JsonResponse({
-        'message': f'Product family "{product_name}" saved.',
+        'message': f'Product "{product_name}" saved.',
         'family': _serialize_family_editor_family(family),
         'chunks': chunks,
         'families': families,
@@ -2792,8 +3136,6 @@ def _v2_job_payload(job):
 def upload_pdf_v2(request):
     if not request.user.is_staff:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
-    if not settings.CATALOG_RAG_V2_INGEST:
-        return JsonResponse({'error': 'Catalog RAG V2 ingestion is not enabled.'}, status=409)
 
     uploaded = request.FILES.get('pdf')
     if not uploaded:
@@ -2852,8 +3194,6 @@ def ingestion_job_status_v2(request, job_id):
 def retry_ingestion_job_v2(request, job_id):
     if not request.user.is_staff:
         return JsonResponse({'error': 'Permission denied.'}, status=403)
-    if not settings.CATALOG_RAG_V2_INGEST:
-        return JsonResponse({'error': 'Catalog RAG V2 ingestion is not enabled.'}, status=409)
 
     from django.db import transaction
     from .models import CatalogDocument, IngestionJob
@@ -2944,7 +3284,7 @@ def execute_index_v2(request, document_id):
 
     try:
         document = CatalogDocument.objects.get(pk=document_id)
-        result = index_document(document, confirmed_embedding_count=confirmed, allow_disabled=True)
+        result = index_document(document, confirmed_embedding_count=confirmed)
         
         # Update progress to 'indexed' (75%) after successful indexing
         pdf_progress = request.session.get('pdf_progress', {})

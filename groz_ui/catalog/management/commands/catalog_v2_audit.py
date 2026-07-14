@@ -25,9 +25,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         report = {
-            "feature_flags": {
-                "ingest": bool(settings.CATALOG_RAG_V2_INGEST),
-            },
+            "mode": "v2-only",
             "legacy_postgres": self._legacy_postgres_stats(),
             "v2_postgres": self._v2_postgres_stats(),
             "filesystem": self._filesystem_stats(hash_pdfs=options["hash_pdfs"]),
@@ -44,7 +42,7 @@ class Command(BaseCommand):
         qd = report["qdrant"]
         v2 = report["v2_postgres"]
         self.stdout.write("Catalog RAG V2 readiness audit (read-only)")
-        self.stdout.write(f"  V2 ingest enabled    : {report['feature_flags']['ingest']}")
+        self.stdout.write(f"  Mode                  : {report['mode']}")
         self.stdout.write(f"  Legacy products       : {pg.get('products', 0)}")
         self.stdout.write(f"  Legacy source values  : {pg.get('source_pdfs', 0)}")
         self.stdout.write(f"  Raw categories        : {pg.get('categories', 0)}")

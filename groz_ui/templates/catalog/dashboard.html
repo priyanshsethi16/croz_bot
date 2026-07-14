@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=grouped-rows-20260702e"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=grouped-rows-20260713c"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -71,7 +71,7 @@
         <span class="step-num">1</span>
       </button>
       <button class="sidebar-link" data-panel="families" onclick="showPanel('families')">
-        <i class="fa fa-sitemap"></i> Product Families
+        <i class="fa fa-sitemap"></i> Products &amp; Variants
         <span class="step-num">2</span>
       </button>
       <button class="sidebar-link" data-panel="chunk" onclick="showPanel('chunk')">
@@ -111,7 +111,7 @@
         <button class="sidebar-toggle" id="sidebar-toggle"><i class="fa fa-bars"></i></button>
         <div>
           <h1>{% if is_admin %}Admin <span>Dashboard</span>{% else %}User <span>Dashboard</span>{% endif %}</h1>
-          <p>{% if is_admin %}Manage catalog PDFs — upload, chunk, review families, and index for semantic search{% else %}View catalog status and test product queries{% endif %}</p>
+          <p>{% if is_admin %}Manage catalog PDFs — upload, chunk, review products, and index for semantic search{% else %}View catalog status and test product queries{% endif %}</p>
         </div>
       </div>
     </div>
@@ -168,8 +168,8 @@
       <div class="step-item" data-step="families" onclick="showPanel('families')">
         <div class="step-circle">3</div>
         <div class="step-text">
-          <div class="step-title">Product Families</div>
-          <div class="step-sub">Review and group chunks</div>
+          <div class="step-title">Products &amp; Variants</div>
+          <div class="step-sub">Review products and chunk mapping</div>
         </div>
       </div>
       <div class="step-item" data-step="index" onclick="showPanel('index')">
@@ -219,7 +219,7 @@
         </div>
         <div class="milestone" data-progress-step="families">
           <span><i class="fa fa-sitemap"></i></span>
-          <b>Product Families</b>
+          <b>Products &amp; Variants</b>
           <small>60%</small>
         </div>
         <div class="milestone" data-progress-step="index">
@@ -572,6 +572,18 @@
               transition: border-color 0.15s;
             }
             .panel-search-input:focus { border-color: var(--orange); }
+            .panel-filter-select {
+              width: 100%;
+              padding: 7px 10px;
+              border: 1px solid #e2e8f0;
+              border-radius: 6px;
+              font-size: 13px;
+              outline: none;
+              transition: border-color 0.15s;
+              background: #fff;
+              color: #334155;
+            }
+            .panel-filter-select:focus { border-color: var(--orange); }
             .panel-search-count {
               font-size: 12px;
               color: #888;
@@ -599,7 +611,26 @@
               <i class="fa fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px"></i>
               <input type="text" id="chunk-panel-search" placeholder="Search PDFs…" oninput="_chunkPanelFilter()" class="panel-search-input">
             </div>
-            <span id="chunk-panel-count" class="panel-search-count"></span>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:0 0 180px;min-width:150px;max-width:180px">
+              <span style="font-size:11px;color:#64748b;font-weight:600">Chunk status</span>
+              <select id="chunk-panel-status" class="panel-filter-select" onchange="_chunkPanelFilter()">
+                <option value="all">All statuses</option>
+                <option value="ready">Ready</option>
+                <option value="pending">Pending</option>
+                <option value="processing">Processing</option>
+                <option value="partial">Partial</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;flex:0 0 190px;min-width:160px;max-width:190px">
+              <span style="font-size:11px;color:#64748b;font-weight:600">Review status</span>
+              <select id="chunk-panel-review-status" class="panel-filter-select" onchange="_chunkPanelFilter()">
+                <option value="all">All review statuses</option>
+                <option value="approved">Approved</option>
+                <option value="needs_review">Needs review</option>
+              </select>
+            </div>
+            <span id="chunk-panel-count" class="panel-search-count" style="margin-left:auto"></span>
           </div>
           <div class="table-wrap" style="margin-bottom: 20px;">
             <table class="catalog-table">
@@ -632,9 +663,9 @@
           </div>
           <div class="log-output" id="chunk-log"></div>
           <div class="next-step-bar" id="next-to-index" style="display:none">
-            <p><i class="fa fa-check-circle"></i> Chunks created! Now review product families.</p>
+            <p><i class="fa fa-check-circle"></i> Chunks created! Now review products.</p>
             <button class="btn btn-primary btn-sm" onclick="showPanel('families')">
-              Next: Product Families <i class="fa fa-arrow-right"></i>
+              Next: Products &amp; Variants <i class="fa fa-arrow-right"></i>
             </button>
           </div>
         </div>
@@ -650,8 +681,8 @@
           <div class="panel-head-left">
             <div class="panel-head-icon"><i class="fa fa-sitemap"></i></div>
             <div>
-              <h3>Step 3 — Product Families</h3>
-              <p>Group extracted chunks into canonical product families before indexing</p>
+              <h3>Step 3 — Products &amp; Variants</h3>
+              <p>Review extracted products, variants, and chunk mapping before indexing</p>
             </div>
           </div>
           <span class="badge badge-orange">Step 3 of 5</span>
@@ -660,7 +691,7 @@
           <div class="family-toolbar">
             <div class="family-toolbar-info">
               <i class="fa fa-file-pdf"></i>
-              <span id="family-panel-pdf">Select a chunked PDF to review families</span>
+              <span id="family-panel-pdf">Select a chunked PDF to review products</span>
             </div>
             <div class="family-search-box">
               <i class="fa fa-search"></i>
@@ -679,7 +710,7 @@
           <div class="family-review-layout">
             <section class="family-review-table-panel">
               <div class="family-review-hint" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-                <span>Select one or more chunk rows, then save them into a product family on the right.</span>
+                <span>Select one or more chunk rows, then save them into a product on the right.</span>
                 <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#64748b">
                   <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500">
                     <input type="checkbox" id="family-select-all" onchange="toggleSelectAllFamilyChunks(this.checked)" style="width:15px;height:15px;cursor:pointer">
@@ -695,7 +726,7 @@
                       <th></th>
                       <th style="width: 90px;">CHUNK</th>
                       <th style="width: 240px;">PRODUCT</th>
-                      <th style="width: 190px;">FAMILY</th>
+                      <th style="width: 190px;">ASSIGNED PRODUCT</th>
                       <th style="width: 90px;">PAGES</th>
                       <th>EXCERPT</th>
                       <th style="width: 110px; text-align: center;">STATUS</th>
@@ -705,7 +736,7 @@
                     <tr>
                       <td colspan="8" class="index-table-empty">
                         <i class="fa fa-sitemap" style="font-size: 32px; display: block; margin-bottom: 10px; color: #ccc;"></i>
-                        Loading families…
+                        Loading products…
                       </td>
                     </tr>
                   </tbody>
@@ -718,18 +749,22 @@
               <div class="family-editor-head">
                 <div>
                   <h4>Product Editor</h4>
-                  <p>Create or update the actual product, then assign selected chunks to it.</p>
+                  <p>Create or update the product, then assign selected chunks to it.</p>
                 </div>
                 <span class="badge badge-blue" id="family-editor-chunk-count">0 selected</span>
               </div>
 
               <input type="hidden" id="family-id" />
               <div class="family-field">
-                <label for="family-name">Actual product name</label>
+                <label for="family-name">Product name</label>
                 <input type="text" id="family-name" placeholder="Cordless Impact Drill Driver 13mm (1/2&quot;)" />
               </div>
               <div class="family-field">
-                <label for="family-category">Parent category</label>
+                <label for="family-product-code">Product code</label>
+                <input type="text" id="family-product-code" placeholder="BLMD-358JST" />
+              </div>
+              <div class="family-field">
+                <label for="family-category">Source category</label>
                 <input type="text" id="family-category" placeholder="Cordless Drills" />
               </div>
               <div class="family-field">
@@ -750,7 +785,6 @@
                 <select id="family-review-status">
                   <option value="approved" selected>Approved</option>
                   <option value="needs_review">Needs review</option>
-                  <option value="rejected">Rejected</option>
                 </select>
               </div>
               <div class="family-selection-summary" id="family-selection-summary">
@@ -759,7 +793,7 @@
 
               <div class="family-actions">
                 <button class="btn btn-primary" onclick="saveProductFamily()">
-                  <i class="fa fa-save"></i> Save Family
+                  <i class="fa fa-save"></i> Save Product
                 </button>
                 <button class="btn btn-secondary" onclick="bulkApproveAllFamilies(this)" title="Set all Needs Review families to Approved">
                   <i class="fa fa-check-double"></i> Approve All
@@ -770,17 +804,17 @@
               </div>
 
               <div class="family-card-list-head">
-                <span>Existing Families</span>
+                <span>Existing Products</span>
                 <span id="family-count-badge" class="badge badge-grey">0</span>
               </div>
               <div class="family-card-list" id="family-card-list">
-                <div class="family-card-empty">Load a chunked PDF to review product families.</div>
+                <div class="family-card-empty">Load a chunked PDF to review products.</div>
               </div>
             </aside>
           </div>
 
           <div class="next-step-bar" id="next-to-index-families" style="display:none">
-            <p><i class="fa fa-check-circle"></i> Families saved! Now index approved chunks.</p>
+            <p><i class="fa fa-check-circle"></i> Products saved! Now index approved chunks.</p>
             <button class="btn btn-primary btn-sm" onclick="showPanel('index')">
               Next: Index &amp; Embed <i class="fa fa-arrow-right"></i>
             </button>
@@ -1144,12 +1178,11 @@
 <script>
   const CSRF = '{{ csrf_token }}';
   const IS_ADMIN = {{ is_admin|yesno:"true,false" }};
-  const V2_INGEST_ENABLED = {{ v2_ingest_enabled|yesno:"true,false" }};
   const ADMIN_TOKEN = '{{ admin_access_token }}';
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=group-embed-fix-20260707"></script>
+<script src="{% static 'js/dashboard.js' %}?v=v2-chunk-expand-partial-20260713d"></script>
 
 
 {% endblock %}

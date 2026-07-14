@@ -37,16 +37,6 @@
   <!-- Chat -->
   <div class="chat-panel">
 
-    <!-- Quick filter chips -->
-    <div class="filter-bar">
-      <span class="filter-label">Quick:</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-tachometer-alt"></i> 7500 PSI Products</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-list-ul"></i> Grease Pump Variants</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-barcode"></i> Z-Swivel Cat No.</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-cube"></i> Aluminium Body Valve</span>
-      <span class="filter-chip" onclick="quickAsk(this)"><i class="fa fa-archive"></i> Grease Gun Holder</span>
-    </div>
-
     <!-- Messages -->
     <div class="messages" id="messages">
       <div id="welcome-state" class="welcome-wrap">
@@ -99,5 +89,5 @@
 
 {% block extra_scripts %}
 <script>const CSRF = '{{ csrf_token }}';</script>
-<script src="{% static 'js/chat.js' %}?v=202606301730"></script>
+<script src="{% static 'js/chat.js' %}?v=2026071301"></script>
 {% endblock %}
