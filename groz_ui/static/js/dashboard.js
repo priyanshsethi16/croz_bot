@@ -8,6 +8,27 @@ function closeSidebar() { sidebarEl.classList.remove('open'); overlayEl.classLis
 toggleBtn.addEventListener('click', openSidebar);
 overlayEl.addEventListener('click', closeSidebar);
 
+function normalizeWorkflowSidebarOrder() {
+  const workflowLabel = [...document.querySelectorAll('.sidebar-label')]
+    .find(label => label.textContent.trim().toLowerCase() === 'workflow');
+  const workflowSection = workflowLabel?.closest('.sidebar-section');
+  if (!workflowSection) return;
+
+  [
+    ['upload', '1'],
+    ['chunk', '2'],
+    ['families', '3'],
+    ['index', '4'],
+  ].forEach(([panel, step]) => {
+    const link = workflowSection.querySelector(`.sidebar-link[data-panel="${panel}"]`);
+    if (!link) return;
+    const stepNum = link.querySelector('.step-num');
+    if (stepNum) stepNum.textContent = step;
+    workflowSection.appendChild(link);
+  });
+}
+normalizeWorkflowSidebarOrder();
+
 // Utility to parse and return a clean, user-friendly error message from tracebacks/API responses
 function getCleanErrorMessage(errText) {
   if (!errText) return 'Unknown error occurred.';

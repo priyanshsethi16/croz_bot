@@ -70,12 +70,12 @@
         <i class="fa fa-upload"></i> Upload PDF
         <span class="step-num">1</span>
       </button>
-      <button class="sidebar-link" data-panel="families" onclick="showPanel('families')">
-        <i class="fa fa-sitemap"></i> Products &amp; Variants
-        <span class="step-num">2</span>
-      </button>
       <button class="sidebar-link" data-panel="chunk" onclick="showPanel('chunk')">
         <i class="fa fa-layer-group"></i> Create Chunks
+        <span class="step-num">2</span>
+      </button>
+      <button class="sidebar-link" data-panel="families" onclick="showPanel('families')">
+        <i class="fa fa-sitemap"></i> Products &amp; Variants
         <span class="step-num">3</span>
       </button>
       <button class="sidebar-link" data-panel="index" onclick="showPanel('index')">
@@ -1182,7 +1182,7 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=v2-chunk-expand-partial-20260713d"></script>
+<script src="{% static 'js/dashboard.js' %}?v=v2-workflow-sidebar-order-20260805"></script>
 
 
 {% endblock %}
