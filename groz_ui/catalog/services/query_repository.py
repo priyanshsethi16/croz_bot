@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import uuid
 import re
+import uuid
 from dataclasses import dataclass
 
 from django.db.models import Prefetch, Q
@@ -12,6 +12,9 @@ from django.db.models import Prefetch, Q
 from catalog.models import CatalogDocument, Category, DocumentChunk, ProductFamily, ProductVariant
 from catalog.services.taxonomy import descendant_category_ids, normalize_taxonomy_text
 from rag_pipeline.planner import QueryScope
+
+
+_CODE_SHAPED_VARIANT_NAME = re.compile(r'(?=.*[A-Z])(?=.*\d)[A-Z][A-Z0-9./-]*\Z')
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,11 @@ def _valid_uuids(values: list[str]) -> list[uuid.UUID]:
         except (ValueError, TypeError, AttributeError):
             continue
     return result
+
+
+def _is_code_shaped_variant_name(value: str) -> bool:
+    """Accept reviewed variant names as codes only when their shape is unambiguous."""
+    return bool(_CODE_SHAPED_VARIANT_NAME.fullmatch(str(value or '').strip().upper()))
 
 
 def active_documents(scope: QueryScope):
@@ -180,6 +188,8 @@ def find_by_product_codes(codes: list[str], *, scope: QueryScope) -> list[dict]:
             | Q(variants__product_code__iexact=code)
             | Q(variants__order_number__iexact=code)
         )
+        if _is_code_shaped_variant_name(code):
+            code_filter |= Q(variants__name__iexact=code)
     queryset = _family_queryset(scope).filter(code_filter)
     products = [_serialize_family(family) for family in queryset.distinct().order_by('product_name')]
     return _deduplicate_products(products)
@@ -203,6 +213,9 @@ def resolve_product_code_tokens(candidates: list[str], *, scope: QueryScope) -> 
             for value in (variant.get('product_code'), variant.get('order_number')):
                 if value:
                     known_codes.add(str(value).strip().upper())
+            variant_name = str(variant.get('name') or '').strip().upper()
+            if _is_code_shaped_variant_name(variant_name):
+                known_codes.add(variant_name)
     return list(dict.fromkeys(
         candidate for candidate in normalized_candidates if candidate in known_codes
     ))

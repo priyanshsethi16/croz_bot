@@ -857,7 +857,11 @@ class CatalogQueryEngine:
                     *[
                         code
                         for variant in product['variants']
-                        for code in (variant['product_code'], variant['order_number'])
+                        for code in (
+                            variant['product_code'],
+                            variant['order_number'],
+                            variant['name'],
+                        )
                     ],
                 )
                 if value

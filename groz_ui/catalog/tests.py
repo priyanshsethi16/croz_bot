@@ -1053,12 +1053,82 @@ class CatalogV2QueryEngineTests(TestCase):
         self.assertIsNone(category)
 
     def test_code_validation_rejects_hyphenated_properties(self):
+        family = ProductFamily.objects.create(
+            document=self.document,
+            source_key='p3:property-name',
+            product_name='Descriptive Variant',
+            raw_category='Other',
+            review_status=ProductFamily.ReviewStatus.APPROVED,
+        )
+        ProductVariant.objects.create(
+            family=family,
+            name='HEAVY-DUTY',
+            source_row_hash='8' * 64,
+        )
+
         resolved = resolve_product_code_tokens(
             ['NON-SPARKING', 'HEAVY-DUTY', 'CHID'],
             scope=QueryScope(),
         )
 
         self.assertEqual(resolved, ['CHID'])
+
+    def test_code_shaped_reviewed_variant_name_resolves_as_product_code(self):
+        family = ProductFamily.objects.create(
+            document=self.document,
+            source_key='p3:grease-gun',
+            product_name='Heavy Duty Lever Grease Gun',
+            raw_category='LEVER GREASE GUNS',
+            review_status=ProductFamily.ReviewStatus.APPROVED,
+        )
+        ProductVariant.objects.create(
+            family=family,
+            name='G1HD',
+            source_row_hash='9' * 64,
+        )
+
+        resolved = resolve_product_code_tokens(['G1HD'], scope=QueryScope())
+        products = find_by_product_codes(resolved, scope=QueryScope())
+
+        self.assertEqual(resolved, ['G1HD'])
+        self.assertEqual([product['product_name'] for product in products], ['Heavy Duty Lever Grease Gun'])
+
+    def test_grease_gun_taxonomy_lists_guns_but_not_accessories(self):
+        root = Category.objects.get(slug='grease-gun')
+        lever = resolve_category(
+            product_name='Heavy Duty',
+            raw_category='LEVER GREASE GUNS',
+            suggestion='Grease Guns',
+        )
+        accessory = resolve_category(
+            product_name='Heavy Duty Grease Gun Holder',
+            raw_category='GREASE GUN COUPLERS & ACCESSORIES',
+        )
+        ProductFamily.objects.create(
+            document=self.document,
+            source_key='p3:lever-grease-gun',
+            product_name='Heavy Duty Lever Grease Gun',
+            product_code='G1HD',
+            raw_category='LEVER GREASE GUNS',
+            normalized_category=lever,
+            review_status=ProductFamily.ReviewStatus.APPROVED,
+        )
+        ProductFamily.objects.create(
+            document=self.document,
+            source_key='p4:grease-gun-holder',
+            product_name='Heavy Duty Grease Gun Holder',
+            product_code='GGH/1',
+            raw_category='GREASE GUN COUPLERS & ACCESSORIES',
+            normalized_category=accessory,
+            review_status=ProductFamily.ReviewStatus.APPROVED,
+        )
+
+        result = list_products(category_value='grease guns', scope=QueryScope(), page_size=50)
+
+        self.assertEqual(lever.parent_id, root.id)
+        self.assertIsNone(accessory)
+        self.assertEqual(result.total, 1)
+        self.assertEqual(result.products[0]['product_code'], 'G1HD')
 
     @patch('catalog.services.query_engine.AIQueryRouter')
     @patch('catalog.services.query_engine.LLMAnswerer.answer')

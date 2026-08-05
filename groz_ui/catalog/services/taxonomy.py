@@ -7,6 +7,24 @@ import re
 from catalog.models import Category
 
 
+_GREASE_GUN_ACCESSORY_TERMS = (
+    'accessory',
+    'adaptor',
+    'adapter',
+    'cartridge',
+    'coupler',
+    'dispenser',
+    'extension',
+    'fitting',
+    'holder',
+    'hose',
+    'light',
+    'needle',
+    'oil gun',
+    'swivel',
+)
+
+
 def normalize_taxonomy_text(value: str) -> str:
     value = re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
     words = []
@@ -20,6 +38,22 @@ def normalize_taxonomy_text(value: str) -> str:
 def _category_terms(category: Category) -> set[str]:
     values = {category.name, category.slug.replace('-', ' '), *(category.aliases or [])}
     return {normalize_taxonomy_text(value) for value in values if normalize_taxonomy_text(value)}
+
+
+def _is_category_or_descendant(category: Category, root_slug: str) -> bool:
+    current = category
+    while current is not None:
+        if current.slug == root_slug:
+            return True
+        current = current.parent
+    return False
+
+
+def _is_grease_gun_accessory(product_text: str) -> bool:
+    return any(
+        re.search(rf'(^|\s){re.escape(term)}($|\s)', product_text)
+        for term in _GREASE_GUN_ACCESSORY_TERMS
+    )
 
 
 def resolve_category(
@@ -45,18 +79,30 @@ def resolve_category(
         for term in _category_terms(category):
             term_map.append((term, category))
 
-    # A model suggestion/raw label is accepted only as an exact reviewed term.
-    for candidate in (suggestion_text, raw_text):
-        if candidate:
-            exact = [category for term, category in term_map if term == candidate]
-            if exact:
-                return sorted(exact, key=lambda category: len(category.slug), reverse=True)[0]
+    grease_gun_accessory = _is_grease_gun_accessory(product_text)
+
+    def eligible(category: Category) -> bool:
+        return not (
+            grease_gun_accessory
+            and _is_category_or_descendant(category, 'grease-gun')
+        )
+
+    # Suggestions and raw labels must be exact; prefer the more specific match.
+    exact_candidates = {suggestion_text, raw_text} - {''}
+    exact = [
+        category for term, category in term_map
+        if term in exact_candidates and eligible(category)
+    ]
+    if exact:
+        return sorted(exact, key=lambda category: len(category.slug), reverse=True)[0]
 
     # Product names are safer than section banners. Prefer the most specific phrase.
     matches = [
         (term, category)
         for term, category in term_map
-        if term and re.search(rf'(^|\s){re.escape(term)}($|\s)', product_text)
+        if term
+        and eligible(category)
+        and re.search(rf'(^|\s){re.escape(term)}($|\s)', product_text)
     ]
     if not matches:
         return None
