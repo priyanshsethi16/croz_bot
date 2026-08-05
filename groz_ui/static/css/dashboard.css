@@ -783,7 +783,14 @@
 .split-part-status.running { color: var(--orange); }
 .split-part-status.done    { color: #16a34a; }
 .split-part-status.errored { color: #dc2626; }
-.split-preview-btn { padding: 8px 10px; }
+.split-icon-btn {
+  width: 38px; height: 34px; padding: 0;
+  justify-content: center; flex-shrink: 0;
+}
+.split-chunk-panel-btn {
+  color: var(--orange);
+  border-color: #ffc9aa;
+}
 
 /* ── Chunks Drawer ── */
 .chunks-overlay {

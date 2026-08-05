@@ -14,16 +14,10 @@ function normalizeWorkflowSidebarOrder() {
   const workflowSection = workflowLabel?.closest('.sidebar-section');
   if (!workflowSection) return;
 
-  [
-    ['upload', '1'],
-    ['chunk', '2'],
-    ['families', '3'],
-    ['index', '4'],
-  ].forEach(([panel, step]) => {
+  ['upload', 'chunk', 'families', 'index'].forEach((panel) => {
     const link = workflowSection.querySelector(`.sidebar-link[data-panel="${panel}"]`);
     if (!link) return;
-    const stepNum = link.querySelector('.step-num');
-    if (stepNum) stepNum.textContent = step;
+    link.querySelectorAll('.step-num').forEach((stepNum) => stepNum.remove());
     workflowSection.appendChild(link);
   });
 }
@@ -1109,6 +1103,74 @@ function _renderChunkPanelPage() {
   _renderPagination('chunk-panel-pagination', _chunkPanelState.page, totalPages,
     p => { _chunkPanelState.page = p; _renderChunkPanelPage(); },
     _chunkPanelState.pageSize, '_chunkPanelSetPageSize');
+}
+
+function _resetChunkPanelFiltersForFocus() {
+  _chunkPanelState.page = 1;
+  _chunkPanelState.query = '';
+  _chunkPanelState.status = 'all';
+  _chunkPanelState.reviewStatus = 'all';
+
+  const searchEl = document.getElementById('chunk-panel-search');
+  const statusEl = document.getElementById('chunk-panel-status');
+  const reviewEl = document.getElementById('chunk-panel-review-status');
+  if (searchEl) searchEl.value = '';
+  if (statusEl) statusEl.value = 'all';
+  if (reviewEl) reviewEl.value = 'all';
+}
+
+function _findChunkPanelRow(pdfName) {
+  return Array.from(document.querySelectorAll('#pdf-selector-table-body tr'))
+    .find(row => row.dataset.pdf === pdfName) || null;
+}
+
+function _focusChunkPanelPdf(pdfName) {
+  const tbody = document.getElementById('pdf-selector-table-body');
+  const targetRow = _findChunkPanelRow(pdfName);
+  if (!tbody || !targetRow) return false;
+
+  const groupStem = targetRow.dataset.groupStem || '';
+  const topRows = Array.from(tbody.querySelectorAll('tr'))
+    .filter(row => !row.className.startsWith('pdf-child-row') && !row.classList.contains('chunk-panel-empty-row'));
+  const anchorRow = groupStem
+    ? topRows.find(row => row.dataset.groupStem === groupStem)
+    : targetRow;
+  const anchorIndex = topRows.indexOf(anchorRow);
+
+  if (anchorIndex >= 0) {
+    _chunkPanelState.page = Math.floor(anchorIndex / _chunkPanelState.pageSize) + 1;
+    _renderChunkPanelPage();
+  }
+
+  if (groupStem) {
+    const groupButton = document.getElementById('ckg-btn-' + groupStem);
+    if (groupButton && !groupButton.classList.contains('open')) _toggleChunkGroup(groupStem);
+  }
+
+  const focusedRow = _findChunkPanelRow(pdfName);
+  if (!focusedRow) return false;
+  selectPdfRow(focusedRow, pdfName);
+  focusedRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return true;
+}
+
+async function openCreateChunksForSplitPart(idx) {
+  const part = _splitParts[idx];
+  if (!part || !part.filename) return;
+
+  selectedPdf = part.filename;
+  _userSelectedPdf = part.filename;
+  _resetChunkPanelFiltersForFocus();
+  _pdfDetails = [];
+  _pdfDetailsPromise = null;
+  showPanel('chunk');
+  await loadPdfList();
+
+  if (_focusChunkPanelPdf(part.filename)) {
+    showToast(`Selected "${part.filename}" in Create Chunks.`, 'success');
+  } else {
+    showToast('Create Chunks tab opened. Refresh the PDF list if this part is not visible yet.', 'info');
+  }
 }
 
 // ── Upload panel search + pagination ───────────────────────────────────────────────────
@@ -2798,8 +2860,14 @@ function renderSplitParts(parts, skipAutoPreview = false) {
     const statusText = isDone ? '\u2713 Done' : 'Pending';
     const itemCls    = isDone ? 'split-part-item done' : 'split-part-item';
     const runBtn     = isDone
-      ? `<button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})" title="Re-run"><i class="fa fa-redo"></i></button>`
+      ? `<button class="btn btn-sm btn-secondary split-icon-btn" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})" title="Re-run"><i class="fa fa-redo"></i></button>`
       : `<button class="btn btn-sm btn-secondary" id="split-btn-${i}" onclick="event.stopPropagation();runSingleSplit(${i})"><i class="fa fa-play"></i> Run</button>`;
+    const chunkPanelBtn = `
+      <button class="btn btn-sm btn-secondary split-icon-btn split-chunk-panel-btn" id="split-chunk-panel-btn-${i}"
+        onclick="event.stopPropagation();openCreateChunksForSplitPart(${i})"
+        title="Open in Create Chunks" style="${isDone ? '' : 'display:none'}">
+        <i class="fa fa-layer-group"></i>
+      </button>`;
     return `
     <div class="${itemCls}" id="split-part-${i}" onclick="loadSplitPartPreview(${i})" title="Preview this split part">
       <div class="split-part-num">${i+1}</div>
@@ -2808,7 +2876,8 @@ function renderSplitParts(parts, skipAutoPreview = false) {
         <div class="part-pages">Pages ${escHtml(p.pages)} &nbsp;&middot;&nbsp; ${p.page_count} page${p.page_count!==1?'s':''}</div>
       </div>
       <span class="split-part-status ${statusCls}" id="split-status-${i}">${statusText}</span>
-      <button class="btn btn-sm btn-secondary split-preview-btn" onclick="event.stopPropagation();loadSplitPartPreview(${i})">
+      ${chunkPanelBtn}
+      <button class="btn btn-sm btn-secondary split-preview-btn split-icon-btn" onclick="event.stopPropagation();loadSplitPartPreview(${i})" title="Preview split part">
         <i class="fa fa-eye"></i>
       </button>
       ${runBtn}
@@ -2856,10 +2925,14 @@ async function runSingleSplit(idx, options = {}) {
       }
       return false;
     } else {
+      part.done = true;
       itemEl.className = 'split-part-item done';
       statEl.className = 'split-part-status done';
       statEl.textContent = '✓ Done';
       btnEl.innerHTML = '<i class="fa fa-redo"></i>';
+      btnEl.classList.add('split-icon-btn');
+      const chunkPanelBtn = document.getElementById(`split-chunk-panel-btn-${idx}`);
+      if (chunkPanelBtn) chunkPanelBtn.style.display = 'inline-flex';
       
       // Update stage for this split part
       try {
@@ -2910,8 +2983,10 @@ async function runSingleSplit(idx, options = {}) {
     const currentBtn = document.getElementById(`split-btn-${idx}`);
     if (currentBtn) {
       if (currentBtn.innerHTML.includes('redo')) {
+        currentBtn.classList.add('split-icon-btn');
         currentBtn.disabled = false;
       } else {
+        currentBtn.classList.remove('split-icon-btn');
         currentBtn.innerHTML = '<i class="fa fa-play"></i> Run';
         currentBtn.disabled = false;
       }

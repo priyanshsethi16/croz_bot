@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=grouped-rows-20260713c"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=split-part-chunk-link-20260805"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -68,19 +68,15 @@
       <div class="sidebar-label">Workflow</div>
       <button class="sidebar-link" data-panel="upload" onclick="showPanel('upload')">
         <i class="fa fa-upload"></i> Upload PDF
-        <span class="step-num">1</span>
       </button>
       <button class="sidebar-link" data-panel="chunk" onclick="showPanel('chunk')">
         <i class="fa fa-layer-group"></i> Create Chunks
-        <span class="step-num">2</span>
       </button>
       <button class="sidebar-link" data-panel="families" onclick="showPanel('families')">
         <i class="fa fa-sitemap"></i> Products &amp; Variants
-        <span class="step-num">3</span>
       </button>
       <button class="sidebar-link" data-panel="index" onclick="showPanel('index')">
         <i class="fa fa-database"></i> Index &amp; Embed
-        <span class="step-num">4</span>
       </button>
     </div>
     {% else %}
@@ -1182,7 +1178,7 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=v2-workflow-sidebar-order-20260805"></script>
+<script src="{% static 'js/dashboard.js' %}?v=split-part-chunk-link-20260805"></script>
 
 
 {% endblock %}
