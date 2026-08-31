@@ -660,6 +660,53 @@ def _display_pdf_name(original_filename: str) -> str:
     return name if name.lower().endswith('.pdf') else f'{name}.pdf'
 
 
+def _stage_map_lookup(stage_map: dict, *keys):
+    """Look up a stage using the same file-name variants the app writes across sessions."""
+    if not isinstance(stage_map, dict):
+        return None
+    ordered = []
+    for raw in keys:
+        if raw is None:
+            continue
+        raw = str(raw).strip()
+        if not raw:
+            continue
+        path = Path(raw)
+        variants = [raw, path.name, path.stem]
+        if raw.lower().endswith('.pdf'):
+            variants.append(path.stem)
+        else:
+            variants.append(f'{path.stem}.pdf' if path.stem else f'{raw}.pdf')
+        for variant in variants:
+            variant = str(variant).strip()
+            if variant and variant not in ordered:
+                ordered.append(variant)
+    for key in ordered:
+        if key in stage_map:
+            return stage_map[key]
+    return None
+
+
+def _stage_map_write(stage_map: dict, filename: str, stage: str):
+    """Persist a stage under both the full filename and the stem to avoid stale mismatches."""
+    if not isinstance(stage_map, dict):
+        return stage_map
+    raw = str(filename or '').strip()
+    if not raw:
+        return stage_map
+    path = Path(raw)
+    variants = [raw, path.name, path.stem]
+    if raw.lower().endswith('.pdf'):
+        variants.append(path.stem)
+    else:
+        variants.append(f'{path.stem}.pdf' if path.stem else f'{raw}.pdf')
+    for variant in variants:
+        variant = str(variant).strip()
+        if variant:
+            stage_map[variant] = stage
+    return stage_map
+
+
 def _catalog_document_display_status(doc, *, chunk_count: int = 0, running: bool = False) -> str:
     """Map CatalogDocument state to the UI status labels used across dashboards."""
     if not doc:
@@ -1410,22 +1457,27 @@ def approve_pdf(request):
     # Also check by resolved doc's original_filename (handles renamed files like G3P-CL -> G3P)
     _resolved_doc = _resolve_catalog_document(filename)
     _resolved_stem = _resolved_doc.original_filename if _resolved_doc else None
-    db_stage = _stage_map.get(filename) or _stage_map.get(pdf_stem) or (_stage_map.get(_resolved_stem) if _resolved_stem else None)
+    db_stage = _stage_map_lookup(_stage_map, filename, pdf_stem, _resolved_stem)
     if db_stage not in STAGE_ORDER:
         db_stage = None
 
-    # Never downgrade only if detected_stage confirms data still exists (> uploaded means chunks/index present)
-    # If detected_stage is 'uploaded' (no chunks/index found), trust it — data was deleted
-    if detected_stage == 'uploaded':
+    # Preserve higher persisted/session stages even when a fresh detection misses
+    # chunk/index records (for example after a reload or stale preview data). The
+    # final tested stage must never be downgraded by a lower fallback value.
+    existing_session_stage = request.session.get('pdf_progress', {}).get(filename) or request.session.get('pdf_progress', {}).get(pdf_stem)
+    candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
+    if not candidate_stages:
         final_stage = 'uploaded'
     else:
-        existing_session_stage = request.session.get('pdf_progress', {}).get(filename) or request.session.get('pdf_progress', {}).get(pdf_stem)
-        candidate_stages = [s for s in [detected_stage, existing_session_stage, db_stage] if s in STAGE_ORDER]
         final_stage = max(candidate_stages, key=lambda s: STAGE_ORDER.index(s))
 
-    # Replace — only track one PDF at a time
+    # Replace — only track one PDF at a time, while keeping a stem alias for compatibility
     request.session['approved_pdfs'] = [filename]
-    request.session['pdf_progress'] = {filename: final_stage}
+    pdf_progress = request.session.get('pdf_progress', {})
+    pdf_progress[filename] = final_stage
+    if pdf_stem:
+        pdf_progress[pdf_stem] = final_stage
+    request.session['pdf_progress'] = pdf_progress
     request.session.modified = True
 
     return JsonResponse({
@@ -1461,7 +1513,7 @@ def update_pdf_stage(request):
         _stage_map = _j.loads(ApiKey.objects.get(name='pdf_stage_map').value)
     except Exception:
         _stage_map = {}
-    current_db_stage = _stage_map.get(filename, 'uploaded')
+    current_db_stage = _stage_map_lookup(_stage_map, filename, Path(filename).stem)
     if current_db_stage not in STAGE_ORDER:
         current_db_stage = 'uploaded'
 
@@ -1470,15 +1522,17 @@ def update_pdf_stage(request):
         if not (stage == 'indexed' and current_db_stage == 'tested'):
             stage = current_db_stage
 
-    _stage_map[filename] = stage
+    _stage_map_write(_stage_map, filename, stage)
     ApiKey.objects.update_or_create(name='pdf_stage_map', defaults={'value': _j.dumps(_stage_map)})
 
     pdf_progress = request.session.get('pdf_progress', {})
     pdf_progress[filename] = stage
+    pdf_progress[Path(filename).stem] = stage
     request.session['pdf_progress'] = pdf_progress
     approved_pdfs = request.session.get('approved_pdfs', [])
-    if filename not in approved_pdfs:
-        approved_pdfs = [filename]
+    canonical = Path(filename).stem or filename
+    if canonical not in approved_pdfs:
+        approved_pdfs = [canonical]
     request.session['approved_pdfs'] = approved_pdfs
     request.session.modified = True
 
@@ -1687,7 +1741,7 @@ def catalog_stats(request):
                 # Check both the full filename and the stem against stage map
                 _stem = Path(fname).stem
                 _stage_from_progress = pdf_progress.get(fname) or pdf_progress.get(_stem)
-                _stage_from_db = db_map.get(fname) or db_map.get(_stem)
+                _stage_from_db = _stage_map_lookup(db_map, fname, _stem)
                 # Pick highest stage between session and DB
                 _candidates = [s for s in [_stage_from_progress, _stage_from_db] if s in STAGE_ORDER]
                 tracked_stage = max(_candidates, key=lambda s: STAGE_ORDER.index(s)) if _candidates else 'uploaded'
@@ -1727,8 +1781,7 @@ def catalog_stats(request):
                         has_index  = False
 
                         # --- Check chunks: session/DB stage map ---
-                        if (pdf_progress.get(p) or db_map.get(p) or
-                                pdf_progress.get(part_stem) or db_map.get(part_stem)) in STAGE_ORDER[1:]:
+                        if (_stage_map_lookup(pdf_progress, p, part_stem) or _stage_map_lookup(db_map, p, part_stem)) in STAGE_ORDER[1:]:
                             has_chunks = True
                         # DB DocumentChunk records
                         if not has_chunks:
@@ -1745,8 +1798,7 @@ def catalog_stats(request):
                             chunked_count += 1
 
                         # --- Check indexed: session/DB stage map ---
-                        part_stage = (pdf_progress.get(p) or db_map.get(p) or
-                                      pdf_progress.get(part_stem) or db_map.get(part_stem))
+                        part_stage = _stage_map_lookup(pdf_progress, p, part_stem) or _stage_map_lookup(db_map, p, part_stem)
                         if part_stage in ('indexed', 'tested'):
                             has_index = True
                         # DB indexed chunks
@@ -1784,14 +1836,14 @@ def catalog_stats(request):
                     # 'tested' cannot be inferred from chunk data — it requires explicit
                     # user approval. If DB stage map records 'tested' for the parent stem
                     # or any split part, honour it (highest stage wins).
-                    db_parent_stage = db_map.get(tracked_pdf) or db_map.get(tracked_pdf + '.pdf')
+                    db_parent_stage = _stage_map_lookup(db_map, tracked_pdf, tracked_pdf + '.pdf')
                     if db_parent_stage == 'tested':
                         tracked_stage = 'tested'
                         tracked_percent = None
                     else:
                         for p in split_part_files:
                             part_stem = Path(p).stem
-                            if (db_map.get(p) or db_map.get(part_stem)) == 'tested':
+                            if _stage_map_lookup(db_map, p, part_stem) == 'tested':
                                 tracked_stage = 'tested'
                                 tracked_percent = None
                                 break

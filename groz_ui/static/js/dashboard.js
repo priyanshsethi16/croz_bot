@@ -116,7 +116,10 @@ async function ensurePdfDetails() {
   if (_pdfDetailsPromise) return _pdfDetailsPromise;
 
   _pdfDetailsPromise = (async () => {
-    const res = await fetch('/admin-panel/api/pdfs/');
+    const res = await fetch('/admin-panel/api/pdfs/?_=' + Date.now(), {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    });
     const data = await res.json();
     _pdfDetails = data.pdf_details || [];
     return _pdfDetails;
@@ -165,13 +168,20 @@ async function previewParentGroup(parentStem, parts) {
   selectedPdf = parentStem;
   _splitStem  = parentStem;
 
-  // Immediately switch progress bar to this PDF before any async calls
-  _trackedPdf     = parentStem;
-  _trackedStage   = 'uploaded';
-  _trackedPercent = null;
-  _trackedSetAt   = Date.now();
-  _approvedAt     = 0;
-  _renderProgress(parentStem, 'uploaded');
+  // Preserve the actual tracked stage for this PDF instead of downgrading to 40%
+  // when the user merely opens the upload preview after automation has already finished.
+  const samePdfTracked = _trackedPdf && _trackedStage && _samePdfKey(_trackedPdf, parentStem);
+  if (samePdfTracked) {
+    _trackedSetAt = Date.now();
+    _renderProgress(parentStem, _trackedStage);
+  } else {
+    _trackedPdf     = parentStem;
+    _trackedStage   = 'uploaded';
+    _trackedPercent = null;
+    _trackedSetAt   = Date.now();
+    _approvedAt     = 0;
+    _renderProgress(parentStem, 'uploaded');
+  }
   // Build splits array by fetching page counts for each part
   const splits = [];
   // Ensure _pdfDetails is populated fresh (force-clear cache so reload reflects DB state)
@@ -588,11 +598,11 @@ async function loadPdfPreview(filename) {
   _pdfDetails = [];
   _pdfDetailsPromise = null;
   await ensurePdfDetails();
-  const stem = filename.replace(/\.pdf$/i, '');
+  const pdfStem = filename.replace(/\.pdf$/i, '');
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-  const splitChildren = _pdfDetails.filter(d => splitRe.test(d.name) && d.name.replace(splitRe, '') === stem);
+  const splitChildren = _pdfDetails.filter(d => splitRe.test(d.name) && d.name.replace(splitRe, '') === pdfStem);
   if (splitChildren.length > 0) {
-    await previewParentGroup(stem, splitChildren.map(d => d.name));
+    await previewParentGroup(pdfStem, splitChildren.map(d => d.name));
     return;
   }
 
@@ -611,12 +621,20 @@ async function loadPdfPreview(filename) {
   strip.innerHTML  = '<div class="pdf-preview-loading"><i class="fa fa-spinner fa-spin"></i> Rendering pages…</div>';
   viewer.innerHTML = '<div class="pdf-viewer-toolbar" style="justify-content:flex-start;color:var(--grey);font-size:12px;gap:6px"><i class="fa fa-hand-pointer"></i> Select a page to preview</div><div class="pdf-viewer-scroll"><div class="pdf-preview-loading"><i class="fa fa-file-pdf"></i></div></div>';
 
-  // Immediately switch progress bar to this PDF before any async calls
-  _trackedPdf     = filename.replace(/\.pdf$/i, '');
-  _trackedStage   = 'uploaded';
-  _trackedPercent = null;
-  _trackedSetAt   = Date.now();
-  _approvedAt     = 0; // clear guard so server can update freely
+  // Preserve the real completion stage if this PDF is already tracked; do not
+  // downgrade the visible progress bar to 40% just because the upload preview opened.
+  const samePdfTracked = _trackedPdf && _trackedPdf === pdfStem && _trackedStage;
+  if (samePdfTracked) {
+    _trackedSetAt = Date.now();
+    _renderProgress(pdfStem, _trackedStage);
+  } else {
+    _trackedPdf     = pdfStem;
+    _trackedStage   = 'uploaded';
+    _trackedPercent = null;
+    _trackedSetAt   = Date.now();
+    _approvedAt     = 0;
+    _renderProgress(pdfStem, 'uploaded');
+  }
 
   // Approve this PDF for progress tracking
   try {
@@ -1034,9 +1052,16 @@ async function loadPdfList() {
         d.name === _trackedPdf || d.name === stem + '.pdf' ||
         d.name.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') === stem
       );
-      if (trackedDetail && !trackedDetail.has_embeddings) {
-        _trackedStage = 'chunked';
-        _renderProgress(_trackedPdf, 'chunked');
+      // Never downgrade a truly completed PDF back to chunked just because the
+      // current detail payload does not include embeddings metadata. That metadata
+      // can be absent while the real state is still indexed/tested.
+      if (_trackedStage === 'tested') {
+        _renderProgress(_trackedPdf, 'tested');
+        return;
+      }
+      if (trackedDetail && !trackedDetail.has_embeddings && trackedDetail.document_id == null) {
+        _renderProgress(_trackedPdf, 'indexed');
+        return;
       }
     }
     _renderChunkPanelPage();
@@ -1307,7 +1332,7 @@ function selectPdfRow(rowEl, name) {
   selectedPdf = name;
   _userSelectedPdf = name;
   _pipelineRunning = false;
-  // Update progress bar to reflect this PDF's stage (always switch, don't prevent downgrade)
+
   fetch('/admin-panel/api/approve-pdf/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
@@ -1315,11 +1340,19 @@ function selectPdfRow(rowEl, name) {
   })
   .then(r => r.json())
   .then(data => {
-    if (!data.error) {
-      const serverStage = data.stage || 'uploaded';
-      // Always switch to this PDF's stage when user clicks a row
-      setTrackedPdf(name, serverStage);
+    if (data.error) return;
+    const serverStage = data.stage || 'uploaded';
+    const order = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
+    const serverIdx = order.indexOf(serverStage);
+    const localIdx = _trackedStage ? order.indexOf(_trackedStage) : -1;
+
+    if (_trackedStage === 'tested' && serverIdx < order.indexOf('tested')) return;
+    if (_trackedPdf && _samePdfKey(_trackedPdf, name) && localIdx !== -1 && localIdx >= serverIdx) {
+      _renderProgress(_trackedPdf, _trackedStage, _trackedPercent ?? undefined);
+      return;
     }
+
+    setTrackedPdf(name, serverStage);
   })
   .catch(() => {});
 }
@@ -2117,11 +2150,18 @@ async function runAutomation(filename) {
     });
     _trackedStage = 'indexed';
     advanceTrackedStage('tested');
+    forceFinalProgressState(stem);
+    markStepDone('chunk');
+    markStepDone('families');
+    markStepDone('index');
+    markStepDone('chat');
     setStep('tested', 'done', 'Approved');
     setProgress(100);
     log('✓ All done! Catalog is live and ready for product queries.');
-    await refreshStats();
-    await loadPdfList();
+    // Do not trigger a follow-up stats/pdfs refresh after the final stage write.
+    // That extra polling is what reintroduces stale 40% state and causes the UI
+    // to briefly re-read older progress values after the workflow has already finished.
+    setAllSplitPartsDone();
   } catch(e) {
     setStep('tested', 'error', 'Failed');
     log('Error: ' + e.message);
@@ -2597,7 +2637,10 @@ function _renderOverviewPage() {
 
 async function refreshStats() {
   try {
-    const res  = await fetch('/admin-panel/api/stats/');
+    const res  = await fetch('/admin-panel/api/stats/?_=' + Date.now(), {
+      cache: 'no-store',
+      credentials: 'same-origin'
+    });
     const data = await res.json();
     console.log('Stats received:', { 
       pdf_progress: data.pdf_progress, 
@@ -2631,6 +2674,15 @@ let _trackedPercent = null;  // custom percent for partial-split progress
 let _trackedSetAt   = 0;     // timestamp when _trackedPdf was last set locally
 let _approvedAt     = 0;     // timestamp when approve-pdf was last called
 
+function _normalizePdfKey(name) {
+  return String(name || '').replace(/\.pdf$/i, '').trim();
+}
+
+function _samePdfKey(a, b) {
+  if (!a || !b) return false;
+  return _normalizePdfKey(a) === _normalizePdfKey(b);
+}
+
 const STAGE_CONFIG = {
   uploaded: { percent: 20,  stepNo: 1, active: 'upload',   title: 'PDF uploaded & split',  sub: 'Preview the PDF then split & parse to extract product chunks.' },
   chunked:  { percent: 40,  stepNo: 2, active: 'chunk',    title: 'Chunks created',         sub: 'Product chunks are ready. Review products before indexing.' },
@@ -2640,6 +2692,16 @@ const STAGE_CONFIG = {
 };
 
 function setTrackedPdf(filename, stage) {
+  const order = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
+  const nextIdx = order.indexOf(stage);
+  const currentIdx = _trackedStage ? order.indexOf(_trackedStage) : -1;
+
+  if (_trackedPdf && filename && _samePdfKey(_trackedPdf, filename) && currentIdx !== -1 && currentIdx >= nextIdx) {
+    _trackedSetAt = Date.now();
+    _renderProgress(_trackedPdf, _trackedStage, _trackedPercent ?? undefined);
+    return;
+  }
+
   _trackedPdf     = filename;
   _trackedStage   = stage;
   _trackedPercent = null;
@@ -2647,22 +2709,37 @@ function setTrackedPdf(filename, stage) {
   _renderProgress(filename, stage);
 }
 
+function forceFinalProgressState(displayPdf = _trackedPdf || selectedPdf || null) {
+  if (!displayPdf) return;
+  _trackedPdf     = displayPdf;
+  _trackedStage   = 'tested';
+  _trackedPercent = null;
+  _trackedSetAt   = Date.now();
+  _renderProgress(displayPdf, 'tested');
+  document.querySelectorAll('[data-progress-step]').forEach(el => {
+    el.classList.add('done');
+    el.classList.remove('active');
+  });
+}
+
 function advanceTrackedStage(stage, fallbackPdf) {
   const pdf = _trackedPdf || fallbackPdf || null;
   if (!pdf) return;
   const order = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
   const cur = _trackedStage ? order.indexOf(_trackedStage) : -1;
-  if (order.indexOf(stage) > cur) {
-    _trackedPdf   = pdf;
-    _trackedStage = stage;
-    _trackedSetAt = Date.now();
-    _renderProgress(pdf, stage);
-    fetch('/admin-panel/api/update-pdf-stage/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-      body: JSON.stringify({ filename: pdf, stage })
-    }).catch(() => {});
-  }
+  const nextIdx = order.indexOf(stage);
+  if (nextIdx === -1) return;
+  if (_trackedStage === 'tested' && nextIdx <= order.indexOf('tested')) return;
+  if (cur !== -1 && nextIdx <= cur) return;
+  _trackedPdf   = pdf;
+  _trackedStage = stage === 'tested' ? 'tested' : stage;
+  _trackedSetAt = Date.now();
+  _renderProgress(pdf, _trackedStage);
+  fetch('/admin-panel/api/update-pdf-stage/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+    body: JSON.stringify({ filename: pdf, stage: _trackedStage })
+  }).catch(() => {});
 }
 
 function _renderProgress(filename, stage, customPercent) {
@@ -2716,6 +2793,10 @@ function updateWorkflowProgress(data = {}) {
       _trackedStage = data.tracked_stage;
       _trackedSetAt = Date.now();
       const pct = data.tracked_percent !== undefined ? data.tracked_percent : undefined;
+      if (data.tracked_stage === 'tested') {
+        forceFinalProgressState(data.tracked_pdf);
+        return;
+      }
       if (pct !== undefined) {
         _renderProgress(data.tracked_pdf, data.tracked_stage, pct);
       } else {
@@ -2731,17 +2812,33 @@ function updateWorkflowProgress(data = {}) {
   }
   
   if (data.tracked_pdf && data.tracked_stage) {
-    // Never downgrade from 'tested' — local state is source of truth after approve button
     const STAGE_ORDER = ['uploaded', 'chunked', 'families', 'indexed', 'tested'];
+    const localStageIdx = _trackedStage ? STAGE_ORDER.indexOf(_trackedStage) : -1;
+    const serverStageIdx = STAGE_ORDER.indexOf(data.tracked_stage);
+
+    // The final tested stage is absolute and must never be downgraded by stale data.
+    if (data.tracked_stage === 'tested' || _trackedStage === 'tested') {
+      const targetPdf = data.tracked_pdf || _trackedPdf;
+      forceFinalProgressState(targetPdf);
+      return;
+    }
+
+    // Local progress is authoritative for the currently tracked PDF. Ignore stale/fallback
+    // server values that are behind the UI's actual completion state.
+    if (_trackedPdf && _samePdfKey(_trackedPdf, data.tracked_pdf) && localStageIdx >= serverStageIdx && localStageIdx !== -1) {
+      return;
+    }
+
+    // Never downgrade from 'tested' — local state is source of truth after approve button
     if (_trackedStage === 'tested' && STAGE_ORDER.indexOf(data.tracked_stage) < STAGE_ORDER.indexOf('tested')) {
       return; // Keep current 100% state
     }
     // If user explicitly selected a row, don't let server overwrite with a different PDF
-    if (_userSelectedPdf && _userSelectedPdf !== data.tracked_pdf) {
+    if (_userSelectedPdf && !_samePdfKey(_userSelectedPdf, data.tracked_pdf)) {
       return;
     }
     // If user just switched to a new PDF locally (within 5s), ignore stale server data
-    if (_trackedPdf && _trackedPdf !== data.tracked_pdf && (Date.now() - _trackedSetAt) < 5000) {
+    if (_trackedPdf && !_samePdfKey(_trackedPdf, data.tracked_pdf) && (Date.now() - _trackedSetAt) < 5000) {
       return;
     }
     _trackedPdf   = data.tracked_pdf;
@@ -3065,7 +3162,18 @@ async function splitPdf() {
   finally { btn.disabled = false; btn.innerHTML = '<i class="fa fa-cut"></i> Split PDF'; }
 }
 
-function renderSplitParts(parts, skipAutoPreview = false) {
+function setAllSplitPartsDone() {
+  if (!_splitStem || !_splitParts.length) return;
+  _splitParts = _splitParts.map(part => ({ ...part, done: true }));
+  renderSplitParts(_splitParts, true);
+}
+
+async function renderSplitParts(parts, skipAutoPreview = false) {
+  // Ensure server-side PDF details are loaded so completed split parts persist after reload.
+  if ((!_pdfDetails || _pdfDetails.length === 0) && typeof ensurePdfDetails === 'function') {
+    try { await ensurePdfDetails(); } catch(e) { /* ignore */ }
+  }
+
   const wrap  = document.getElementById('split-parts-wrap');
   const list  = document.getElementById('split-parts-list');
   const title = document.getElementById('split-parts-title');
@@ -3078,7 +3186,11 @@ function renderSplitParts(parts, skipAutoPreview = false) {
   const wholePdfStatus = document.getElementById('whole-pdf-status');
   if (wholePdfStatus) { wholePdfStatus.style.display = 'none'; wholePdfStatus.innerHTML = ''; }
   list.innerHTML = parts.map((p, i) => {
-    const isDone = !!p.done;
+    // Consider both the transient in-memory p.done flag and persistent server-side status
+    // so that after a page reload the UI reflects completed split parts correctly.
+    const detail = _findPdfDetail(p.filename) || null;
+    const serverDone = detail && (Number(detail.chunks_count || 0) > 0 || String(detail.status || '').toLowerCase() === 'ready');
+    const isDone = !!p.done || !!serverDone;
     const statusCls  = isDone ? 'done'    : 'pending';
     const statusText = isDone ? '\u2713 Done' : 'Pending';
     const itemCls    = isDone ? 'split-part-item done' : 'split-part-item';
@@ -3107,7 +3219,7 @@ function renderSplitParts(parts, skipAutoPreview = false) {
         <i class="fa fa-eye"></i>
       </button>
       ${runBtn}
-    </div>`;
+    </div>`
   }).join('');
   if (parts.length && !skipAutoPreview) loadSplitPartPreview(0);
 }
@@ -3252,6 +3364,8 @@ async function runAllSplits() {
   btn.style.opacity = '';
 
   if (allDone) {
+    _splitParts = _splitParts.map(part => ({ ...part, done: true }));
+    renderSplitParts(_splitParts, true);
     btn.innerHTML = '<i class="fa fa-check"></i> All Done';
     if (nextToIndex) nextToIndex.style.display = 'flex';
     showToast('Product chunks created!', 'success');
@@ -4610,7 +4724,10 @@ async function loadIndexPanel() {
   // Auto-detect and update progress when navigating to index panel
   if (selectedPdf) {
     try {
-      const statsRes = await fetch('/admin-panel/api/stats/');
+      const statsRes = await fetch('/admin-panel/api/stats/?_=' + Date.now(), {
+        cache: 'no-store',
+        credentials: 'same-origin'
+      });
       const statsData = await statsRes.json();
       const currentStage = (statsData.pdf_progress || {})[selectedPdf];
       
