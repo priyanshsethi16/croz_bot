@@ -365,6 +365,8 @@
 .btn-success:disabled { background: #22c55e !important; color: #fff !important; border-color: #22c55e !important; opacity: 1 !important; cursor: not-allowed; }
 .btn-danger { background: #fee2e2; color: #dc2626; border: 1.5px solid #fecaca; }
 .btn-danger:hover { background: #fecaca; }
+.btn-warning { background: #fff7ed; color: #c2410c; border: 1.5px solid #fed7aa; }
+.btn-warning:hover { background: #ffedd5; }
 .btn-sm { padding: 7px 14px; font-size: 12px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
 

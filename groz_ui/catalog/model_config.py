@@ -23,8 +23,6 @@ _EMBEDDING_PROVIDER_BY_MODEL = {
 }
 
 VISION_MODELS = (
-    # Mistral OCR-4
-    ("mistral-ocr-4", "Mistral OCR-4 + LLM"),
     # OpenAI GPT-5 Series
     ("gpt-5.4", "GPT-5.4"),
     ("gpt-5.4-mini", "GPT-5.4 mini"),

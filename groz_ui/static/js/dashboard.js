@@ -174,7 +174,9 @@ async function previewParentGroup(parentStem, parts) {
   _renderProgress(parentStem, 'uploaded');
   // Build splits array by fetching page counts for each part
   const splits = [];
-  // Ensure _pdfDetails is populated
+  // Ensure _pdfDetails is populated fresh (force-clear cache so reload reflects DB state)
+  _pdfDetails = [];
+  _pdfDetailsPromise = null;
   await ensurePdfDetails();
   for (const partName of parts) {
     try {
@@ -183,7 +185,7 @@ async function previewParentGroup(parentStem, parts) {
       const m = partName.match(/_(custom_)?p(\d+)-(\d+)\.pdf$/i);
       const pages = m ? `${parseInt(m[2])}–${parseInt(m[3])}` : '?';
       const detail = _pdfDetails.find(d => d.name === partName);
-      const isDone = detail && detail.chunks_count > 0;
+      const isDone = detail && (detail.chunks_count > 0 || detail.status === 'Ready');
       splits.push({ filename: partName, pages, page_count: data.pages || 0, done: isDone });
     } catch(e) {
       splits.push({ filename: partName, pages: '?', page_count: 0, done: false });
@@ -332,6 +334,9 @@ async function loadExistingUploads() {
         <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(parentStem + '.pdf')}', this)" title="Delete PDF">
           <i class="fa fa-trash"></i>
         </button>
+        <button class="btn btn-sm btn-warning file-auto-btn" onclick="runAutomation('${escHtml(parentStem + '.pdf')}')" title="Auto-process: chunk, approve, index">
+          <i class="fa fa-bolt"></i>
+        </button>
         <button class="btn btn-sm btn-secondary file-group-toggle" title="Show split parts">
           <i class="fa fa-chevron-right"></i>
         </button>`;
@@ -362,6 +367,9 @@ async function loadExistingUploads() {
           </button>
           <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(partName)}', this)" title="Delete PDF">
             <i class="fa fa-trash"></i>
+          </button>
+          <button class="btn btn-sm btn-warning file-auto-btn" onclick="runAutomation('${escHtml(partName)}')" title="Auto-process: chunk, approve, index">
+            <i class="fa fa-bolt"></i>
           </button>`;
         children.appendChild(child);
       });
@@ -526,6 +534,9 @@ function addFileItem(name, size, statusClass, statusText) {
     </button>
     <button class="btn btn-sm btn-danger file-delete-btn" onclick="deleteUploadedPdf('${escHtml(name)}', this)" title="Delete PDF">
       <i class="fa fa-trash"></i>
+    </button>
+    <button class="btn btn-sm btn-warning file-auto-btn" onclick="runAutomation('${escHtml(name)}')" title="Auto-process: chunk, approve, index">
+      <i class="fa fa-bolt"></i>
     </button>`;
   document.getElementById('upload-file-list').prepend(div);
   return div;
@@ -573,6 +584,9 @@ function formatBytes(b) {
 // ── PDF Page Preview ─────────────────────────────────────────────────────────────
 async function loadPdfPreview(filename) {
   // If this is a parent PDF with existing split parts, show the split parts list
+  // Force-refresh _pdfDetails so post-reload state is accurate
+  _pdfDetails = [];
+  _pdfDetailsPromise = null;
   await ensurePdfDetails();
   const stem = filename.replace(/\.pdf$/i, '');
   const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
@@ -930,6 +944,9 @@ async function loadPdfList() {
   const tbody = document.getElementById('pdf-selector-table-body');
   if (!tbody) return;
   try {
+    // Always fetch fresh data — loadPdfList is called after mutations (chunking, deleting, etc.)
+    _pdfDetails = [];
+    _pdfDetailsPromise = null;
     await ensurePdfDetails();
     tbody.innerHTML = '';
 
@@ -1914,6 +1931,206 @@ function appendAdminMsg(role, html) {
   msgs.appendChild(div); msgs.scrollTop = msgs.scrollHeight;
 }
 
+// -- Automation Pipeline --------------------------------------------------------
+async function runAutomation(filename) {
+  const isGroup = !filename.endsWith('.pdf') || filename.replace(/\.pdf$/i, '') === filename.replace(/\.pdf$/i, '');
+  const stem = filename.replace(/\.pdf$/i, '');
+
+  // Build modal HTML
+  const modalId = 'automation-modal';
+  let existing = document.getElementById(modalId);
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = modalId;
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:28px 32px;min-width:420px;max-width:520px;box-shadow:0 8px 40px rgba(0,0,0,0.18)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+        <i class="fa fa-bolt" style="color:#f97316;font-size:20px"></i>
+        <h3 style="margin:0;font-size:16px;font-weight:700">Auto-Process: ${escHtml(stem)}</h3>
+      </div>
+      <div id="auto-steps" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+        <div id="auto-step-chunk" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0">
+          <i class="fa fa-circle" style="color:#cbd5e1;font-size:10px"></i>
+          <span style="font-size:13px;font-weight:600">Step 1: Create Chunks</span>
+          <span id="auto-step-chunk-status" style="margin-left:auto;font-size:12px;color:#94a3b8">Waiting</span>
+        </div>
+        <div id="auto-step-families" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0">
+          <i class="fa fa-circle" style="color:#cbd5e1;font-size:10px"></i>
+          <span style="font-size:13px;font-weight:600">Step 2: Save &amp; Approve Families</span>
+          <span id="auto-step-families-status" style="margin-left:auto;font-size:12px;color:#94a3b8">Waiting</span>
+        </div>
+        <div id="auto-step-index" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0">
+          <i class="fa fa-circle" style="color:#cbd5e1;font-size:10px"></i>
+          <span style="font-size:13px;font-weight:600">Step 3: Index &amp; Embed</span>
+          <span id="auto-step-index-status" style="margin-left:auto;font-size:12px;color:#94a3b8">Waiting</span>
+        </div>
+        <div id="auto-step-tested" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0">
+          <i class="fa fa-circle" style="color:#cbd5e1;font-size:10px"></i>
+          <span style="font-size:13px;font-weight:600">Step 4: Test &amp; Approve</span>
+          <span id="auto-step-tested-status" style="margin-left:auto;font-size:12px;color:#94a3b8">Waiting</span>
+        </div>
+      </div>
+      <div style="background:#f1f5f9;border-radius:6px;height:8px;margin-bottom:16px;overflow:hidden">
+        <div id="auto-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#f97316,#fb923c);transition:width 0.4s ease;border-radius:6px"></div>
+      </div>
+      <div id="auto-log" style="font-size:11px;color:#64748b;min-height:20px;margin-bottom:16px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button id="auto-cancel-btn" onclick="document.getElementById('${modalId}').remove()" class="btn btn-sm btn-secondary">Cancel</button>
+        <button id="auto-close-btn" onclick="document.getElementById('${modalId}').remove()" class="btn btn-sm btn-primary" style="display:none">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const setStep = (stepId, state, msg) => {
+    const el = document.getElementById(`auto-step-${stepId}`);
+    const st = document.getElementById(`auto-step-${stepId}-status`);
+    const icon = el.querySelector('i');
+    const colors = { running: '#f97316', done: '#22c55e', error: '#ef4444', waiting: '#cbd5e1' };
+    const icons  = { running: 'fa-spinner fa-spin', done: 'fa-check-circle', error: 'fa-times-circle', waiting: 'fa-circle' };
+    icon.className = `fa ${icons[state] || icons.waiting}`;
+    icon.style.color = colors[state] || colors.waiting;
+    el.style.borderColor = state === 'running' ? '#f97316' : state === 'done' ? '#22c55e' : state === 'error' ? '#ef4444' : '#e2e8f0';
+    el.style.background  = state === 'running' ? '#fff7ed' : state === 'done' ? '#f0fdf4' : state === 'error' ? '#fef2f2' : '#f8fafc';
+    if (st) st.textContent = msg || '';
+  };
+  const setProgress = pct => { document.getElementById('auto-progress-bar').style.width = pct + '%'; };
+  const log = msg => { document.getElementById('auto-log').textContent = msg; };
+
+  document.getElementById('auto-cancel-btn').style.display = 'inline-flex';
+
+  // Set this PDF as the tracked/selected PDF before starting
+  selectedPdf = filename;
+  _trackedPdf = stem;
+  _trackedStage = 'uploaded';
+  _trackedSetAt = Date.now();
+  _renderProgress(stem, 'uploaded');
+
+  // ── Step 1: Create Chunks ────────────────────────────────────────────────
+  setStep('chunk', 'running', 'Running…');
+  setProgress(5);
+  log('Starting chunk extraction…');
+  try {
+    const isMistral = _visionModel === 'mistral-ocr-latest';
+    const endpoint = isMistral ? '/admin-panel/api/pipeline-mistral/' : '/admin-panel/api/pipeline/';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename, parsing_instructions: getParsingInstructions() })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (data.no_products) throw new Error('No products extracted from this PDF.');
+    setStep('chunk', 'done', 'Done');
+    setProgress(25);
+    log('Chunks created. Saving product families…');
+    _trackedStage = 'uploaded';
+    advanceTrackedStage('chunked');
+    await loadPdfList();
+  } catch(e) {
+    setStep('chunk', 'error', 'Failed');
+    log('Error: ' + getCleanErrorMessage(e.message));
+    document.getElementById('auto-cancel-btn').style.display = 'none';
+    document.getElementById('auto-close-btn').style.display = 'inline-flex';
+    return;
+  }
+
+  // ── Step 2: Bulk-approve families ────────────────────────────────────────
+  setStep('families', 'running', 'Approving…');
+  setProgress(30);
+  try {
+    const res = await fetch('/admin-panel/api/families/bulk-approve/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ pdf: filename })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Bulk approve failed.');
+    setStep('families', 'done', `${data.total} approved`);
+    setProgress(50);
+    log(`${data.total} product families approved. Starting indexing…`);
+    _trackedStage = 'chunked';
+    advanceTrackedStage('families');
+    await refreshStats();
+  } catch(e) {
+    setStep('families', 'error', 'Failed');
+    log('Error: ' + e.message);
+    document.getElementById('auto-cancel-btn').style.display = 'none';
+    document.getElementById('auto-close-btn').style.display = 'inline-flex';
+    return;
+  }
+
+  // ── Step 3: Index & Embed ────────────────────────────────────────────────
+  setStep('index', 'running', 'Indexing…');
+  setProgress(55);
+  log('Indexing chunks into Qdrant…');
+  try {
+    // Resolve document IDs for this PDF (handles split parts)
+    await loadPdfList();
+    const details = _pdfDetails.filter(d => {
+      const s = d.name.replace(/\.pdf$/i, '');
+      return s === stem || s.startsWith(stem + '_custom_p') || s.startsWith(stem + '_p');
+    });
+    const docIds = details.map(d => d.document_id).filter(Boolean);
+    if (!docIds.length) throw new Error('No document IDs found. Ensure chunks were created.');
+
+    let totalIndexed = 0;
+    for (const docId of docIds) {
+      const auditRes = await fetch(`/admin-panel/api/v2/documents/${docId}/index-audit/`);
+      const audit = await auditRes.json();
+      if (!auditRes.ok || audit.error) continue;
+      if (audit.pending_embeddings === 0) continue;
+      const res = await fetch(`/admin-panel/api/v2/documents/${docId}/index/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ confirmed_embedding_count: audit.pending_embeddings })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Indexing failed.');
+      totalIndexed += data.indexed || 0;
+    }
+    setStep('index', 'done', `${totalIndexed} chunks indexed`);
+    setProgress(75);
+    log(`${totalIndexed} chunks indexed. Marking as approved…`);
+    _trackedStage = 'families';
+    advanceTrackedStage('indexed');
+    await refreshStats();
+    await loadPdfList();
+  } catch(e) {
+    setStep('index', 'error', 'Failed');
+    log('Error: ' + e.message);
+    document.getElementById('auto-cancel-btn').style.display = 'none';
+    document.getElementById('auto-close-btn').style.display = 'inline-flex';
+    return;
+  }
+
+  // ── Step 4: Test & Approve (mark as tested = 100%) ─────────────────────────────
+  setStep('tested', 'running', 'Approving…');
+  setProgress(85);
+  log('Marking catalog as approved…');
+  try {
+    await fetch('/admin-panel/api/update-pdf-stage/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+      body: JSON.stringify({ filename: stem, stage: 'tested' })
+    });
+    _trackedStage = 'indexed';
+    advanceTrackedStage('tested');
+    setStep('tested', 'done', 'Approved');
+    setProgress(100);
+    log('✓ All done! Catalog is live and ready for product queries.');
+    await refreshStats();
+    await loadPdfList();
+  } catch(e) {
+    setStep('tested', 'error', 'Failed');
+    log('Error: ' + e.message);
+  }
+
+  document.getElementById('auto-cancel-btn').style.display = 'none';
+  document.getElementById('auto-close-btn').style.display = 'inline-flex';
+}
+
 // -- Delete PDF ------------------------------------------------------------------
 async function deletePdf(filename) {
   if (!await showConfirm('Delete PDF', `Delete "${filename}" and ALL associated chunks, products and index data? This cannot be undone.`)) return;
@@ -2145,7 +2362,8 @@ function updateCatalogTable(processed, unprocessed) {
               <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(item.name)}')">
                 <i class="fa fa-layer-group"></i> Chunks</button>
               ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(item.name)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
-              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" onclick="event.stopPropagation()"><i class="fa fa-trash"></i></button>` : ''}
+              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" onclick="event.stopPropagation()"><i class="fa fa-trash"></i></button>
+              <button class="btn btn-sm btn-warning" onclick="runAutomation('${escHtml(item.name)}')" title="Auto-process"><i class="fa fa-bolt"></i></button>` : ''}
             </div>
           </td>
         </tr>`;
@@ -2177,7 +2395,8 @@ function updateCatalogTable(processed, unprocessed) {
               <button class="btn btn-sm btn-secondary" onclick="openChunks('${safeStem}')">
                 <i class="fa fa-layer-group"></i> Chunks</button>
               ${IS_ADMIN && item.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(stem)})'><i class="fa fa-sitemap"></i> Families</button>` : ''}
-              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>` : ''}
+              ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>
+              <button class="btn btn-sm btn-warning" onclick="runAutomation('${safeStem}.pdf')" title="Auto-process"><i class="fa fa-bolt"></i></button>` : ''}
               <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button>
             </div>
           </td>
@@ -2204,7 +2423,8 @@ function updateCatalogTable(processed, unprocessed) {
                   <button class="btn btn-sm btn-secondary" onclick="openChunks('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Chunks</button>
                   ${IS_ADMIN && child.chunks > 0 ? `<button class="btn btn-sm btn-secondary" onclick='openFamilies(${JSON.stringify(child.name)})' style="font-size:11px;padding:5px 10px"><i class="fa fa-sitemap"></i> Families</button>` : ''}
                 ` : ''}
-                ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i></button>` : ''}
+                ${IS_ADMIN ? `<button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i></button>
+                  <button class="btn btn-sm btn-warning" onclick="runAutomation('${escHtml(child.name)}')" title="Auto-process" style="font-size:11px;padding:5px 10px"><i class="fa fa-bolt"></i></button>` : ''}
               </div>
             </td>
           </tr>`;
@@ -2230,6 +2450,7 @@ function updateCatalogTable(processed, unprocessed) {
           <td>${IS_ADMIN ? `<div class="table-actions">
             <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(item.name)}',this)"><i class="fa fa-layer-group"></i> Create Chunks</button>
             <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(item.name)}')" ><i class="fa fa-trash"></i></button>
+            <button class="btn btn-sm btn-warning" onclick="runAutomation('${escHtml(item.name)}')" title="Auto-process"><i class="fa fa-bolt"></i></button>
           </div>` : ''}</td>
         </tr>`;
     } else {
@@ -2255,6 +2476,7 @@ function updateCatalogTable(processed, unprocessed) {
           <td>${IS_ADMIN ? `<div class="table-actions">
             <button class="btn btn-sm btn-primary" onclick="showPanel('chunk')"><i class="fa fa-layer-group"></i> Create Chunks</button>
             <button class="btn btn-sm btn-danger" onclick="deletePdf('${safeStem}.pdf')"><i class="fa fa-trash"></i></button>
+            <button class="btn btn-sm btn-warning" onclick="runAutomation('${safeStem}.pdf')" title="Auto-process"><i class="fa fa-bolt"></i></button>
             <button class="pdf-group-expand-btn" id="ovg-btn-${safeStem}" onclick="event.stopPropagation();_toggleOverviewGroup('${safeStem}')" title="Show split parts"><i class="fa fa-chevron-right"></i></button>
           </div>` : ''}</td>
         </tr>`;
@@ -2273,6 +2495,7 @@ function updateCatalogTable(processed, unprocessed) {
             <td>${IS_ADMIN ? `<div class="table-actions">
               <button class="btn btn-sm btn-primary" onclick="openChunkingFromDashboard('${escHtml(child.name)}',this)" style="font-size:11px;padding:5px 10px"><i class="fa fa-layer-group"></i> Create Chunks</button>
               <button class="btn btn-sm btn-danger" onclick="deletePdf('${escHtml(child.name)}')" style="font-size:11px;padding:5px 10px"><i class="fa fa-trash"></i></button>
+              <button class="btn btn-sm btn-warning" onclick="runAutomation('${escHtml(child.name)}')" title="Auto-process" style="font-size:11px;padding:5px 10px"><i class="fa fa-bolt"></i></button>
             </div>` : ''}</td>
           </tr>`;
       });
@@ -2877,6 +3100,9 @@ function renderSplitParts(parts, skipAutoPreview = false) {
       </div>
       <span class="split-part-status ${statusCls}" id="split-status-${i}">${statusText}</span>
       ${chunkPanelBtn}
+      <button class="btn btn-sm btn-warning split-icon-btn" onclick="event.stopPropagation();runAutomation(_splitParts[${i}].filename)" title="Auto-process: chunk, approve, index">
+        <i class="fa fa-bolt"></i>
+      </button>
       <button class="btn btn-sm btn-secondary split-preview-btn split-icon-btn" onclick="event.stopPropagation();loadSplitPartPreview(${i})" title="Preview split part">
         <i class="fa fa-eye"></i>
       </button>
@@ -2924,6 +3150,15 @@ async function runSingleSplit(idx, options = {}) {
         showToast(errMsg, 'error', 10000);
       }
       return false;
+    } else if (data.no_products) {
+      itemEl.className = 'split-part-item errored';
+      statEl.className = 'split-part-status errored';
+      statEl.textContent = '⚠ No products';
+      btnEl.disabled = false;
+      btnEl.innerHTML = '<i class="fa fa-redo"></i> Retry';
+      showToast(`No products extracted from ${part.filename}. Check if this PDF contains product data.`, 'warning', 8000);
+      await loadPdfList();
+      return false;
     } else {
       part.done = true;
       itemEl.className = 'split-part-item done';
@@ -2933,7 +3168,7 @@ async function runSingleSplit(idx, options = {}) {
       btnEl.classList.add('split-icon-btn');
       const chunkPanelBtn = document.getElementById(`split-chunk-panel-btn-${idx}`);
       if (chunkPanelBtn) chunkPanelBtn.style.display = 'inline-flex';
-      
+
       // Update stage for this split part
       try {
         await fetch('/admin-panel/api/update-pdf-stage/', {
@@ -2971,7 +3206,7 @@ async function runSingleSplit(idx, options = {}) {
 
       _trackedPercent = null;  // let server recompute fresh percent
       await refreshStats();
-      loadPdfList();
+      await loadPdfList();
       return true;
     }
   } catch(e) {
@@ -3025,6 +3260,16 @@ async function runAllSplits() {
 
   btn.innerHTML = '<i class="fa fa-redo"></i> Retry Failed';
   if (nextToIndex) nextToIndex.style.display = 'none';
+}
+
+async function runAutomationAllSplits() {
+  const btn = document.getElementById('btn-auto-all-splits');
+  if (!_splitStem) { showToast('No PDF selected.', 'error'); return; }
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Running…';
+  await runAutomation(_splitStem + '.pdf');
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa fa-bolt"></i> Auto All';
 }
 
 // ── Chunks Drawer ─────────────────────────────────────────────────────
@@ -3969,34 +4214,60 @@ async function loadFamilyPanel(force = false) {
   if (!body || !cardList) return;
 
   try {
-    if (!_pdfDetails.length || force) {
+    // Always refresh PDF details when a tracked PDF is set, so newly chunked
+    // PDFs are found instead of falling back to the first alphabetical entry.
+    const preferredName = selectedPdf || _trackedPdf;
+    if (!_pdfDetails.length || force || preferredName) {
+      _pdfDetails = [];
+      _pdfDetailsPromise = null;
       await ensurePdfDetails();
     }
 
     // Use the PDF shown in progress bar (parent stem for split PDFs)
     // selectedPdf is set directly by openFamilies — prefer it over _trackedPdf
+    // But if selectedPdf is a split child, resolve up to the parent stem.
     let pdfName = selectedPdf || _trackedPdf;
-    
+    if (pdfName) {
+      const splitRe2 = /_(custom_)?p\d{4}-\d{4}(\.pdf)?$/i;
+      if (splitRe2.test(pdfName)) {
+        pdfName = _rootStem(pdfName) + '.pdf';
+      }
+    }
+
     // If pdfName doesn't have .pdf extension, add it for lookup
     if (pdfName && !pdfName.toLowerCase().endsWith('.pdf')) {
       pdfName = pdfName + '.pdf';
     }
-    
+
+    const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
     let detail = _findPdfDetail(pdfName);
-    
-    // If not found, check if it's a parent stem of split PDFs
-    if (!detail || !detail.chunks_count) {
-      const splitRe = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+    let isParentStem = false;
+
+    // Check if this is a parent stem whose chunks live in split children
+    if (pdfName) {
+      const stem = pdfName.replace(/\.pdf$/i, '');
+      const hasChildren = _pdfDetails.some(d => splitRe.test(d.name) && _rootStem(d.name) === stem);
+      if (hasChildren) {
+        // Parent stem — backend aggregates all split children; use stem directly
+        isParentStem = true;
+        detail = { chunks_count: 1 };  // sentinel so we don't fall through
+      }
+    }
+
+    // If still not found, check if it's a split part itself
+    if (!isParentStem && (!detail || !detail.chunks_count)) {
       let splitPart = null;
       if (pdfName) {
         const stem = pdfName.replace(/\.pdf$/i, '');
         splitPart = _pdfDetails.find(d => splitRe.test(d.name) && _rootStem(d.name) === stem);
       }
       if (splitPart && splitPart.chunks_count > 0) {
-        pdfName = splitPart.name;
-        detail = splitPart;
-      } else {
-        // Fall back to default chunked PDF
+        // Use parent stem so backend returns ALL split children's families
+        pdfName = _rootStem(splitPart.name) + '.pdf';
+        detail = { chunks_count: splitPart.chunks_count };
+        isParentStem = true;
+      } else if (!preferredName) {
+        // Only fall back to default when no PDF was tracked/selected at all
         detail = _defaultChunkedPdf();
         if (detail) {
           pdfName = detail.name;

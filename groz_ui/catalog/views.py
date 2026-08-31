@@ -120,11 +120,12 @@ def _resolve_catalog_document(pdf_name: str):
         return None
     pdf_stem = Path(pdf_name).stem
 
-    # Build list of stems to try: exact stem, then strip trailing " (N)" suffix
-    stems_to_try = [pdf_stem, pdf_name]
+    # Build list of stems to try: exact stem, stem+.pdf, then strip trailing " (N)" suffix
+    stems_to_try = [pdf_stem, pdf_name, pdf_stem + '.pdf']
     base_stem = re.sub(r'\s*\(\d+\)$', '', pdf_stem).strip()
     if base_stem and base_stem != pdf_stem:
         stems_to_try.append(base_stem)
+        stems_to_try.append(base_stem + '.pdf')
 
     for s in stems_to_try:
         doc = CatalogDocument.objects.filter(original_filename=s).order_by('-version').first()
@@ -2012,6 +2013,16 @@ def run_pipeline_split(request):
                 'output': output,
             }, status=422)
 
+        # Only mark as chunked if pipeline actually ingested products into DB
+        no_products = 'No products extracted' in output or 'nothing written to Postgres' in output
+        if no_products:
+            logger.warning('[pipeline-split] SUCCESS but 0 products extracted part=%s', part_file)
+            return JsonResponse({
+                'message': f'{part_file} processed but no products were extracted.',
+                'output': output[-2000:],
+                'no_products': True,
+            })
+
         # Update stage for this split part in session + DB stage map
         import json as _j
         from .models import ApiKey
@@ -2036,7 +2047,6 @@ def run_pipeline_split(request):
         request.session['pdf_progress'] = pdf_progress
         request.session.modified = True
 
-        # Pipeline ingests directly into Postgres — no post-run file reading needed
         logger.warning('[pipeline-split] SUCCESS provider=%s model=%s part=%s', _provider, runtime.vision_model, part_file)
         return JsonResponse({'message': f'{part_file} processed.', 'output': output[-2000:]})
     except subprocess.TimeoutExpired:
@@ -3026,6 +3036,47 @@ def save_product_family(request):
             'progress_percent': round(families_progress_percent, 1) if total_families > 0 else 40,
         }
     })
+
+
+@login_required
+@require_POST
+def bulk_approve_families(request):
+    """Auto-approve all families for a PDF (used by automation pipeline)."""
+    if not request.user.is_staff:
+        return JsonResponse({'error': 'Permission denied.'}, status=403)
+    try:
+        body = json.loads(request.body)
+    except Exception:
+        return JsonResponse({'error': 'Invalid request body.'}, status=400)
+
+    pdf_name = str(body.get('pdf', '')).strip()
+    if not pdf_name:
+        return JsonResponse({'error': 'Missing pdf parameter.'}, status=400)
+
+    from .models import ProductFamily
+    from django.db import transaction
+
+    pdf_stem = Path(pdf_name).stem
+    split_docs = _resolve_split_docs_for_parent(pdf_stem)
+    docs = split_docs if split_docs else []
+    if not docs:
+        doc = _resolve_catalog_document(pdf_name)
+        if not doc:
+            return JsonResponse({'error': f'PDF not found: {pdf_name}'}, status=404)
+        docs = [doc]
+
+    updated = 0
+    with transaction.atomic():
+        for doc in docs:
+            count = ProductFamily.objects.filter(
+                document=doc
+            ).exclude(
+                review_status=ProductFamily.ReviewStatus.APPROVED
+            ).update(review_status=ProductFamily.ReviewStatus.APPROVED)
+            updated += count
+
+    total = sum(ProductFamily.objects.filter(document=d).count() for d in docs)
+    return JsonResponse({'approved': updated, 'total': total})
 
 
 @login_required

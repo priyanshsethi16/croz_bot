@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/chunks/',       views.list_chunks,        name='list_chunks'),
     path('api/chunks/save/',  views.save_chunk,         name='save_chunk'),
     path('api/families/',     views.list_product_families, name='list_product_families'),
+    path('api/families/bulk-approve/', views.bulk_approve_families, name='bulk_approve_families'),
     path('api/families/save/', views.save_product_family, name='save_product_family'),
     path('api/families/approval-status/', views.product_families_approval_status, name='product_families_approval_status'),
     path('api/pdf-pages/',     views.pdf_page_count,     name='pdf_page_count'),
