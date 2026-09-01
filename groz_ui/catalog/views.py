@@ -241,9 +241,23 @@ def _chunk_excerpt(text: str, limit: int = 180) -> str:
         return cleaned
     return cleaned[:limit - 1].rstrip() + '…'
 
+_stats_cache: dict = {}
+_stats_cache_ts: float = 0.0
+_STATS_CACHE_TTL = 8  # seconds
+
+
+def _invalidate_stats_cache():
+    global _stats_cache, _stats_cache_ts
+    _stats_cache = {}
+    _stats_cache_ts = 0.0
+
 
 def _get_catalog_stats():
     """Return stats about processed PDFs and indexed chunks."""
+    import time
+    global _stats_cache, _stats_cache_ts
+    if _stats_cache and (time.monotonic() - _stats_cache_ts) < _STATS_CACHE_TTL:
+        return _stats_cache
     import re as _re
     input_dir = PROJECT_ROOT / 'input'
     splits_dir = PROJECT_ROOT / 'input' / 'splits'
@@ -265,37 +279,41 @@ def _get_catalog_stats():
     # For top-level PDFs that have been split, use split parts instead
     effective_pdfs = [p for p in pdfs if p.stem not in split_parent_stems] + all_split_parts
     processed = []
-    processed_checksums = set()  # track which disk files are already processed
 
     # DB-only: processed documents with chunks in Postgres
     try:
         from .models import CatalogDocument, DocumentChunk, ProductFamily
-        import hashlib
-        # Build checksum → disk file map for all effective PDFs
-        disk_checksum_to_file: dict = {}
-        for p in effective_pdfs:
-            try:
-                disk_checksum_to_file[hashlib.sha256(p.read_bytes()).hexdigest()] = p
-            except Exception:
-                pass
+        from django.db.models import Count, Q
+        # Build filename → disk file map (no checksum reads — fast)
+        disk_name_to_file: dict = {p.name: p for p in effective_pdfs}
+        disk_stem_to_file: dict = {p.stem: p for p in effective_pdfs}
 
-        for doc in CatalogDocument.objects.exclude(status=CatalogDocument.Status.ARCHIVED).order_by('original_filename'):
-            chunk_count = DocumentChunk.objects.filter(document=doc).count()
-            if chunk_count == 0:
+        # Single query: annotate chunk_count and approved_count per document
+        docs = (
+            CatalogDocument.objects
+            .exclude(status=CatalogDocument.Status.ARCHIVED)
+            .annotate(
+                chunk_count=Count('chunks', distinct=True),
+                approved_count=Count(
+                    'product_families',
+                    filter=Q(product_families__review_status=ProductFamily.ReviewStatus.APPROVED),
+                    distinct=True,
+                )
+            )
+            .order_by('original_filename')
+        )
+        for doc in docs:
+            if doc.chunk_count == 0:
                 continue
-            # Prefer the actual disk filename if we can match by checksum
-            disk_file = disk_checksum_to_file.get(doc.checksum_sha256)
-            if disk_file:
-                display = disk_file.name
-                processed_checksums.add(doc.checksum_sha256)
-            else:
-                fn = doc.original_filename
-                display = fn if fn.endswith('.pdf') else f'{fn}.pdf'
+            fn = doc.original_filename
+            fn_pdf = fn if fn.endswith('.pdf') else f'{fn}.pdf'
+            disk_file = disk_name_to_file.get(fn_pdf) or disk_name_to_file.get(fn) or disk_stem_to_file.get(fn)
+            display = disk_file.name if disk_file else fn_pdf
             processed.append({
                 'name': display,
-                'chunks': chunk_count,
-                'products': doc.product_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count(),
-                'status': _catalog_document_display_status(doc, chunk_count=chunk_count),
+                'chunks': doc.chunk_count,
+                'products': doc.approved_count,
+                'status': _catalog_document_display_status(doc, chunk_count=doc.chunk_count),
             })
     except Exception:
         pass
@@ -312,17 +330,9 @@ def _get_catalog_stats():
 
     # Build unprocessed list with status info from DB
     processed_names = {proc['name'] for proc in processed}
-    unprocessed_raw = []
-    for p in effective_pdfs:
-        if p.name in processed_names or p.stem in processed_names:
-            continue
-        try:
-            import hashlib
-            if hashlib.sha256(p.read_bytes()).hexdigest() in processed_checksums:
-                continue
-        except Exception:
-            pass
-        unprocessed_raw.append(p)
+    processed_stems = {Path(n).stem for n in processed_names}
+    unprocessed_raw = [p for p in effective_pdfs
+                       if p.name not in processed_names and p.stem not in processed_stems]
     unprocessed = []
     try:
         from .models import CatalogDocument, DocumentChunk, IngestionJob
@@ -388,6 +398,9 @@ def _get_catalog_stats():
         }
     except Exception:
         stats['v2'] = {}
+    import time
+    _stats_cache = stats
+    _stats_cache_ts = time.monotonic()
     return stats
 
 
@@ -442,9 +455,9 @@ def dashboard(request):
     request.session['pdf_progress'] = {}
     request.session['approved_pdfs'] = []
     request.session.modified = True
-    stats = _get_catalog_stats()
+    _invalidate_stats_cache()  # force fresh data on next /api/stats/ call after reload
+    # Stats are loaded client-side via /api/stats/ on DOMContentLoaded — no server computation needed here
     return render(request, 'catalog/dashboard.html', {
-        'stats': stats,
         'is_admin': request.user.is_staff,
         'admin_access_token': request.session.get('admin_access_token', ''),
     })
@@ -839,6 +852,7 @@ def _ingest_assembled_products_for_document(doc, assembled):
         doc.is_active = True
         doc.status = doc.Status.READY
         doc.save(update_fields=['is_active', 'status'])
+        _invalidate_stats_cache()
 
 
 # ── API: Run Mistral OCR Pipeline (pdf_extractor) ────────────────────────────
@@ -3413,6 +3427,7 @@ def execute_index_v2(request, document_id):
         request.session['pdf_progress'] = pdf_progress
         request.session.modified = True
         
+        _invalidate_stats_cache()
         return JsonResponse(result)
     except CatalogDocument.DoesNotExist:
         return JsonResponse({'error': 'Catalog document not found.'}, status=404)

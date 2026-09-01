@@ -18,7 +18,7 @@
 {% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=automation-fixed-20260831-3"/>
+<link rel="stylesheet" href="{% static 'css/dashboard.css' %}?v=stat-cache-fix-20260901"/>
 <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
@@ -117,28 +117,28 @@
       <div class="stat-card">
         <div class="stat-icon"><i class="fa fa-file-pdf"></i></div>
         <div>
-          <div class="stat-value" id="stat-pdfs">{{ stats.total_pdfs }}</div>
+          <div class="stat-value" id="stat-pdfs">—</div>
           <div class="stat-label">PDFs Uploaded</div>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon"><i class="fa fa-layer-group"></i></div>
         <div>
-          <div class="stat-value" id="stat-processed">{{ stats.processed|length }}</div>
+          <div class="stat-value" id="stat-processed">—</div>
           <div class="stat-label">PDFs Processed</div>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon"><i class="fa fa-cube"></i></div>
         <div>
-          <div class="stat-value" id="stat-chunks">{{ stats.total_chunks }}</div>
+          <div class="stat-value" id="stat-chunks">—</div>
           <div class="stat-label">Chunks Created</div>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon"><i class="fa fa-database"></i></div>
         <div>
-          <div class="stat-value" id="stat-indexed">{{ stats.indexed }}</div>
+          <div class="stat-value" id="stat-indexed">—</div>
           <div class="stat-label">Chunks Indexed</div>
         </div>
       </div>
@@ -1076,7 +1076,7 @@
 
   // bfcache guard handled in extra_head
 </script>
-<script src="{% static 'js/dashboard.js' %}?v=upload-fixes-20260901-5"></script>
+<script src="{% static 'js/dashboard.js' %}?v=stat-cache-fix-20260901"></script>
 
 
 {% endblock %}

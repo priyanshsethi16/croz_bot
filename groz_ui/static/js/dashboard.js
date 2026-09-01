@@ -2657,10 +2657,18 @@ async function refreshStats() {
       tracked_percent: data.tracked_percent,
       total_split_parts: data.total_split_parts
     });
-    document.getElementById('stat-pdfs').textContent      = data.total_pdfs ?? '—';
-    document.getElementById('stat-processed').textContent = (data.processed||[]).length;
-    document.getElementById('stat-indexed').textContent   = data.indexed ?? '—';
-    document.getElementById('stat-chunks').textContent    = data.total_chunks ?? data.indexed ?? '—';
+    const statPdfs      = data.total_pdfs ?? 0;
+    const statProcessed = (data.processed||[]).length;
+    const statIndexed   = data.indexed ?? 0;
+    const statChunks    = data.total_chunks ?? data.indexed ?? 0;
+    document.getElementById('stat-pdfs').textContent      = statPdfs;
+    document.getElementById('stat-processed').textContent = statProcessed;
+    document.getElementById('stat-indexed').textContent   = statIndexed;
+    document.getElementById('stat-chunks').textContent    = statChunks;
+    // Cache in localStorage so next page load shows real numbers instantly
+    try {
+      localStorage.setItem('groz_stats', JSON.stringify({ statPdfs, statProcessed, statIndexed, statChunks }));
+    } catch(e) {}
     updateWorkflowProgress(data);
     updateCatalogTable(data.processed || [], data.unprocessed || []);
   } catch(e) {
@@ -2823,9 +2831,18 @@ function updateWorkflowProgress(data = {}) {
     const localStageIdx = _trackedStage ? STAGE_ORDER.indexOf(_trackedStage) : -1;
     const serverStageIdx = STAGE_ORDER.indexOf(data.tracked_stage);
 
+    // If user explicitly selected a PDF, block server overwrite — but only if _userSelectedPdf is still current (matches _trackedPdf)
+    if (_userSelectedPdf && _samePdfKey(_userSelectedPdf, _trackedPdf) && !_samePdfKey(_userSelectedPdf, data.tracked_pdf)) {
+      return;
+    }
+    // If _trackedPdf differs from server and user has a current (non-stale) explicit selection, block permanently
+    if (_trackedPdf && !_samePdfKey(_trackedPdf, data.tracked_pdf) && _userSelectedPdf && _samePdfKey(_userSelectedPdf, _trackedPdf)) {
+      return;
+    }
+
     // The final tested stage is absolute and must never be downgraded by stale data.
     if (data.tracked_stage === 'tested' || _trackedStage === 'tested') {
-      const targetPdf = data.tracked_pdf || _trackedPdf;
+      const targetPdf = (_userSelectedPdf && _samePdfKey(_userSelectedPdf, _trackedPdf)) ? _userSelectedPdf : (data.tracked_pdf || _trackedPdf);
       forceFinalProgressState(targetPdf);
       return;
     }
@@ -2838,10 +2855,6 @@ function updateWorkflowProgress(data = {}) {
 
     // Never downgrade from 'tested' — local state is source of truth after approve button
     if (_trackedStage === 'tested' && STAGE_ORDER.indexOf(data.tracked_stage) < STAGE_ORDER.indexOf('tested')) {
-      return; // Keep current 100% state
-    }
-    // If user explicitly selected a row, don't let server overwrite with a different PDF
-    if (_userSelectedPdf && !_samePdfKey(_userSelectedPdf, data.tracked_pdf)) {
       return;
     }
     // If user just switched to a new PDF locally (within 5s), ignore stale server data
@@ -3121,6 +3134,16 @@ function setPreset(btn, val) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   fetch('/admin-panel/api/model-config/').then(r => r.ok ? r.json() : null).then(d => { if (d && d.configuration) _visionModel = d.configuration.vision_model || _visionModel; }).catch(() => {});
+  // Restore cached stats instantly so widgets never show — on reload
+  try {
+    const cached = JSON.parse(localStorage.getItem('groz_stats') || 'null');
+    if (cached) {
+      document.getElementById('stat-pdfs').textContent      = cached.statPdfs;
+      document.getElementById('stat-processed').textContent = cached.statProcessed;
+      document.getElementById('stat-indexed').textContent   = cached.statIndexed;
+      document.getElementById('stat-chunks').textContent    = cached.statChunks;
+    }
+  } catch(e) {}
   // On fresh page load, completely reset all progress tracking state
   _trackedPdf = null;
   _trackedStage = null;
@@ -4361,6 +4384,14 @@ async function loadFamilyPanel(force = false) {
     // selectedPdf is set directly by openFamilies — prefer it over _trackedPdf
     // But if selectedPdf is a split child, resolve up to the parent stem.
     let pdfName = selectedPdf || _trackedPdf;
+
+    // On fresh page load with no selection, show empty state immediately
+    if (!pdfName) {
+      _familyPanelState = { pdf: '', document_id: '', chunks: [], families: [], chunksById: {}, familiesById: {}, search: '' };
+      _familyResetForm();
+      renderFamilyWorkspace();
+      return;
+    }
     if (pdfName) {
       const splitRe2 = /_(custom_)?p\d{4}-\d{4}(\.pdf)?$/i;
       if (splitRe2.test(pdfName)) {
@@ -4714,14 +4745,20 @@ async function loadIndexPanel() {
     const stem = name.replace(/\.pdf$/i, '');
     return _pdfDetails.some(d => _splitPartRe.test(d.name) && d.name.replace(_splitPartRe, '') === stem);
   }
-  // Always prefer the progress-bar tracked PDF — it reflects what the user is actively working on
-  if (_trackedPdf) {
+  // User-explicit selection wins ONLY if it still matches the tracked PDF.
+  // If _trackedPdf has moved on (e.g. server updated it), discard the stale _userSelectedPdf.
+  if (_userSelectedPdf && _trackedPdf && !_samePdfKey(_userSelectedPdf, _trackedPdf)) {
+    _userSelectedPdf = null;
+  }
+  if (_userSelectedPdf) {
+    selectedPdf = _userSelectedPdf;
+  } else if (_trackedPdf) {
+    // Always prefer the progress-bar tracked PDF — it reflects what the user is actively working on
     const trackedStem = _trackedPdf.replace(/\.pdf$/i, '');
     const trackedWithExt = trackedStem + '.pdf';
     // Check if this is a parent stem that has split children
     const hasChildren = _pdfDetails.some(d => _splitPartRe.test(d.name) && _rootStem(d.name) === trackedStem);
     if (hasChildren) {
-      // Use parent stem — backend aggregates all split parts
       selectedPdf = trackedWithExt;
     } else {
       const trackedDetail = _findPdfDetail(trackedWithExt) || _findPdfDetail(_trackedPdf);
@@ -4740,48 +4777,41 @@ async function loadIndexPanel() {
       _highlightPdfRow(selectedPdf);
     }
   }
-  
-  // Auto-detect and update progress when navigating to index panel
+
+  // Background: update stage tracking (non-blocking, runs after chunks are shown)
   if (selectedPdf) {
-    try {
-      const statsRes = await fetch('/admin-panel/api/stats/?_=' + Date.now(), {
-        cache: 'no-store',
-        credentials: 'same-origin'
-      });
-      const statsData = await statsRes.json();
-      const currentStage = (statsData.pdf_progress || {})[selectedPdf];
-      
-      // Only auto-update to indexed if currently at chunked stage
-      if (currentStage === 'chunked') {
-        const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
-        const lookupPdf = splitRe2.test(selectedPdf)
-          ? selectedPdf.replace(splitRe2, '') + '.pdf'
-          : selectedPdf;
-        const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupPdf)}&index=1`);
-        const chunksData = await chunksRes.json();
-        if (chunksData.chunks && chunksData.chunks.some(c => c.status === 'Embedded')) {
-          await fetch('/admin-panel/api/update-pdf-stage/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
-            body: JSON.stringify({ filename: selectedPdf, stage: 'indexed' })
-          });
+    setTimeout(async () => {
+      try {
+        const statsRes = await fetch('/admin-panel/api/stats/?_=' + Date.now(), { cache: 'no-store', credentials: 'same-origin' });
+        const statsData = await statsRes.json();
+        const currentStage = (statsData.pdf_progress || {})[selectedPdf];
+        if (currentStage === 'chunked') {
+          const splitRe2 = /_(custom_)?p\d{4}-\d{4}\.pdf$/i;
+          const lookupPdf = splitRe2.test(selectedPdf) ? selectedPdf.replace(splitRe2, '') + '.pdf' : selectedPdf;
+          const chunksRes = await fetch(`/admin-panel/api/chunks/?pdf=${encodeURIComponent(lookupPdf)}&index=1`);
+          const chunksData = await chunksRes.json();
+          if (chunksData.chunks && chunksData.chunks.some(c => c.status === 'Embedded')) {
+            await fetch('/admin-panel/api/update-pdf-stage/', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+              body: JSON.stringify({ filename: selectedPdf, stage: 'indexed' })
+            });
+          }
         }
-      }
-      
-      // Now update the progress bar with the correct stage from server
-      if (currentStage && !_trackedPdf) {
-        const displayPdf = selectedPdf.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || selectedPdf;
-        setTrackedPdf(displayPdf, currentStage);
-      }
-
-      // Pin _userSelectedPdf to the resolved PDF so refreshStats() can't overwrite
-      // the progress bar with a different server-tracked PDF (e.g. Fluid_Handling...)
-      if (_trackedPdf && !_userSelectedPdf) {
-        _userSelectedPdf = _trackedPdf;
-      }
-
-      await refreshStats();
-    } catch (e) {}
+        if (currentStage && !_trackedPdf) {
+          const displayPdf = selectedPdf.replace(/_(custom_)?p\d{4}-\d{4}\.pdf$/i, '') || selectedPdf;
+          setTrackedPdf(displayPdf, currentStage);
+        }
+        // Pin _userSelectedPdf BEFORE refreshStats so the guard in updateWorkflowProgress blocks server overwrite
+        if (!_userSelectedPdf) _userSelectedPdf = selectedPdf;
+        // Also ensure _trackedPdf matches the user-selected PDF so progress bar stays correct
+        const pinnedStem = selectedPdf.replace(/\.pdf$/i, '');
+        if (!_samePdfKey(_trackedPdf, pinnedStem)) {
+          _trackedPdf = pinnedStem;
+          _trackedSetAt = Date.now();
+        }
+        await refreshStats();
+      } catch (e) {}
+    }, 0);
   }
 
   // 2. If selectedPdf is STILL not set (e.g. no PDFs exist)
