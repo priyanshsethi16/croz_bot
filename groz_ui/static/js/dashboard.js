@@ -3050,16 +3050,29 @@ let _pagesPerPart = 5;
 function _updateWholePdfStatus(filename) {
   const el = document.getElementById('whole-pdf-status');
   const wholeBtn = document.getElementById('btn-process-whole-pdf');
+  const autoRunBtn = document.getElementById('btn-auto-run-whole');
   if (!el) return;
   const detail = _pdfDetails.find(d => d.name === filename);
   if (detail && detail.chunks_count > 0) {
     el.style.display = 'flex';
     el.innerHTML = `<i class="fa fa-check-circle" style="color:#22c55e"></i> <span style="color:#22c55e">Done &mdash; ${detail.chunks_count} chunk${detail.chunks_count !== 1 ? 's' : ''} created</span>`;
     if (wholeBtn) wholeBtn.innerHTML = '<i class="fa fa-redo"></i> Re-run';
+    if (autoRunBtn && detail.has_embeddings) {
+      autoRunBtn.innerHTML = '<i class="fa fa-check-circle" style="color:#22c55e"></i> <span style="color:#22c55e">Auto Run Complete</span>';
+      autoRunBtn.style.background = '#16a34a';
+      autoRunBtn.style.borderColor = '#16a34a';
+      autoRunBtn.style.color = '#fff';
+    }
   } else {
     el.style.display = 'none';
     el.innerHTML = '';
     if (wholeBtn) wholeBtn.innerHTML = '<i class="fa fa-layer-group"></i> Process Whole PDF';
+    if (autoRunBtn) {
+      autoRunBtn.innerHTML = '<i class="fa fa-bolt"></i> Auto Run';
+      autoRunBtn.style.background = '';
+      autoRunBtn.style.borderColor = '';
+      autoRunBtn.style.color = '';
+    }
   }
 }
 

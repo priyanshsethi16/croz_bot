@@ -1306,6 +1306,13 @@ def list_pdfs(request):
             doc_id = None
             has_embeddings = False
 
+            # For split parts with no own DB doc, fall back to parent doc
+            if not doc and split_re.search(Path(pdf_name).stem):
+                parent_stem = split_re.sub('', Path(pdf_name).stem)
+                parent_doc = docs_by_name.get(parent_stem + '.pdf') or docs_by_name.get(parent_stem)
+                if parent_doc:
+                    doc = parent_doc
+
             if doc:
                 doc_id = str(doc.id)
                 stats = chunk_stats.get(doc.id, {})
@@ -1396,16 +1403,23 @@ def approve_pdf(request):
         part_stages = []
         for part_name in split_parts:
             part_stem = Path(part_name).stem
-            # Check DB stage map for this part
-            part_stage = _stage_map.get(part_name) or _stage_map.get(part_stem)
+            # Check DB stage map for this part OR its parent stem
+            _split_re = re.compile(r'_(custom_)?p\d{4}-\d{4}$', re.I)
+            parent_stem = _split_re.sub('', part_stem)
+            part_stage = (_stage_map.get(part_name) or _stage_map.get(part_stem)
+                          or _stage_map.get(parent_stem) or _stage_map.get(parent_stem + '.pdf'))
             if part_stage in STAGE_ORDER:
                 part_stages.append(part_stage)
             else:
-                # Check DB chunks
+                # Check DB chunks — fall back to parent doc if no own doc
                 try:
                     doc = CatalogDocument.objects.filter(
                         original_filename__in=[part_stem, part_name]
                     ).order_by('-version').first()
+                    if not doc:
+                        doc = CatalogDocument.objects.filter(
+                            original_filename__in=[parent_stem, parent_stem + '.pdf']
+                        ).order_by('-version').first()
                     if doc:
                         indexed_count = DocumentChunk.objects.filter(
                             document=doc, index_status=DocumentChunk.IndexStatus.INDEXED
