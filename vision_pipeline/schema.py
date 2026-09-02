@@ -58,6 +58,7 @@ class ProductExtraction(BaseModel):
     page_metadata: PageMetadata = Field(default_factory=PageMetadata)
     product_name: str
     product_code: str = ''
+    aliases: list[str] = Field(default_factory=list)
     category: str = ''
     raw_category: str = ''
     normalized_category_suggestion: str = ''
@@ -84,6 +85,7 @@ class ProductExtraction(BaseModel):
         'certifications',
         'safety_warnings',
         'raw_text_blocks',
+        'aliases',
         mode='before',
     )
     @classmethod

@@ -36,7 +36,20 @@ Children within one family when: same heading + multiple code badges, same produ
 **Product codes:** Alphanumeric label in coloured badge. Read every character exactly.
 NOT codes: BS, ISO, DIN, ANSI, ASME, BIS, CE, EN, IEC, NF, JIS, GB, UL, CSA, IP, ATEX — these are certifications.
 
-**Specs — use dedicated fields:**
+**Multiple product codes on one product:**
+When a single product heading has MORE THAN ONE code badge (e.g. G55 and G65 both shown for the same product):
+- `product_code`: ALL code badges joined with ", " (e.g. "G55, G65")
+- `aliases`: ONLY human-readable trade names / common names — NO codes here
+Do NOT create separate product families for codes that share the same heading and description.
+
+**Aliases — trade names only, never codes:**
+- Add common trade names, short names from your industrial tool knowledge
+- Think: "What descriptive name would a technician search for?"
+- NEVER put product codes (short alphanumeric codes like G65, CH500) in aliases
+- Keep aliases concise (1–4 words each), no duplicates, no certifications
+- Example for "Pistol Grip Grease Gun 'Vario'" with codes G55+G65:
+  product_code: "G55, G65"
+  aliases: ["Vario Grease Gun", "Pistol Grease Gun", "Pistol Grip Greaser"]
 flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, thread, lumens, runtime, weight, operating_temp, connection_type. Never dump specs into description.
 
 **Children — NEVER empty:**
@@ -57,7 +70,7 @@ flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, t
 - Safety warnings, warranty, country of origin → dedicated fields
 - Unclassified text → raw_text_blocks
 - Pay special attention to tiny text, measurement annotations, symbols, and labels near product images. Zoom in mentally and OCR these regions before concluding that no text is present.
--  also extract text of the label dimension of equipment or tool or product
+- Also extract text of the label dimension of equipment or tool or product
 
 ## JSON SCHEMA
 Return JSON array only. Each element = one product family.
@@ -66,6 +79,7 @@ Return JSON array only. Each element = one product family.
   "page_metadata": {"page_number": null, "catalog_section": "", "brand": ""},
   "product_name": "",
   "product_code": "",
+  "aliases": [],
   "category": "",
   "raw_category": "",
   "normalized_category_suggestion": "",
@@ -105,8 +119,9 @@ Return JSON array only. Each element = one product family.
 3. Read product codes character by character
 4. category = exact section banner text
 5. Different heading + image = separate families
-6. Return ONLY the JSON array — no markdown, no explanation
-7. Cover/TOC/divider page with no products → return []
+6. Multiple code badges on ONE heading → one family, primary code in product_code, rest in aliases
+7. Return ONLY the JSON array — no markdown, no explanation
+8. Cover/TOC/divider page with no products → return []
 """
 
 
