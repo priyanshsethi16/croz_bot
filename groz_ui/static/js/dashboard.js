@@ -2849,7 +2849,8 @@ function updateWorkflowProgress(data = {}) {
 
     // Local progress is authoritative for the currently tracked PDF. Ignore stale/fallback
     // server values that are behind the UI's actual completion state.
-    if (_trackedPdf && _samePdfKey(_trackedPdf, data.tracked_pdf) && localStageIdx >= serverStageIdx && localStageIdx !== -1) {
+    // Exception: if server sends a tracked_percent (partial families progress), always apply it.
+    if (_trackedPdf && _samePdfKey(_trackedPdf, data.tracked_pdf) && localStageIdx >= serverStageIdx && localStageIdx !== -1 && data.tracked_percent === undefined) {
       return;
     }
 
@@ -3359,7 +3360,7 @@ async function runSingleSplit(idx, options = {}) {
         }
       }
 
-      _trackedPercent = null;  // let server recompute fresh percent
+      // Keep _trackedPercent set so refreshStats() doesn't overwrite with server value
       await refreshStats();
       await loadPdfList();
       return true;
@@ -4322,6 +4323,46 @@ function toggleFamilyChunkSelection(chunkId, checked) {
   _updateFamilySelectionUI();
   renderFamilyChunks();
   renderFamilySelectionSummary();
+  _autoFillEditorFromSelection();
+}
+
+function _autoFillEditorFromSelection() {
+  const selected = _familySelectedChunks();
+  if (!selected.length) return;
+
+  const name = document.getElementById('family-name');
+  const productCode = document.getElementById('family-product-code');
+  const category = document.getElementById('family-category');
+  const aliases = document.getElementById('family-aliases');
+
+  if (selected.length === 1) {
+    // Single chunk — load its family if it has one, else fill from chunk data
+    const chunk = selected[0];
+    const fam = _familyPanelState.familiesById?.[chunk.family_id];
+    if (fam) {
+      loadFamilyFromCard(fam.id);
+    } else {
+      if (name) name.value = chunk.product_name || '';
+      if (productCode) productCode.value = chunk.family_code || '';
+      if (category) category.value = '';
+      if (aliases) aliases.value = '';
+      renderFamilyVariantRows(chunk.family_code ? [{ product_code: chunk.family_code, order_number: '', name: '', size: '', unit: '', specifications: {}, ordering_data: {} }] : []);
+    }
+  } else {
+    // Multiple chunks — aggregate into a new combined product
+    _familySelectedId = '';
+    document.getElementById('family-id') && (document.getElementById('family-id').value = '');
+    const codes = [...new Set(selected.map(c => c.family_code).filter(Boolean))];
+    const rawCats = [...new Set(selected.map(c => {
+      const fam = _familyPanelState.familiesById?.[c.family_id];
+      return fam ? (fam.raw_category || fam.category || '') : '';
+    }).filter(Boolean))];
+    if (productCode) productCode.value = codes.join(', ');
+    if (name) name.value = '';
+    if (aliases) aliases.value = '';
+    if (category) category.value = rawCats.length === 1 ? rawCats[0] : '';
+    renderFamilyVariantRows(codes.map(code => ({ product_code: code, order_number: '', name: '', size: '', unit: '', specifications: {}, ordering_data: {} })));
+  }
 }
 
 function loadFamilyFromCard(familyId) {
@@ -4339,7 +4380,7 @@ function loadFamilyFromCard(familyId) {
   if (id) id.value = family.id;
   if (name) name.value = family.product_name || '';
   if (productCode) productCode.value = family.product_code || '';
-  if (category) category.value = family.category || family.raw_category || '';
+  if (category) category.value = family.raw_category || family.category || '';
   if (aliases) aliases.value = (family.aliases || []).join(', ');
   if (status) status.value = family.review_status || 'approved';
   renderFamilyVariantRows(family.variants || []);
@@ -4495,7 +4536,7 @@ async function loadFamilyPanel(force = false) {
       if (id) id.value = family.id;
       if (name) name.value = family.product_name || '';
       if (productCode) productCode.value = family.product_code || '';
-      if (category) category.value = family.category || family.raw_category || '';
+      if (category) category.value = family.raw_category || family.category || '';
       if (aliases) aliases.value = (family.aliases || []).join(', ');
       if (status) status.value = family.review_status || 'approved';
       renderFamilyVariantRows(family.variants || []);
@@ -4595,7 +4636,7 @@ async function saveProductFamily() {
     if (id) id.value = _familySelectedId;
     if (name) name.value = data.family?.product_name || productName;
     if (productCodeField) productCodeField.value = data.family?.product_code || productCode;
-    if (category) category.value = data.family?.category || data.family?.raw_category || rawCategory;
+    if (category) category.value = data.family?.raw_category || data.family?.category || rawCategory;
     if (aliasesField) aliasesField.value = (data.family?.aliases || []).join(', ') || aliases;
     if (status) status.value = data.family?.review_status || reviewStatus;
     renderFamilyVariantRows(data.family?.variants || variants);

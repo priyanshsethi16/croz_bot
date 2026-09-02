@@ -1855,9 +1855,9 @@ def catalog_stats(request):
                     elif chunked_count == total_parts:
                         tracked_stage = 'families'  # 60%
                     elif chunked_count > 0:
-                        # Between 40% and 60%: some chunked, none indexed
-                        tracked_percent = 40 + (chunked_count / total_parts) * 20
-                        tracked_stage = 'chunked'
+                        # Between 20% and 40%: some parts chunked, none indexed
+                        tracked_percent = 20 + (chunked_count / total_parts) * 20
+                        tracked_stage = 'uploaded'
                     else:
                         tracked_stage = 'uploaded'  # 20%
 
@@ -1916,18 +1916,23 @@ def catalog_stats(request):
                     total_fam = 0
                     approved_fam = 0
                     for doc_fam in docs_for_families:
-                        all_fam = ProductFamily.objects.filter(document=doc_fam)
+                        all_fam = ProductFamily.objects.filter(document=doc_fam, chunks__isnull=False).distinct()
                         total_fam += all_fam.count()
                         approved_fam += all_fam.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
                     
                     if total_fam > 0:
-                        # Proportional progress: 40% + (approved/total * 20%)
-                        families_percent = 40 + (approved_fam / total_fam) * 20
-                        stats['tracked_percent'] = round(families_percent, 2)
-                        stats['families_progress'] = {
-                            'total': total_fam,
-                            'approved': approved_fam,
-                        }
+                        if approved_fam >= total_fam:
+                            # All approved → 60%
+                            stats['tracked_stage'] = 'families'
+                            stats.pop('tracked_percent', None)
+                        else:
+                            # Proportional: 40% + (approved/total * 20%)
+                            stats['tracked_stage'] = 'chunked'
+                            stats['tracked_percent'] = round(40 + (approved_fam / total_fam) * 20, 2)
+                            stats['families_progress'] = {
+                                'total': total_fam,
+                                'approved': approved_fam,
+                            }
             except Exception:
                 pass
         import logging
@@ -3051,11 +3056,11 @@ def save_product_family(request):
                 if not docs_to_query:
                     docs_to_query = [doc]
     
-    # Count total and approved families across all documents
+    # Count only families that have at least one chunk assigned (ignore empty/orphan families)
     total_families = 0
     approved_families = 0
     for current_doc in docs_to_query:
-        all_families = ProductFamily.objects.filter(document=current_doc)
+        all_families = ProductFamily.objects.filter(document=current_doc, chunks__isnull=False).distinct()
         total_families += all_families.count()
         approved_families += all_families.filter(review_status=ProductFamily.ReviewStatus.APPROVED).count()
     
@@ -3069,7 +3074,7 @@ def save_product_family(request):
         import json as _j
         
         tracked_pdf = pdf_stem if len(docs_to_query) > 1 else pdf_name
-        new_stage = 'families' if approved_families > 0 else 'chunked'
+        new_stage = 'families' if approved_families >= total_families else 'chunked'
         
         # Update DB stage map
         try:

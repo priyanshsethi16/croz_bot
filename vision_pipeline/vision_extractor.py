@@ -55,14 +55,14 @@ flow_rate, pressure, motor_size, ratio, voltage, battery, capacity, ip_rating, t
 **Children — NEVER empty:**
 - Min 1 child per family. Single product → child with same code as family.
 - Sizes/ordering tables → always in children, never at family level.
-- Text under badge → child's product_name (e.g. "750cc High capacity", "Popular in Australia & NZ").
+- Text under badge → child's product_name .
 - SIZES list with no per-row codes → one child per size row, size = product_name, family code = product_code.
 - Shared features/description → family level only, don't repeat in children.
 
 **Capture everything:**
-- Section banner → page_metadata.catalog_section (exact, never infer)
-- category = catalog_section text exactly
-- raw_category = the same exact section banner text
+- Section banner → page_metadata.catalog_section (exact text if present on page)
+- category = catalog_section text if present; otherwise infer a concise product category from your industrial tool knowledge based on what the product actually is
+- raw_category = catalog_section text if present; otherwise same as the inferred category above — NEVER leave raw_category empty
 - normalized_category_suggestion = conservative broad English tool category, or "" when uncertain
 - extraction_confidence = overall confidence from 0.0 to 1.0
 - NEW, Bestseller, Popular in EUROPE, Patent Pending → notes
@@ -119,7 +119,7 @@ Return JSON array only. Each element = one product family.
 3. Read product codes character by character
 4. category = exact section banner text
 5. Different heading + image = separate families
-6. Multiple code badges on ONE heading → one family, primary code in product_code, rest in aliases
+6. Multiple code badges on ONE heading → one family, ALL codes comma-separated in product_code , each code also as a child with its own product_code
 7. Return ONLY the JSON array — no markdown, no explanation
 8. Cover/TOC/divider page with no products → return []
 """
